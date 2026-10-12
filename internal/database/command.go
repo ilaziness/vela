@@ -165,6 +165,21 @@ func NewCommandHistoryRepository(db *sql.DB, logger *zap.Logger) *CommandHistory
 	return &CommandHistoryRepository{db: db, logger: logger}
 }
 
+// GetLatestHistory returns the most recent history row, or nil if empty.
+func (r *CommandHistoryRepository) GetLatestHistory() (*CommandHistoryDB, error) {
+	query := `SELECT id, command, timestamp FROM command_history ORDER BY timestamp DESC LIMIT 1`
+	row := r.db.QueryRow(query)
+	var h CommandHistoryDB
+	err := row.Scan(&h.ID, &h.Command, &h.Timestamp)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf(errQuery, tableNameCommandHistory, err)
+	}
+	return &h, nil
+}
+
 // GetHistory 获取命令历史（最新 100 条）
 func (r *CommandHistoryRepository) GetHistory() ([]*CommandHistoryDB, error) {
 	query := `SELECT id, command, timestamp FROM command_history ORDER BY timestamp DESC LIMIT 100`
@@ -235,7 +250,7 @@ func (r *CommandHistoryRepository) InsertHistory(history *CommandHistoryDB) (int
 		return 0, fmt.Errorf("get last insert id failed: %w", err)
 	}
 
-	r.logger.Debug("command history inserted", zap.String("command", history.Command))
+	r.logger.Debug("command history inserted", zap.Int64("id", id))
 	return id, nil
 }
 

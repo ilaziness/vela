@@ -10,13 +10,19 @@ import {
   SSHService,
   ConfigService,
   AppService,
+  CommandService,
 } from "../../bindings/github.com/ilaziness/vexo/services";
 import useTerminalStore from "../stores/terminal";
 import Loading from "./Loading";
 import TerminalContextMenu from "./TerminalContextMenu";
 import TerminalSearchBar from "./TerminalSearchBar";
+import TerminalCommandHints, {
+  TERMINAL_HINTS_MAX,
+  type HintAnchor,
+} from "./TerminalCommandHints";
 import { terminalInstances } from "../stores/terminalInstances";
 import { parseCallServiceError, sleep } from "../func/service";
+import { applyShellInput, matchCommandHints } from "../func/shellLineBuf";
 import { useSSHTabsStore } from "../stores/ssh";
 import { useMessageStore } from "../stores/message";
 import { ConnectionStatus } from "../types/ssh";
@@ -28,6 +34,7 @@ import {
   parseShortcutAction,
   toShellCodeBlock,
 } from "../func/shortcuts";
+import type { CommandHistory } from "../types/command";
 
 const EVENT_SESSION_LOG_STOPPED = "eventSSHSessionLogStopped";
 
@@ -122,6 +129,9 @@ function Terminal(props: {
   const [searchFocusNonce, setSearchFocusNonce] = useState(0);
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
   const [logging, setLogging] = useState(false);
+  const [hintItems, setHintItems] = useState<string[]>([]);
+  const [hintActiveIndex, setHintActiveIndex] = useState(0);
+  const [hintAnchor, setHintAnchor] = useState<HintAnchor | null>(null);
   const termRef = React.useRef<HTMLDivElement>(null);
   const term = React.useRef<TerminalLib>(null);
   const termFit = React.useRef<FitAddon>(null);
@@ -134,6 +144,14 @@ function Terminal(props: {
   linkIDRef.current = props.linkID;
   const loggingRef = React.useRef(logging);
   loggingRef.current = logging;
+  const lineBufRef = React.useRef("");
+  const historyCacheRef = React.useRef<string[]>([]);
+  const hintItemsRef = React.useRef<string[]>([]);
+  const hintActiveIndexRef = React.useRef(0);
+  const acceptingHintRef = React.useRef(false);
+  const historyRefreshTimerRef = React.useRef<number | NodeJS.Timeout | null>(
+    null,
+  );
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
     mouseY: number;
@@ -161,6 +179,97 @@ function Terminal(props: {
     setSearchOpen(false);
     searchAddon?.clearDecorations();
     term.current?.focus();
+  };
+
+  const readCursorAnchor = (): HintAnchor | null => {
+    const t = term.current;
+    const host = termRef.current?.parentElement;
+    if (!t?.element || !host) {
+      return null;
+    }
+    try {
+      const core = t as unknown as {
+        _core?: {
+          _renderService?: {
+            dimensions?: { css?: { cell?: { width: number; height: number } } };
+          };
+        };
+      };
+      const cell = core._core?._renderService?.dimensions?.css?.cell;
+      if (!cell?.width || !cell?.height) {
+        return null;
+      }
+      const { cursorX, cursorY } = t.buffer.active;
+      const termRect = t.element.getBoundingClientRect();
+      const hostRect = host.getBoundingClientRect();
+      return {
+        left: termRect.left - hostRect.left + cursorX * cell.width,
+        top: termRect.top - hostRect.top + (cursorY + 1) * cell.height,
+        cellHeight: cell.height,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const clearHints = () => {
+    hintItemsRef.current = [];
+    hintActiveIndexRef.current = 0;
+    setHintItems([]);
+    setHintActiveIndex(0);
+    setHintAnchor(null);
+  };
+
+  const updateHints = (prefix: string) => {
+    const items = matchCommandHints(
+      historyCacheRef.current,
+      prefix,
+      TERMINAL_HINTS_MAX,
+    );
+    const anchor = items.length > 0 ? readCursorAnchor() : null;
+    // No anchor → hide list and do not capture keys.
+    if (items.length === 0 || !anchor) {
+      clearHints();
+      return;
+    }
+    // Prefer first completable (longer) item; exact match stays visible above.
+    const active = items[0] === prefix ? 1 : 0;
+    hintItemsRef.current = items;
+    hintActiveIndexRef.current = active;
+    setHintItems(items);
+    setHintActiveIndex(active);
+    setHintAnchor(anchor);
+  };
+
+  const acceptHint = (command: string) => {
+    const prefix = lineBufRef.current;
+    if (!command.startsWith(prefix)) {
+      return;
+    }
+    // Exact match: already typed; just dismiss the list.
+    if (command === prefix) {
+      clearHints();
+      term.current?.focus();
+      return;
+    }
+    const suffix = command.slice(prefix.length);
+    acceptingHintRef.current = true;
+    term.current?.paste(suffix);
+    acceptingHintRef.current = false;
+    lineBufRef.current = command;
+    updateHints(command);
+    term.current?.focus();
+  };
+
+  const loadHistoryCache = async () => {
+    try {
+      const rows = (await CommandService.GetCommandHistory()) as CommandHistory[];
+      historyCacheRef.current = rows.map((r) => r.command).filter(Boolean);
+    } catch (err) {
+      LogService.Error(
+        `load command history for hints failed: ${parseCallServiceError(err)}`,
+      );
+    }
   };
 
   const handleContextMenu = (event: React.MouseEvent) => {
@@ -390,6 +499,78 @@ function Terminal(props: {
         const attachAddon = new mods.AttachAddon(ws);
         term.current?.loadAddon(attachAddon);
 
+        lineBufRef.current = "";
+        clearHints();
+        void loadHistoryCache();
+
+        term.current.attachCustomKeyEventHandler((ev) => {
+          if (ev.type !== "keydown") {
+            return true;
+          }
+          const items = hintItemsRef.current;
+          if (items.length === 0) {
+            return true;
+          }
+          if (ev.key === "ArrowUp") {
+            ev.preventDefault();
+            setHintActiveIndex((i) => {
+              const next = i <= 0 ? items.length - 1 : i - 1;
+              hintActiveIndexRef.current = next;
+              return next;
+            });
+            return false;
+          }
+          if (ev.key === "ArrowDown") {
+            ev.preventDefault();
+            setHintActiveIndex((i) => {
+              const next = i >= items.length - 1 ? 0 : i + 1;
+              hintActiveIndexRef.current = next;
+              return next;
+            });
+            return false;
+          }
+          if (ev.key === "Escape") {
+            ev.preventDefault();
+            clearHints();
+            return false;
+          }
+          if (ev.key === "Tab" || ev.key === "Enter") {
+            const selected = items[hintActiveIndexRef.current];
+            if (selected) {
+              // Select into terminal only (exact = dismiss; longer = paste suffix).
+              // Never send here — user presses Enter again to run.
+              ev.preventDefault();
+              acceptHint(selected);
+              return false;
+            }
+          }
+          return true;
+        });
+
+        term.current.onData((data) => {
+          if (acceptingHintRef.current) {
+            // paste during accept already applied to lineBuf
+            return;
+          }
+          const { buf, submitted } = applyShellInput(lineBufRef.current, data);
+          lineBufRef.current = buf;
+          if (submitted) {
+            // Refresh from backend so secrets skipped server-side never enter the hint cache.
+            clearHints();
+            if (historyRefreshTimerRef.current) {
+              clearTimeout(historyRefreshTimerRef.current);
+            }
+            historyRefreshTimerRef.current = globalThis.setTimeout(() => {
+              historyRefreshTimerRef.current = null;
+              if (mountedRef.current) {
+                void loadHistoryCache();
+              }
+            }, 300);
+            return;
+          }
+          updateHints(buf);
+        });
+
         ws.onopen = async () => {
           if (!mountedRef.current) return;
           LogService.Debug("WebSocket connected for terminal " + props.linkID);
@@ -517,6 +698,12 @@ function Terminal(props: {
       terminalInstances.remove(props.linkID);
       setSearchOpen(false);
       setSearchAddon(null);
+      clearHints();
+      lineBufRef.current = "";
+      if (historyRefreshTimerRef.current) {
+        clearTimeout(historyRefreshTimerRef.current);
+        historyRefreshTimerRef.current = null;
+      }
       try {
         wsRef.current?.close();
         webglRef.current?.dispose();
@@ -557,6 +744,16 @@ function Terminal(props: {
         searchAddon={searchAddon}
         focusNonce={searchFocusNonce}
         onClose={closeSearch}
+      />
+      <TerminalCommandHints
+        items={hintItems}
+        activeIndex={hintActiveIndex}
+        anchor={hintAnchor}
+        onSelect={acceptHint}
+        onHover={(index) => {
+          hintActiveIndexRef.current = index;
+          setHintActiveIndex(index);
+        }}
       />
       <TerminalContextMenu
         contextMenu={contextMenu}

@@ -79,6 +79,11 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	bookmarkService := NewBookmarkService(a, bookmarks, sshService)
 
 	commandSvc := command.New(log, db, commandsJSON, sshService.SendToSession)
+	termWS.SetOnCommand(func(cmd string) {
+		if err := commandSvc.AddHistory(cmd); err != nil {
+			log.Error("add shell command history failed", zap.Error(err))
+		}
+	})
 	commandService := NewCommandService(windows, commandSvc)
 	syncService := NewSyncService(configService, db, log)
 	toolService := NewToolService(windows)

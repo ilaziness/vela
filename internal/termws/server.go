@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vexo/internal/command"
 	"github.com/ilaziness/vexo/internal/ssh"
 	"github.com/ilaziness/vexo/internal/system"
 )
@@ -25,12 +26,15 @@ type Client struct {
 	pongMissed int
 	pongMu     sync.Mutex
 	logger     *zap.Logger
+	capture    *command.LineCapture
+	onCommand  func(string)
 }
 
 type Server struct {
 	logger     *zap.Logger
 	ssh        *ssh.Manager
 	onClose    func(sessionID string)
+	onCommand  func(string)
 	httpServer *http.Server
 	clients    sync.Map
 	addr       string
@@ -41,6 +45,11 @@ func NewServer(logger *zap.Logger, sshMgr *ssh.Manager, onClose func(sessionID s
 		logger = zap.NewNop()
 	}
 	return &Server{logger: logger, ssh: sshMgr, onClose: onClose}
+}
+
+// SetOnCommand registers a callback for shell lines submitted via the terminal WS.
+func (s *Server) SetOnCommand(fn func(string)) {
+	s.onCommand = fn
 }
 
 func (s *Server) Addr() string { return s.addr }
@@ -136,7 +145,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SSH connection not found", http.StatusNotFound)
 		return
 	}
-	client := &Client{done: make(chan struct{}), stdin: sess.Stdin, sessionID: sessionID, logger: s.logger}
+	client := &Client{
+		done:      make(chan struct{}),
+		stdin:     sess.Stdin,
+		sessionID: sessionID,
+		logger:    s.logger,
+		capture:   &command.LineCapture{},
+		onCommand: s.onCommand,
+	}
 	connWS, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 		OnPongReceived: func(_ context.Context, _ []byte) {
@@ -198,6 +214,16 @@ func (c *Client) readLoop() {
 		if err != nil {
 			return
 		}
+		if c.capture != nil {
+			cmds := c.capture.FeedInput(data)
+			if c.onCommand != nil {
+				for _, cmd := range cmds {
+					cmd := cmd
+					onCmd := c.onCommand
+					system.SafeGo(func() { onCmd(cmd) })
+				}
+			}
+		}
 		if c.stdin != nil {
 			if _, err := c.stdin.Write(data); err != nil {
 				return
@@ -214,6 +240,9 @@ func (c *Client) writeLoop(outputChan chan []byte) {
 		case data, ok := <-outputChan:
 			if !ok {
 				return
+			}
+			if c.capture != nil {
+				c.capture.FeedOutput(data)
 			}
 			if err := c.conn.Write(ctx, websocket.MessageBinary, data); err != nil {
 				return

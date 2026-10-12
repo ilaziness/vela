@@ -3,6 +3,7 @@ package command
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -124,7 +125,17 @@ func (s *Service) History() []History {
 }
 
 func (s *Service) AddHistory(cmd string) error {
-	_, err := s.db.CommandHistoryRepo.InsertHistory(&database.CommandHistoryDB{Command: cmd, Timestamp: time.Now()})
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return nil
+	}
+	latest, err := s.db.CommandHistoryRepo.GetLatestHistory()
+	if err != nil {
+		s.logger.Error("get latest command history failed", zap.Error(err))
+	} else if latest != nil && latest.Command == cmd {
+		return nil
+	}
+	_, err = s.db.CommandHistoryRepo.InsertHistory(&database.CommandHistoryDB{Command: cmd, Timestamp: time.Now()})
 	return err
 }
 
