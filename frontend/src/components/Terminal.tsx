@@ -115,6 +115,7 @@ function Terminal(props: {
   readonly linkID: string;
   readonly isActive: boolean;
   readonly onLoggingChange?: (logging: boolean) => void;
+  readonly onReady?: () => void;
 }) {
   const [isInitializing, setIsInitializing] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -143,6 +144,8 @@ function Terminal(props: {
   const { errorMessage, successMessage } = useMessageStore();
   const onLoggingChangeRef = React.useRef(props.onLoggingChange);
   onLoggingChangeRef.current = props.onLoggingChange;
+  const onReadyRef = React.useRef(props.onReady);
+  onReadyRef.current = props.onReady;
 
   const setLoggingState = (next: boolean) => {
     setLogging(next);
@@ -392,6 +395,7 @@ function Terminal(props: {
           LogService.Debug("WebSocket connected for terminal " + props.linkID);
           setIsInitializing(false);
           setConnectionStatus(props.linkID, ConnectionStatus.Connected);
+          onReadyRef.current?.();
 
           term.current?.focus();
           term.current?.onResize(onResize);

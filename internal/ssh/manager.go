@@ -149,24 +149,26 @@ type Options struct {
 }
 
 type Manager struct {
-	logger               *zap.Logger
-	knownHostsPath       string
-	knownHostsMu         sync.Mutex
-	prompter             HostKeyPrompter
-	keyboardPrompter     KeyboardInteractivePrompter
-	onClose              func(sessionID string, reason CloseReason)
-	onSessionLogStopped  func(sessionID, reason string)
-	clients              *sync.Map
-	sessions             *sync.Map
-	clientLocks          sync.Map
-	remoteInfoCache      sync.Map
-	remoteInfoFetchLocks sync.Map
-	hostKey              *hostKeyStore
-	keyboard             *keyboardStore
-	keepAlives           sync.Map
-	optsMu               sync.RWMutex
-	opts                 Options
-	zmodemPicker         zmodem.FilePicker
+	logger                *zap.Logger
+	knownHostsPath        string
+	knownHostsMu          sync.Mutex
+	prompter              HostKeyPrompter
+	keyboardPrompter      KeyboardInteractivePrompter
+	onClose               func(sessionID string, reason CloseReason)
+	onSessionLogStopped   func(sessionID, reason string)
+	clients               *sync.Map
+	sessions              *sync.Map
+	clientLocks           sync.Map
+	remoteInfoCache       sync.Map
+	remoteInfoFetchLocks  sync.Map
+	hostMetricsCache      sync.Map
+	hostMetricsFetchLocks sync.Map
+	hostKey               *hostKeyStore
+	keyboard              *keyboardStore
+	keepAlives            sync.Map
+	optsMu                sync.RWMutex
+	opts                  Options
+	zmodemPicker          zmodem.FilePicker
 }
 
 func NewManager(logger *zap.Logger, knownHostsPath string, prompter HostKeyPrompter, keyboard KeyboardInteractivePrompter) *Manager {

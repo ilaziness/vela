@@ -288,6 +288,10 @@ func (s *SSHService) GetOrFetchRemoteSystemInfo(linkID, host string) *ssh.Remote
 	return s.mgr.GetOrFetchRemoteSystemInfo(linkID, host)
 }
 
+func (s *SSHService) GetHostResources(linkID string) (ssh.HostResources, error) {
+	return s.mgr.FetchHostResources(context.Background(), linkID)
+}
+
 // StartSessionLog opens a save dialog and begins recording session output.
 // Cancelled dialog returns started=false with no error.
 func (s *SSHService) StartSessionLog(sessionID string) (path string, started bool, err error) {

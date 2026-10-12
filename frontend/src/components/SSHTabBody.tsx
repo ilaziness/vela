@@ -54,6 +54,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
   const [sessionLogging, setSessionLogging] = React.useState(false);
   const [sftpLoaded, setSftpLoaded] = React.useState(false);
   const [sftpReady, setSftpReady] = React.useState(false);
+  const [termReady, setTermReady] = React.useState(false);
   const [isReloading, setIsReloading] = React.useState<boolean>(false);
   const [lastSSHInfo, setLastSSHInfo] = React.useState<SSHLinkInfo | null>(
     null,
@@ -83,6 +84,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
     setSessionLogging(false);
     setSftpLoaded(false);
     setSftpReady(false);
+    setTermReady(false);
   };
 
   // connect ssh server
@@ -105,6 +107,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
         setLinkID(nextLinkID);
         linkIDRef.current = nextLinkID;
         setSessionLogging(false);
+        setTermReady(false);
         setName(tabIndex, `${li.user}@${li.host}:${li.port}`);
         setSSHInfo(tabIndex, { ...li, linkID: nextLinkID });
         // Session is Exec-ready immediately; do not wait for terminal WebSocket.
@@ -186,6 +189,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
         setActiveTab(0);
         setSftpLoaded(false);
         setSftpReady(false);
+        setTermReady(false);
         try {
           const nextID = await connectRef.current(info);
           if (nextID) {
@@ -214,6 +218,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
             linkID={linkID}
             isActive={isActive && activeTab === 0}
             onLoggingChange={setSessionLogging}
+            onReady={() => setTermReady(true)}
           />
         ),
       },
@@ -256,6 +261,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
     setActiveTab(0);
     setSftpLoaded(false);
     setSftpReady(false);
+    setTermReady(false);
     // 如果有保存的连接信息，重新连接
     if (lastSSHInfo) {
       reloadingRef.current = true;
@@ -465,6 +471,8 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
       <StatusBar
         sessionID={linkID}
         height={statusBarHeight}
+        isActive={isActive}
+        termReady={termReady}
         logging={sessionLogging}
         sftpReady={sftpReady}
       />
