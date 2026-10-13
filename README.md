@@ -85,6 +85,34 @@ _服务器连接配置管理_
 
 ---
 
+## 📦 下载与安装
+
+从 [Releases](https://github.com/ilaziness/vexo/releases) 下载对应平台的包：
+
+| 平台 | 资源文件 | 说明 |
+|------|----------|------|
+| Windows | `Vexo_*_windows_amd64.zip` | 解压后运行 `Vexo.exe` |
+| Linux | `Vexo_*_linux_amd64.tar.gz` | 解压后运行 `Vexo` |
+| macOS | `Vexo_*_darwin_arm64.zip` | 解压得到 `Vexo.app`（见下方） |
+
+### macOS
+
+当前仅提供 **Apple Silicon（arm64）** 安装包，Intel Mac 无法使用。
+
+从浏览器下载后，macOS 可能拦截首次启动（双击无反应、提示无法验证开发者，或提示已损坏）。按下面步骤打开即可：
+
+1. 解压 zip，得到 `Vexo.app`（不要在压缩包内直接打开）。
+2. 在终端执行（路径换成实际解压位置）：
+
+```bash
+xattr -cr ~/Downloads/Vexo.app
+open ~/Downloads/Vexo.app
+```
+
+3. 若仍被拦：在 Finder 中对 `Vexo.app` **右键 → 打开** 并确认；或到 **系统设置 → 隐私与安全性** 中选择 **仍要打开**。
+
+---
+
 ## 📄 许可证
 
 本项目采用 [Apache License 2.0](LICENSE) 许可证。
