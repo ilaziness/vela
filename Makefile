@@ -74,13 +74,13 @@ build-windows: replace-config
 # Build for macOS ARM64 (Darwin)
 build-mac: replace-config
 	@echo "Building for macOS (Darwin) $(VERSION)..."
-	@wails3 build GOOS=darwin GOARCH=arm64 VERSION=$(VERSION) MODE=$(MODE); \
+	@wails3 build GOOS=darwin ARCH=arm64 VERSION=$(VERSION) MODE=$(MODE); \
 		status=$$?; $(MAKE) restore-config; exit $$status
 
 # Build for macOS Intel (Darwin)
 build-mac-intel: replace-config
 	@echo "Building for macOS Intel (Darwin) $(VERSION)..."
-	@wails3 build GOOS=darwin GOARCH=amd64 VERSION=$(VERSION) MODE=$(MODE); \
+	@wails3 build GOOS=darwin ARCH=amd64 VERSION=$(VERSION) MODE=$(MODE); \
 		status=$$?; $(MAKE) restore-config; exit $$status
 
 # Build for Linux

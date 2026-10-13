@@ -185,7 +185,7 @@ jobs:
           sed -i.sedbak "s|BuildTime = \".*\"|BuildTime = \"$BUILD_TIME\"|" "$CONFIG_FILE"
           rm -f "$CONFIG_FILE.sedbak"
           status=0
-          wails3 package GOOS=darwin GOARCH=arm64 VERSION="$VERSION" MODE="$MODE" || status=$?
+          wails3 package GOOS=darwin ARCH=arm64 VERSION="$VERSION" MODE="$MODE" || status=$?
           mv "$CONFIG_FILE.orig" "$CONFIG_FILE"
           exit $status
 
