@@ -28,6 +28,7 @@ var migrations = []Migration{
 	{Version: 9, Name: "add bookmark dial proxy", Up: migrateAddBookmarkDialProxy},
 	{Version: 10, Name: "add bookmark session options", Up: migrateAddBookmarkSessionOptions},
 	{Version: 11, Name: "add sftp transfers queue", Up: migrateAddSftpTransfers},
+	{Version: 12, Name: "add bookmark tags and color", Up: migrateAddBookmarkTagsColor},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -341,6 +342,31 @@ func migrateAddSftpTransfers(db *sql.DB, logger *zap.Logger) error {
 		return fmt.Errorf("create sftp_transfers failed: %w", err)
 	}
 	logger.Debug("migration: sftp_transfers table ready")
+	return nil
+}
+
+func migrateAddBookmarkTagsColor(db *sql.DB, logger *zap.Logger) error {
+	cols := []struct {
+		name string
+		ddl  string
+	}{
+		{"tags", `ALTER TABLE bookmarks ADD COLUMN tags TEXT NOT NULL DEFAULT ''`},
+		{"color", `ALTER TABLE bookmarks ADD COLUMN color TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, c := range cols {
+		var columnName string
+		err := db.QueryRow(`SELECT name FROM pragma_table_info('bookmarks') WHERE name = ?`, c.name).Scan(&columnName)
+		if err == sql.ErrNoRows {
+			if _, err := db.Exec(c.ddl); err != nil {
+				return fmt.Errorf("add column bookmarks.%s failed: %w", c.name, err)
+			}
+			logger.Debug("migration: added bookmarks column", zap.String("column", c.name))
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("check column bookmarks.%s failed: %w", c.name, err)
+		}
+	}
 	return nil
 }
 

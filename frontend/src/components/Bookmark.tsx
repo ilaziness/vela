@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -23,6 +23,8 @@ import BookmarkForm from "./BookmarkForm";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";
 import { ProxyMode, ProxyType } from "../types/proxy";
+import { collectTagSuggestions } from "../func/bookmarkMeta";
+import { BookmarkColor } from "../types/bookmark";
 
 const IMPORT_GROUP_DEFAULT = "Imported";
 const EXPORT_ALL = "";
@@ -44,6 +46,11 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
   const [warningsOpen, setWarningsOpen] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const { errorMessage, successMessage } = useMessageStore();
+
+  const tagSuggestions = useMemo(
+    () => collectTagSuggestions(bookmarks),
+    [bookmarks],
+  );
 
   const loadBookmarks = useCallback(async () => {
     try {
@@ -155,6 +162,8 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       startup_cmd: "",
       env_vars: "",
       term: "",
+      tags: [],
+      color: BookmarkColor.None,
     };
     setSelectedBookmark(newBookmark);
   };
@@ -330,6 +339,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
         </Stack>
         <BookmarkTree
           bookmarks={bookmarks}
+          tagSuggestions={tagSuggestions}
           selectedBookmark={selectedBookmark}
           onBookmarkSelect={handleBookmarkSelect}
           onGroupRename={handleGroupRename}
@@ -352,6 +362,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
         <BookmarkForm
           bookmark={selectedBookmark}
           groupNames={bookmarks.map((g) => g.name)}
+          tagSuggestions={tagSuggestions}
           onSave={handleSaveBookmark}
           onTestConnection={handleTestConnection}
           onSaveAndConnect={handleSaveAndConnect}

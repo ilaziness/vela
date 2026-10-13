@@ -198,6 +198,8 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       startup_cmd: "",
       env_vars: "",
       term: "",
+      tags: [],
+      color: "",
     };
 
     BookmarkService.SaveBookmark(newBookmark)

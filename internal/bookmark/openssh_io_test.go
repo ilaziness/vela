@@ -78,6 +78,9 @@ Host target
 	if _, ok := env["TERM"]; ok {
 		t.Fatalf("TERM should not be in env_vars: %v", env)
 	}
+	if len(target.Tags) != 0 || target.Color != "" {
+		t.Fatalf("import should not set tags/color: tags=%v color=%q", target.Tags, target.Color)
+	}
 
 	out, warns, err := svc.ExportOpenSSH(ImportedGroupName)
 	if err != nil {

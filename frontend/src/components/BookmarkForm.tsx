@@ -15,6 +15,7 @@ import {
   InputAdornment,
   Autocomplete,
   createFilterOptions,
+  Tooltip,
 } from "@mui/material";
 import ClearIcon from "@mui/icons-material/Clear";
 import MoreHorizIcon from "@mui/icons-material/MoreHoriz";
@@ -36,10 +37,17 @@ import {
 } from "./icons/bookmarkIcons";
 import { ProxyMode, ProxyType } from "../types/proxy";
 import { envFromJSON, envToJSON, formatEnvLines, parseEnvLines } from "../func/envVars";
+import {
+  bookmarkColorHex,
+  normalizeBookmarkColor,
+  normalizeBookmarkTags,
+} from "../func/bookmarkMeta";
+import { BOOKMARK_COLOR_OPTIONS, BookmarkColor } from "../types/bookmark";
 
 interface BookmarkFormProps {
   bookmark: SSHBookmark | null;
   groupNames: string[]; // 添加分组列表
+  tagSuggestions: string[];
   onSave: (bookmark: SSHBookmark) => Promise<SSHBookmark>;
   onTestConnection: (bookmark: SSHBookmark) => Promise<void>;
   onSaveAndConnect: (bookmark: SSHBookmark) => Promise<SSHBookmark>;
@@ -81,11 +89,14 @@ const emptyBookmark = (): SSHBookmark => ({
   startup_cmd: "",
   env_vars: "",
   term: "",
+  tags: [],
+  color: BookmarkColor.None,
 });
 
 const BookmarkForm: React.FC<BookmarkFormProps> = ({
   bookmark,
   groupNames,
+  tagSuggestions,
   onSave,
   onTestConnection,
   onSaveAndConnect,
@@ -130,6 +141,8 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         startup_cmd: bookmark.startup_cmd || "",
         env_vars: bookmark.env_vars || "",
         term: bookmark.term || "",
+        tags: normalizeBookmarkTags(bookmark.tags),
+        color: normalizeBookmarkColor(bookmark.color),
       };
       setFormData(next);
       setEnvText(formatEnvLines(envFromJSON(next.env_vars)));
@@ -147,6 +160,8 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         startup_cmd: (data.startup_cmd || "").trim(),
         term: (data.term || "").trim(),
         env_vars: envToJSON(env),
+        tags: normalizeBookmarkTags(data.tags),
+        color: normalizeBookmarkColor(data.color),
       };
     } catch (err) {
       errorMessage(err instanceof Error ? err.message : String(err));
@@ -434,6 +449,90 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       option.id === value.id
                     }
                   />
+                </FormRow>
+                <FormRow label="标签" labelWidth={120}>
+                  <Autocomplete
+                    multiple
+                    freeSolo
+                    size="small"
+                    fullWidth
+                    options={tagSuggestions}
+                    value={formData.tags ?? []}
+                    filterSelectedOptions
+                    onChange={(_, value) => {
+                      setFormData((prev) => ({
+                        ...prev,
+                        tags: normalizeBookmarkTags(
+                          value.map((v) => String(v)),
+                        ),
+                      }));
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        placeholder="输入后回车添加"
+                      />
+                    )}
+                  />
+                </FormRow>
+                <FormRow label="颜色" labelWidth={120}>
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                    <Tooltip title="无">
+                      <Box
+                        component="button"
+                        type="button"
+                        onClick={() =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            color: BookmarkColor.None,
+                          }))
+                        }
+                        sx={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: "50%",
+                          border: 2,
+                          borderColor:
+                            !formData.color
+                              ? "primary.main"
+                              : "divider",
+                          bgcolor: "transparent",
+                          cursor: "pointer",
+                          p: 0,
+                        }}
+                      />
+                    </Tooltip>
+                    {BOOKMARK_COLOR_OPTIONS.map((token) => {
+                      const hex = bookmarkColorHex(token);
+                      const selected = formData.color === token;
+                      return (
+                        <Tooltip key={token} title={token}>
+                          <Box
+                            component="button"
+                            type="button"
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                color: token,
+                              }))
+                            }
+                            sx={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: "50%",
+                              border: 2,
+                              borderColor: selected
+                                ? "primary.main"
+                                : "transparent",
+                              bgcolor: hex || "transparent",
+                              cursor: "pointer",
+                              p: 0,
+                            }}
+                          />
+                        </Tooltip>
+                      );
+                    })}
+                  </Box>
                 </FormRow>
               </Stack>
             </Box>

@@ -50,6 +50,7 @@ import { ConnectionStatus } from "../types/ssh";
 import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useUIStore } from "../stores/ui";
 import { genTabIndex, parseCallServiceError } from "../func/service";
+import { bookmarkColorHex } from "../func/bookmarkMeta";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../stores/message";
 import ThemeSwitcher from "./ThemeSwitcher";
@@ -381,22 +382,29 @@ export default function Header() {
                   unmountOnExit
                 >
                   <List component="div" disablePadding dense>
-                    {group.bookmarks.map((bookmark) => (
-                      <ListItem key={bookmark.id} disablePadding>
-                        <ListItemButton
-                          sx={{ pl: 4 }}
-                          onClick={() => handleBookmarkSelect(bookmark.id)}
-                        >
-                          <ListItemIcon sx={{ minWidth: 24 }}>
-                            <BookmarkIconView
-                              icon={bookmark.icon}
-                              fontSize={16}
-                            />
-                          </ListItemIcon>
-                          <ListItemText primary={bookmark.title} />
-                        </ListItemButton>
-                      </ListItem>
-                    ))}
+                    {(group.bookmarks || []).map((bookmark) =>
+                      bookmark ? (
+                        <ListItem key={bookmark.id} disablePadding>
+                          <ListItemButton
+                            sx={{
+                              pl: 4,
+                              borderLeft: 5,
+                              borderColor:
+                                bookmarkColorHex(bookmark.color) || "transparent",
+                            }}
+                            onClick={() => handleBookmarkSelect(bookmark.id)}
+                          >
+                            <ListItemIcon sx={{ minWidth: 24 }}>
+                              <BookmarkIconView
+                                icon={bookmark.icon}
+                                fontSize={16}
+                              />
+                            </ListItemIcon>
+                            <ListItemText primary={bookmark.title} />
+                          </ListItemButton>
+                        </ListItem>
+                      ) : null,
+                    )}
                   </List>
                 </Collapse>
               </div>

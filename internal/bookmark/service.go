@@ -23,30 +23,32 @@ type PasswordFn func(reason string) (string, error)
 type KeyPEMFunc func(id string) (string, error)
 
 type Bookmark struct {
-	GroupName          string `json:"group_name"`
-	ID                 string `json:"id"`
-	Title              string `json:"title"`
-	Host               string `json:"host"`
-	Port               int    `json:"port"`
-	PrivateKey         string `json:"private_key"`
-	PrivateKeyPassword string `json:"private_key_password"`
-	ProxyJumpID        string `json:"proxy_jump_id"`
-	User               string `json:"user"`
-	Password           string `json:"password"`
-	Icon               string `json:"icon"`
-	UseAgent           bool   `json:"use_agent"` // DB 兼容字段，拨号时始终尝试 Agent，运行时忽略
-	SshKeyID           string `json:"ssh_key_id"`
-	Certificate        string `json:"certificate"`
-	ForwardAgent       bool   `json:"forward_agent"`
-	ProxyMode          string `json:"proxy_mode"` // inherit | none | custom
-	ProxyType          string `json:"proxy_type"` // http | socks5
-	ProxyHost          string `json:"proxy_host"`
-	ProxyPort          int    `json:"proxy_port"`
-	ProxyUser          string `json:"proxy_user"`
-	ProxyPassword      string `json:"proxy_password"`
-	StartupCmd         string `json:"startup_cmd"`
-	EnvVars            string `json:"env_vars"` // JSON object
-	Term               string `json:"term"`
+	GroupName          string   `json:"group_name"`
+	ID                 string   `json:"id"`
+	Title              string   `json:"title"`
+	Host               string   `json:"host"`
+	Port               int      `json:"port"`
+	PrivateKey         string   `json:"private_key"`
+	PrivateKeyPassword string   `json:"private_key_password"`
+	ProxyJumpID        string   `json:"proxy_jump_id"`
+	User               string   `json:"user"`
+	Password           string   `json:"password"`
+	Icon               string   `json:"icon"`
+	UseAgent           bool     `json:"use_agent"` // DB 兼容字段，拨号时始终尝试 Agent，运行时忽略
+	SshKeyID           string   `json:"ssh_key_id"`
+	Certificate        string   `json:"certificate"`
+	ForwardAgent       bool     `json:"forward_agent"`
+	ProxyMode          string   `json:"proxy_mode"` // inherit | none | custom
+	ProxyType          string   `json:"proxy_type"` // http | socks5
+	ProxyHost          string   `json:"proxy_host"`
+	ProxyPort          int      `json:"proxy_port"`
+	ProxyUser          string   `json:"proxy_user"`
+	ProxyPassword      string   `json:"proxy_password"`
+	StartupCmd         string   `json:"startup_cmd"`
+	EnvVars            string   `json:"env_vars"` // JSON object
+	Term               string   `json:"term"`
+	Tags               []string `json:"tags"`
+	Color              string   `json:"color"`
 }
 
 func (b Bookmark) Endpoint() ssh.Endpoint {
@@ -225,6 +227,7 @@ func fromDB(b *database.BookmarkDB, groupName string) *Bookmark {
 		ProxyMode: mode, ProxyType: b.ProxyType, ProxyHost: b.ProxyHost, ProxyPort: b.ProxyPort,
 		ProxyUser: b.ProxyUser, ProxyPassword: b.ProxyPassword,
 		StartupCmd: b.StartupCmd, EnvVars: b.EnvVars, Term: b.Term,
+		Tags: decodeTags(b.Tags), Color: normalizeColor(b.Color),
 	}
 }
 
@@ -377,6 +380,7 @@ func (s *Service) Save(b Bookmark) (string, error) {
 	if err := validateSessionOptions(&b); err != nil {
 		return "", err
 	}
+	normalizeMeta(&b)
 	if b.ID != "" {
 		existing, err := s.db.BookmarkRepo.GetBookmarkByID(b.ID)
 		if err == nil && existing != nil {
@@ -420,6 +424,7 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 		ProxyHost: processed.ProxyHost, ProxyPort: processed.ProxyPort,
 		ProxyUser: processed.ProxyUser, ProxyPassword: processed.ProxyPassword,
 		StartupCmd: processed.StartupCmd, EnvVars: processed.EnvVars, Term: processed.Term,
+		Tags: encodeTags(processed.Tags), Color: processed.Color,
 		UpdatedAt: time.Now(),
 	}
 	if err := s.db.BookmarkRepo.UpdateBookmark(dbBookmark); err != nil {
@@ -487,6 +492,7 @@ func (s *Service) insert(b Bookmark) (string, error) {
 		ProxyHost: processed.ProxyHost, ProxyPort: processed.ProxyPort,
 		ProxyUser: processed.ProxyUser, ProxyPassword: processed.ProxyPassword,
 		StartupCmd: processed.StartupCmd, EnvVars: processed.EnvVars, Term: processed.Term,
+		Tags: encodeTags(processed.Tags), Color: processed.Color,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return "", err
@@ -572,6 +578,7 @@ func (s *Service) Copy(id string) (*Bookmark, error) {
 		ProxyHost: src.ProxyHost, ProxyPort: src.ProxyPort,
 		ProxyUser: src.ProxyUser, ProxyPassword: src.ProxyPassword,
 		StartupCmd: src.StartupCmd, EnvVars: src.EnvVars, Term: src.Term,
+		Tags: src.Tags, Color: src.Color,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return nil, err
