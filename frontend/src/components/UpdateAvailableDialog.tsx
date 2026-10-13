@@ -11,8 +11,8 @@ import {
   Box,
 } from "@mui/material";
 import Markdown from "markdown-to-jsx";
-import { NewVersion } from "../../bindings/github.com/ilaziness/vexo/services";
-import { InstallUpdate } from "../../bindings/github.com/ilaziness/vexo/services/appservice";
+import { NewVersion } from "../../bindings/github.com/ilaziness/vela/services";
+import { InstallUpdate } from "../../bindings/github.com/ilaziness/vela/services/appservice";
 import { formatFileSize, parseCallServiceError } from "../func/service";
 import { useMessageStore } from "../stores/message";
 

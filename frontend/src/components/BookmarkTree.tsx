@@ -27,7 +27,7 @@ import {
 import {
   SSHBookmark,
   BookmarkGroup,
-} from "../../bindings/github.com/ilaziness/vexo/services";
+} from "../../bindings/github.com/ilaziness/vela/services";
 import {
   BookmarkIconView,
   GroupIconView,

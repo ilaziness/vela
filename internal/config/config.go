@@ -9,9 +9,9 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/ai"
-	"github.com/ilaziness/vexo/internal/sync"
-	"github.com/ilaziness/vexo/internal/system"
+	"github.com/ilaziness/vela/internal/ai"
+	"github.com/ilaziness/vela/internal/sync"
+	"github.com/ilaziness/vela/internal/system"
 )
 
 const FileName = "config.toml"

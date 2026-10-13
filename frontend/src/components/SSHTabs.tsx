@@ -13,11 +13,11 @@ import { genTabIndex } from "../func/service";
 import {
   ProgressData,
   TransferQueuedData,
-} from "../../bindings/github.com/ilaziness/vexo/services/models";
+} from "../../bindings/github.com/ilaziness/vela/services/models";
 import {
   LogService,
   BookmarkService,
-} from "../../bindings/github.com/ilaziness/vexo/services/index.ts";
+} from "../../bindings/github.com/ilaziness/vela/services/index.ts";
 import { DragDropContext, Droppable, DropResult } from "@hello-pangea/dnd";
 import { useMessageStore } from "../stores/message";
 

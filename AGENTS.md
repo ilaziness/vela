@@ -71,7 +71,7 @@
 ├── data/                     # 内置默认数据（如 commands.json）
 ├── frontend/                 # 前端 React 项目
 │   ├── bindings/             # Go 绑定（wails3 generate bindings -ts 生成）
-│   │   └── github.com/ilaziness/vexo/services/  # 暴露给前端的函数、类型等
+│   │   └── github.com/ilaziness/vela/services/  # 暴露给前端的函数、类型等
 │   ├── public/               # 公共静态资源
 │   ├── src/
 │   │   ├── components/       # React UI 组件（MUI）
@@ -138,7 +138,7 @@
 
 React开发时启用了严格模式StrictMode。
 
-Go绑定到前端的方法和数据类型在`frontend\bindings\github.com\ilaziness\vexo\services`。
+Go绑定到前端的方法和数据类型在`frontend\bindings\github.com\ilaziness\vela\services`。
 
 搜索代码应该排除`dist`目录。
 
@@ -233,7 +233,7 @@ go build -o {name} .
 go build .
 ```
 
-`{name}` 为平台对应的可执行文件名，如 `vexo.exe`（Windows）、`vexo`（macOS/Linux）。
+`{name}` 为平台对应的可执行文件名，如 `Vela.exe`（Windows）、`Vela`（macOS/Linux）。
 
 ### 3. 修改完成后的验证与格式化
 

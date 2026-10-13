@@ -14,10 +14,10 @@ import (
 	"github.com/things-go/go-socks5"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/buildinfo"
-	"github.com/ilaziness/vexo/internal/ssh"
-	"github.com/ilaziness/vexo/internal/system"
-	"github.com/ilaziness/vexo/internal/utils"
+	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/utils"
 )
 
 const (

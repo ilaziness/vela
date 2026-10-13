@@ -6,7 +6,7 @@ import PasswordInputDialog from "../components/PasswordInputDialog.tsx";
 import HostKeyPrompt from "../components/HostKeyPrompt";
 import KeyboardInteractivePrompt from "../components/KeyboardInteractivePrompt";
 import ShortcutListener from "../components/ShortcutListener";
-import { AppService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { AppService } from "../../bindings/github.com/ilaziness/vela/services";
 
 function App() {
   return (

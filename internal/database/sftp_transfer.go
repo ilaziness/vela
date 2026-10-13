@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/transfer"
+	"github.com/ilaziness/vela/internal/transfer"
 )
 
 // SftpTransferRepository persists unfinished SFTP transfers.

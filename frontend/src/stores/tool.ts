@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { Tool } from "../types/tool";
-import { ToolService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 
 interface ToolStore {
   tools: Tool[];

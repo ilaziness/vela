@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ilaziness/vexo/internal/database"
+	"github.com/ilaziness/vela/internal/database"
 )
 
 // SyncManager 同步管理器
@@ -130,7 +130,7 @@ func (sm *SyncManager) Download(dstDir string, version int, db *database.Databas
 	// 创建临时目录在 parent/temp/ 下
 	parentDir := filepath.Dir(dstDir)
 	tempBaseDir := filepath.Join(parentDir, "temp")
-	tmpDir := filepath.Join(tempBaseDir, "vexo-sync-tmp-"+strconv.Itoa(int(time.Now().UnixNano())))
+	tmpDir := filepath.Join(tempBaseDir, "vela-sync-tmp-"+strconv.Itoa(int(time.Now().UnixNano())))
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}

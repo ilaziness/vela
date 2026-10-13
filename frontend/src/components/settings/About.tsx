@@ -2,11 +2,11 @@ import React, { useState } from "react";
 import { Browser } from "@wailsio/runtime";
 import { Button, Typography, Box, Stack } from "@mui/material";
 import { GitHub as GitHubIcon } from "@mui/icons-material";
-import { CheckUpdate } from "../../../bindings/github.com/ilaziness/vexo/services/appservice";
+import { CheckUpdate } from "../../../bindings/github.com/ilaziness/vela/services/appservice";
 import {
   AppInfo,
   NewVersion,
-} from "../../../bindings/github.com/ilaziness/vexo/services";
+} from "../../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../../func/service";
 import { useMessageStore } from "../../stores/message";
 
@@ -61,7 +61,7 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
             style={{ width: "64px", height: "64px" }}
           />
           <Typography variant="h4" sx={{ fontWeight: 800 }}>
-            Vexo
+            Vela
           </Typography>
 
           <Box

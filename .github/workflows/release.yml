@@ -55,14 +55,14 @@ jobs:
 
       - name: Archive Linux package
         run: |
-          test -f bin/Vexo
-          tar -C bin -czf bin/Vexo_${{ github.ref_name }}_linux_amd64.tar.gz Vexo
+          test -f bin/Vela
+          tar -C bin -czf bin/Vela_${{ github.ref_name }}_linux_amd64.tar.gz Vela
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v7
         with:
           name: linux-amd64
-          path: bin/Vexo_${{ github.ref_name }}_linux_amd64.tar.gz
+          path: bin/Vela_${{ github.ref_name }}_linux_amd64.tar.gz
           if-no-files-found: error
 
   build-windows:
@@ -123,14 +123,14 @@ jobs:
       - name: Archive Windows package
         shell: pwsh
         run: |
-          if (-not (Test-Path bin/Vexo.exe)) { throw "missing bin/Vexo.exe" }
-          Compress-Archive -Path bin/Vexo.exe -DestinationPath "bin/Vexo_${{ github.ref_name }}_windows_amd64.zip" -Force
+          if (-not (Test-Path bin/Vela.exe)) { throw "missing bin/Vela.exe" }
+          Compress-Archive -Path bin/Vela.exe -DestinationPath "bin/Vela_${{ github.ref_name }}_windows_amd64.zip" -Force
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v7
         with:
           name: windows-amd64
-          path: bin/Vexo_${{ github.ref_name }}_windows_amd64.zip
+          path: bin/Vela_${{ github.ref_name }}_windows_amd64.zip
           if-no-files-found: error
 
   # Apple Silicon only. macos-latest is arm64; Intel (amd64) is intentionally omitted.
@@ -194,8 +194,8 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          APP="bin/Vexo.app"
-          BIN="$APP/Contents/MacOS/Vexo"
+          APP="bin/Vela.app"
+          BIN="$APP/Contents/MacOS/Vela"
           PLIST="$APP/Contents/Info.plist"
           test -f "$BIN"
           test -f "$PLIST"
@@ -212,18 +212,18 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          ARCHIVE="bin/Vexo_${VERSION}_darwin_arm64.zip"
+          ARCHIVE="bin/Vela_${VERSION}_darwin_arm64.zip"
           rm -f "$ARCHIVE"
-          # --keepParent makes Vexo.app the single top-level entry.
+          # --keepParent makes Vela.app the single top-level entry.
           # --norsrc skips AppleDouble __MACOSX, which the updater would reject.
-          ditto -c -k --keepParent --norsrc "bin/Vexo.app" "$ARCHIVE"
-          python3 -c 'import sys,zipfile; tops={n.split("/")[0] for n in zipfile.ZipFile(sys.argv[1]).namelist() if n}; assert tops=={"Vexo.app"}, sorted(tops)' "$ARCHIVE"
+          ditto -c -k --keepParent --norsrc "bin/Vela.app" "$ARCHIVE"
+          python3 -c 'import sys,zipfile; tops={n.split("/")[0] for n in zipfile.ZipFile(sys.argv[1]).namelist() if n}; assert tops=={"Vela.app"}, sorted(tops)' "$ARCHIVE"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v7
         with:
           name: darwin-arm64
-          path: bin/Vexo_${{ github.ref_name }}_darwin_arm64.zip
+          path: bin/Vela_${{ github.ref_name }}_darwin_arm64.zip
           if-no-files-found: error
 
   release:
@@ -241,13 +241,13 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          test -f "Vexo_${{ github.ref_name }}_darwin_arm64.zip"
-          test -f "Vexo_${{ github.ref_name }}_linux_amd64.tar.gz"
-          test -f "Vexo_${{ github.ref_name }}_windows_amd64.zip"
+          test -f "Vela_${{ github.ref_name }}_darwin_arm64.zip"
+          test -f "Vela_${{ github.ref_name }}_linux_amd64.tar.gz"
+          test -f "Vela_${{ github.ref_name }}_windows_amd64.zip"
           sha256sum \
-            "Vexo_${{ github.ref_name }}_darwin_arm64.zip" \
-            "Vexo_${{ github.ref_name }}_linux_amd64.tar.gz" \
-            "Vexo_${{ github.ref_name }}_windows_amd64.zip" \
+            "Vela_${{ github.ref_name }}_darwin_arm64.zip" \
+            "Vela_${{ github.ref_name }}_linux_amd64.tar.gz" \
+            "Vela_${{ github.ref_name }}_windows_amd64.zip" \
             > SHA256SUMS
           cat SHA256SUMS
 
@@ -260,7 +260,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/Vexo_${{ github.ref_name }}_darwin_arm64.zip
-            dist/Vexo_${{ github.ref_name }}_linux_amd64.tar.gz
-            dist/Vexo_${{ github.ref_name }}_windows_amd64.zip
+            dist/Vela_${{ github.ref_name }}_darwin_arm64.zip
+            dist/Vela_${{ github.ref_name }}_linux_amd64.tar.gz
+            dist/Vela_${{ github.ref_name }}_windows_amd64.zip
             dist/SHA256SUMS

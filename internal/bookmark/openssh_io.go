@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/database"
-	"github.com/ilaziness/vexo/internal/sshconfig"
+	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/sshconfig"
 )
 
 const ImportedGroupName = "Imported"
@@ -164,7 +164,7 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 }
 
 func (s *Service) exportProxyJumpChain(jumpID string, idToTitle map[string]string) string {
-	// vexo: target.proxy_jump_id = nearest jump. OpenSSH ProxyJump a,b = client→a→b→target.
+	// vela: target.proxy_jump_id = nearest jump. OpenSSH ProxyJump a,b = client→a→b→target.
 	var hops []string
 	seen := map[string]bool{}
 	id := jumpID

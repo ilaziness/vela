@@ -1,7 +1,7 @@
-# Makefile for vexo SSH desktop application
+# Makefile for vela SSH desktop application
 VERSION ?= v1.0.0
 MODE ?= release
-APP_NAME ?= Vexo
+APP_NAME ?= Vela
 
 # 获取 Git 信息（完整 hash）
 GIT_INFO := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
@@ -20,7 +20,7 @@ SHA256SUMS_FILE := bin/SHA256SUMS
 .DEFAULT_GOAL := help
 
 help:
-	@echo "Vexo SSH desktop application — Makefile usage"
+	@echo "Vela SSH desktop application — Makefile usage"
 	@echo ""
 	@echo "Usage: make [target] [VAR=value ...]"
 	@echo ""
@@ -97,7 +97,7 @@ pack-release:
 	@mkdir -p bin
 	@test -f bin/$(APP_NAME) || (echo "missing bin/$(APP_NAME) (linux build failed or GOOS not applied)"; exit 1)
 	@test -f bin/$(APP_NAME).exe || (echo "missing bin/$(APP_NAME).exe"; exit 1)
-	@# Ensure linux artifact is not a Windows PE mistakenly named Vexo
+	@# Ensure linux artifact is not a Windows PE mistakenly named Vela
 	@if command -v file >/dev/null 2>&1; then \
 		file bin/$(APP_NAME) | grep -qiE 'PE32|MS Windows' && \
 			(echo "bin/$(APP_NAME) looks like a Windows binary; cross-build GOOS=linux failed"; exit 1) || true; \

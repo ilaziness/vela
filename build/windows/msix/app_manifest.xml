@@ -6,15 +6,15 @@
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10">
   
   <Identity 
-    Name="com.example.vexo"
-    Publisher="CN=My Company"
+    Name="com.ilaziness.vela"
+    Publisher="CN=Vela Team"
     Version="0.1.0.0" 
     ProcessorArchitecture="x64" />
   
   <Properties>
-    <DisplayName>My Product</DisplayName>
-    <PublisherDisplayName>My Company</PublisherDisplayName>
-    <Description>A vexo application</Description>
+    <DisplayName>Vela</DisplayName>
+    <PublisherDisplayName>Vela Team</PublisherDisplayName>
+    <Description>Vela is an SSH desktop client</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   
@@ -27,10 +27,10 @@
   </Resources>
   
   <Applications>
-    <Application Id="com.example.vexo" Executable="vexo.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="com.ilaziness.vela" Executable="Vela.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="My Product"
-        Description="A vexo application"
+        DisplayName="Vela"
+        Description="Vela is an SSH desktop client"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
@@ -39,7 +39,7 @@
       </uap:VisualElements>
       
       <Extensions>
-        <desktop:Extension Category="windows.fullTrustProcess" Executable="vexo.exe" />
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="Vela.exe" />
         
       </Extensions>
     </Application>

@@ -17,7 +17,7 @@ import {
   Alert,
   CircularProgress,
 } from "@mui/material";
-import { Provider } from "../../../bindings/github.com/ilaziness/vexo/internal/ai/models";
+import { Provider } from "../../../bindings/github.com/ilaziness/vela/internal/ai/models";
 import { useAIConfigStore } from "../../stores/aiConfig";
 import { useMessageStore } from "../../stores/message";
 import { parseCallServiceError } from "../../func/service";

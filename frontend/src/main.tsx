@@ -6,8 +6,8 @@ import CssBaseline from "@mui/material/CssBaseline";
 import { RouterProvider } from "react-router/dom";
 import routes from "./routes.tsx";
 import theme from "./theme";
-import { ReadConfig } from "../bindings/github.com/ilaziness/vexo/services/configservice";
-import { Config } from "../bindings/github.com/ilaziness/vexo/services";
+import { ReadConfig } from "../bindings/github.com/ilaziness/vela/services/configservice";
+import { Config } from "../bindings/github.com/ilaziness/vela/services";
 import useTerminalStore from "./stores/terminal";
 import type { AppTheme } from "./types/ssh";
 

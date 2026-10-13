@@ -9,7 +9,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Events, Window } from "@wailsio/runtime";
-import * as ConfigService from "../../bindings/github.com/ilaziness/vexo/services/configservice";
+import * as ConfigService from "../../bindings/github.com/ilaziness/vela/services/configservice";
 
 const PasswordInputDialog: React.FC = () => {
   const [open, setOpen] = useState(false);

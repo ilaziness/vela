@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "{{.VERSION}}",
-			"CompanyName": "Vexo Team",
-			"FileDescription": "Vexo is an SSH desktop client",
-			"LegalCopyright": "(c) 2026, Vexo Team",
-			"ProductName": "Vexo",
-			"Comments": "Vexo is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients."
+			"CompanyName": "Vela Team",
+			"FileDescription": "Vela is an SSH desktop client",
+			"LegalCopyright": "(c) 2026, Vela Team",
+			"ProductName": "Vela",
+			"Comments": "Vela is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients."
 		}
 	}
 }

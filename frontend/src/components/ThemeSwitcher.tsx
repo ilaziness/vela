@@ -5,8 +5,8 @@ import PaletteIcon from "@mui/icons-material/Palette";
 import useTerminalStore from "../stores/terminal";
 import { AppTheme } from "../types/ssh";
 import { ThemeOptions } from "../theme";
-import { SetTheme } from "../../bindings/github.com/ilaziness/vexo/services/configservice";
-import { LogService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { SetTheme } from "../../bindings/github.com/ilaziness/vela/services/configservice";
+import { LogService } from "../../bindings/github.com/ilaziness/vela/services";
 
 const VALID_THEMES: AppTheme[] = ["light", "dark", "eyeCare"];
 

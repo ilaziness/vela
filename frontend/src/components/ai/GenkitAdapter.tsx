@@ -1,12 +1,12 @@
 // Genkit Adapter - 将 MUI X Chat 连接到后端 AIService（Agent 流）
 import type { ChatAdapter, ChatMessageChunk, ChatStreamEnvelope, ChatUser } from '@mui/x-chat/headless';
 import { Events } from '@wailsio/runtime';
-import { AIService } from '../../../bindings/github.com/ilaziness/vexo/services';
+import { AIService } from '../../../bindings/github.com/ilaziness/vela/services';
 import {
   ChatRequest,
   AIMessage,
   ToolApprovalRequest,
-} from '../../../bindings/github.com/ilaziness/vexo/services/models';
+} from '../../../bindings/github.com/ilaziness/vela/services/models';
 import { formatAIChatError } from '../../func/aiChatError';
 import { parseCallServiceError } from '../../func/service';
 import { getCurrentSSHBindState, RUN_SSH_COMMAND_TOOL, SSH_TARGET_INPUT_KEY } from '../../func/aiContext';

@@ -38,12 +38,12 @@ import {
   HealthCheck,
   GetSyncProgress,
   CancelSync,
-} from "../../../bindings/github.com/ilaziness/vexo/services/syncservice";
+} from "../../../bindings/github.com/ilaziness/vela/services/syncservice";
 import {
   Config,
   SyncProgress,
   LogService,
-} from "../../../bindings/github.com/ilaziness/vexo/services";
+} from "../../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../../func/service";
 
 type SyncConfig = Config["Sync"];

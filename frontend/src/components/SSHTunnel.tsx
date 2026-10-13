@@ -26,8 +26,8 @@ import { useMessageStore } from "../stores/message";
 import {
   TunnelList,
   TunnelInfo,
-} from "../../bindings/github.com/ilaziness/vexo/internal/tunnel/models";
-import { SSHTunnelService } from "../../bindings/github.com/ilaziness/vexo/services";
+} from "../../bindings/github.com/ilaziness/vela/internal/tunnel/models";
+import { SSHTunnelService } from "../../bindings/github.com/ilaziness/vela/services";
 import TunnelForm from "./TunnelForm";
 import { parseCallServiceError } from "../func/service";
 

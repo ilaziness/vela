@@ -1,6 +1,6 @@
-# Vexo Sync Backend
+# Vela Sync Backend
 
-Vexo 数据同步服务端，用于存储和管理用户数据的多版本备份。
+Vela 数据同步服务端，用于存储和管理用户数据的多版本备份。
 
 ## 功能特性
 
@@ -81,9 +81,9 @@ max_versions = 5
 type = "mysql"
 host = "localhost"
 port = 3306
-user = "vexo"
+user = "vela"
 password = "your_password"
-name = "vexo_sync"
+name = "vela_sync"
 ```
 
 ### 配置项说明
@@ -221,18 +221,18 @@ Headers:
 
 ### 使用 systemd 管理
 
-创建 `/etc/systemd/system/vexo-sync.service`：
+创建 `/etc/systemd/system/vela-sync.service`：
 
 ```ini
 [Unit]
-Description=Vexo Sync Backend
+Description=Vela Sync Backend
 After=network.target
 
 [Service]
 Type=simple
-User=vexo
-WorkingDirectory=/opt/vexo-sync
-ExecStart=/opt/vexo-sync/sync-backend server -config=/opt/vexo-sync/config.toml
+User=vela
+WorkingDirectory=/opt/vela-sync
+ExecStart=/opt/vela-sync/sync-backend server -config=/opt/vela-sync/config.toml
 Restart=always
 RestartSec=5
 
@@ -244,8 +244,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable vexo-sync
-sudo systemctl start vexo-sync
+sudo systemctl enable vela-sync
+sudo systemctl start vela-sync
 ```
 
 ### 使用 Nginx 反向代理
@@ -294,8 +294,8 @@ CMD ["./sync-backend", "server"]
 构建并运行：
 
 ```bash
-docker build -t vexo-sync .
-docker run -d -p 8080:8080 -v $(pwd)/data:/root/data vexo-sync
+docker build -t vela-sync .
+docker run -d -p 8080:8080 -v $(pwd)/data:/root/data vela-sync
 ```
 
 ## 数据备份
@@ -313,7 +313,7 @@ docker run -d -p 8080:8080 -v $(pwd)/data:/root/data vexo-sync
 tar czf backup-$(date +%Y%m%d).tar.gz data/
 
 # MySQL 备份示例
-mysqldump -u vexo -p vexo_sync > backup-$(date +%Y%m%d).sql
+mysqldump -u vela -p vela_sync > backup-$(date +%Y%m%d).sql
 ```
 
 ## 安全建议
@@ -328,7 +328,7 @@ mysqldump -u vexo -p vexo_sync > backup-$(date +%Y%m%d).sql
 ### 查看日志
 
 ```bash
-journalctl -u vexo-sync -f
+journalctl -u vela-sync -f
 ```
 
 ### 常见问题

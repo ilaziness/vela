@@ -9,7 +9,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Events } from "@wailsio/runtime";
-import { SSHService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../func/service";
 import { useMessageStore } from "../stores/message";
 

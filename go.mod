@@ -1,4 +1,4 @@
-module github.com/ilaziness/vexo
+module github.com/ilaziness/vela
 
 go 1.27.1
 

@@ -2,8 +2,8 @@
 set -e
 
 # Build configuration
-APP_NAME="vexo.exe"
-BUNDLE_ID="com.example.vexo"
+APP_NAME="Vela"
+BUNDLE_ID="com.ilaziness.vela"
 VERSION="0.1.0"
 BUILD_NUMBER="0.1.0"
 BUILD_DIR="build/ios"

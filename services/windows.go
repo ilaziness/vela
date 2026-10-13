@@ -47,7 +47,7 @@ func (w *Windows) newToolWindow() *application.WebviewWindow {
 
 func (w *Windows) NewMainWindow() {
 	win := w.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Vexo", URL: "/#/submainwindow", Width: 1440, Height: 800,
+		Title: "Vela", URL: "/#/submainwindow", Width: 1440, Height: 800,
 		MinWidth: 1440, MinHeight: 800, DefaultContextMenuDisabled: true, Frameless: true, EnableFileDrop: true,
 	})
 	RegisterFileDropHandler(w.app, win)

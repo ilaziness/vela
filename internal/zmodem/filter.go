@@ -11,7 +11,7 @@ import (
 	zm "github.com/xx25/go-zmodem"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/system"
+	"github.com/ilaziness/vela/internal/system"
 )
 
 const (

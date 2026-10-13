@@ -17,8 +17,8 @@ import {
   Tooltip,
 } from "@mui/material";
 import { Delete, Refresh } from "@mui/icons-material";
-import { SSHService } from "../../../bindings/github.com/ilaziness/vexo/services";
-import type { KnownHostEntry } from "../../../bindings/github.com/ilaziness/vexo/internal/ssh/models";
+import { SSHService } from "../../../bindings/github.com/ilaziness/vela/services";
+import type { KnownHostEntry } from "../../../bindings/github.com/ilaziness/vela/internal/ssh/models";
 import { useMessageStore } from "../../stores/message";
 import { parseCallServiceError } from "../../func/service";
 

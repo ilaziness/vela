@@ -84,7 +84,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/ilaziness/vexo
+        - github.com/ilaziness/vela
   exclusions:
     generated: lax
     paths:

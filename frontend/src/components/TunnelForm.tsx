@@ -15,7 +15,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useMessageStore } from "../stores/message";
-import { SSHTunnelService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { SSHTunnelService } from "../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../func/service";
 import {
   TunnelType,

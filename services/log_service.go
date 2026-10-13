@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/ilaziness/vexo/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/buildinfo"
 )
 
 type LogService struct {
@@ -22,13 +22,13 @@ func NewLogService() *LogService {
 	if buildinfo.IsRelease() {
 		level = zap.NewAtomicLevelAt(zap.InfoLevel)
 	}
-	logger, err := newLogger("logs/vexo.log", level)
+	logger, err := newLogger("logs/vela.log", level)
 	if err != nil {
 		logger = zap.NewNop()
 	} else {
 		logger.Info("Logger initialized",
 			zap.String("mode", buildinfo.Mode),
-			zap.String("logPath", "logs/vexo.log"),
+			zap.String("logPath", "logs/vela.log"),
 			zap.String("logLevel", level.String()),
 		)
 	}

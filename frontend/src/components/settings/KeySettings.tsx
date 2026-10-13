@@ -26,7 +26,7 @@ import { ContentCopy, Delete, FileDownload } from "@mui/icons-material";
 import {
   KeyService,
   SSHKeyInfo,
-} from "../../../bindings/github.com/ilaziness/vexo/services";
+} from "../../../bindings/github.com/ilaziness/vela/services";
 import { useMessageStore } from "../../stores/message";
 import { parseCallServiceError } from "../../func/service";
 

@@ -1,6 +1,6 @@
 package services
 
-import "github.com/ilaziness/vexo/internal/tunnel"
+import "github.com/ilaziness/vela/internal/tunnel"
 
 type TunnelList = tunnel.TunnelList
 type TunnelInfo = tunnel.TunnelInfo

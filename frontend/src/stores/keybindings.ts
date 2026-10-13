@@ -3,7 +3,7 @@ import {
   AppService,
   KeyBindingInfo,
   LogService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
+} from "../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../func/service";
 
 interface KeybindingsState {

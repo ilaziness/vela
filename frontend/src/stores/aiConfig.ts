@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { AIConfig, AIService } from '../../bindings/github.com/ilaziness/vexo/services';
-import { Provider } from "../../bindings/github.com/ilaziness/vexo/internal/ai/models";
+import { AIConfig, AIService } from '../../bindings/github.com/ilaziness/vela/services';
+import { Provider } from "../../bindings/github.com/ilaziness/vela/internal/ai/models";
 import { parseCallServiceError } from '../func/service';
 
 interface AIConfigState {

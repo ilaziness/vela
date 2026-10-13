@@ -9,7 +9,7 @@ includes:
   android: ./build/android/Taskfile.yml
 
 vars:
-  APP_NAME: "Vexo"
+  APP_NAME: "Vela"
   BIN_DIR: "bin"
   VITE_PORT: '{{.WAILS_VITE_PORT | default 9245}}'
   VERSION: '{{.VERSION | default "v1.0.0"}}'
@@ -21,7 +21,7 @@ vars:
   BUILD_TIME:
     # sh: date +"%FT%T%z"
   MODE : "release" # or "debug"
-  GLOBAL_BUILD_FLAGS: '-ldflags="-X github.com/ilaziness/vexo/internal/buildinfo.Version={{.VERSION}} -X github.com/ilaziness/vexo/internal/buildinfo.GitInfo={{.GIT_HASH}} -X github.com/ilaziness/vexo/internal/buildinfo.BuildTime={{.BUILD_TIME}}"'
+  GLOBAL_BUILD_FLAGS: '-ldflags="-X github.com/ilaziness/vela/internal/buildinfo.Version={{.VERSION}} -X github.com/ilaziness/vela/internal/buildinfo.GitInfo={{.GIT_HASH}} -X github.com/ilaziness/vela/internal/buildinfo.BuildTime={{.BUILD_TIME}}"'
 
 tasks:
   build:

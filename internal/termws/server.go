@@ -12,9 +12,9 @@ import (
 	"github.com/coder/websocket"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/command"
-	"github.com/ilaziness/vexo/internal/ssh"
-	"github.com/ilaziness/vexo/internal/system"
+	"github.com/ilaziness/vela/internal/command"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/system"
 )
 
 type Client struct {

@@ -1,11 +1,11 @@
-# Vexo — 跨平台 SSH & SFTP GUI 客户端
+# Vela — 跨平台 SSH & SFTP GUI 客户端
 
-[![CI](https://github.com/ilaziness/vexo/actions/workflows/release.yml/badge.svg)](https://github.com/ilaziness/vexo/actions/workflows/release.yml)
-[![Release](https://img.shields.io/github/v/release/ilaziness/vexo)](https://github.com/ilaziness/vexo/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vexo/releases)
+[![CI](https://github.com/ilaziness/vela/actions/workflows/release.yml/badge.svg)](https://github.com/ilaziness/vela/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/ilaziness/vela)](https://github.com/ilaziness/vela/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vela/releases)
 [![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
-[![License](https://img.shields.io/github/license/ilaziness/vexo)](LICENSE)
+[![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
 一款基于 Go 和 Wails v3 构建的现代化、跨平台 SSH 和 SFTP 桌面 GUI 应用。
 
@@ -13,7 +13,7 @@
 
 ## 📖 简介
 
-**Vexo** 是一个简洁、响应迅速的桌面应用程序，将 SSH 和 SFTP 的强大功能带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vexo 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问和文件管理工具。
+**Vela** 是一个简洁、响应迅速的桌面应用程序，将 SSH 和 SFTP 的强大功能带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vela 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问和文件管理工具。
 
 ---
 
@@ -55,7 +55,7 @@
 
 ## 📸 截图
 
-> 以下截图展示了 Vexo 的主要界面：
+> 以下截图展示了 Vela 的主要界面：
 
 ### 主界面 - SSH 终端
 
@@ -87,13 +87,13 @@ _服务器连接配置管理_
 
 ## 📦 下载与安装
 
-从 [Releases](https://github.com/ilaziness/vexo/releases) 下载对应平台的包：
+从 [Releases](https://github.com/ilaziness/vela/releases) 下载对应平台的包：
 
 | 平台 | 资源文件 | 说明 |
 |------|----------|------|
-| Windows | `Vexo_*_windows_amd64.zip` | 解压后运行 `Vexo.exe` |
-| Linux | `Vexo_*_linux_amd64.tar.gz` | 解压后运行 `Vexo` |
-| macOS | `Vexo_*_darwin_arm64.zip` | 解压得到 `Vexo.app`（见下方） |
+| Windows | `Vela_*_windows_amd64.zip` | 解压后运行 `Vela.exe` |
+| Linux | `Vela_*_linux_amd64.tar.gz` | 解压后运行 `Vela` |
+| macOS | `Vela_*_darwin_arm64.zip` | 解压得到 `Vela.app`（见下方） |
 
 ### macOS
 
@@ -101,15 +101,15 @@ _服务器连接配置管理_
 
 从浏览器下载后，macOS 可能拦截首次启动（双击无反应、提示无法验证开发者，或提示已损坏）。按下面步骤打开即可：
 
-1. 解压 zip，得到 `Vexo.app`（不要在压缩包内直接打开）。
+1. 解压 zip，得到 `Vela.app`（不要在压缩包内直接打开）。
 2. 在终端执行（路径换成实际解压位置）：
 
 ```bash
-xattr -cr ~/Downloads/Vexo.app
-open ~/Downloads/Vexo.app
+xattr -cr ~/Downloads/Vela.app
+open ~/Downloads/Vela.app
 ```
 
-3. 若仍被拦：在 Finder 中对 `Vexo.app` **右键 → 打开** 并确认；或到 **系统设置 → 隐私与安全性** 中选择 **仍要打开**。
+3. 若仍被拦：在 Finder 中对 `Vela.app` **右键 → 打开** 并确认；或到 **系统设置 → 隐私与安全性** 中选择 **仍要打开**。
 
 ---
 
@@ -118,7 +118,7 @@ open ~/Downloads/Vexo.app
 本项目采用 [Apache License 2.0](LICENSE) 许可证。
 
 ```
-Copyright 2024 Vexo Contributors
+Copyright 2024 Vela Contributors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

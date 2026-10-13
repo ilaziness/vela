@@ -14,9 +14,9 @@ import (
 	cryptossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"github.com/ilaziness/vexo/internal/system"
-	"github.com/ilaziness/vexo/internal/utils"
-	"github.com/ilaziness/vexo/internal/zmodem"
+	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/utils"
+	"github.com/ilaziness/vela/internal/zmodem"
 )
 
 const ErrConnectionNotFound = "SSH connection with ID %s not found"

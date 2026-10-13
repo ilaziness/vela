@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ilaziness/vexo/internal/ssh"
+	"github.com/ilaziness/vela/internal/ssh"
 )
 
 // SSHPromptContext SSH 连接上下文（用于系统提示词）
@@ -14,7 +14,7 @@ type SSHPromptContext struct {
 	User string
 }
 
-const promptBase = `你是 Vexo 内置 AI 助手（Agent）。Vexo 是一款 SSH 桌面客户端；用户在侧边栏与你对话，在另一个标签页的终端中操作远程机器。
+const promptBase = `你是 Vela 内置 AI 助手（Agent）。Vela 是一款 SSH 桌面客户端；用户在侧边栏与你对话，在另一个标签页的终端中操作远程机器。
 
 ## 能力
 - 解释命令、分析报错、编写脚本/配置、给出 Linux/Unix 运维建议

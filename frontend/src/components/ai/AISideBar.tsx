@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Slide, Box, Avatar, CircularProgress, Button, Typography } from "@mui/material";
 import { ChatBox, ChatMessageAvatar } from "@mui/x-chat";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
-import { LogService } from "../../../bindings/github.com/ilaziness/vexo/services/index";
+import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
 import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
 import { aiPartRenderers } from "./aiPartRenderers";
 import SessionPanel from "./SessionPanel";

@@ -12,7 +12,7 @@ import { useMessageStore } from "../../stores/message";
 import {
   Config,
   ConfigService,
-} from "../../../bindings/github.com/ilaziness/vexo/services";
+} from "../../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../../func/service";
 
 interface TerminalSettingsProps {

@@ -3,26 +3,26 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "Vexo"
+name: "Vela"
 arch: ${GOARCH}
 platform: "linux"
 version: "{{.VERSION}}"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "Vexo is an SSH desktop client"
-vendor: "Vexo Team"
-homepage: "https://wails.io"
+description: "Vela is an SSH desktop client"
+vendor: "Vela Team"
+homepage: "https://github.com/ilaziness/vela"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/Vexo"
-    dst: "/usr/local/bin/Vexo"
+  - src: "./bin/Vela"
+    dst: "/usr/local/bin/Vela"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/Vexo.png"
-  - src: "./build/linux/Vexo.desktop"
-    dst: "/usr/share/applications/Vexo.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/Vela.png"
+  - src: "./build/linux/Vela.desktop"
+    dst: "/usr/share/applications/Vela.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

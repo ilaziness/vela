@@ -5,7 +5,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/ilaziness/vexo/internal/zmodem"
+	"github.com/ilaziness/vela/internal/zmodem"
 )
 
 type zmodemPicker struct {

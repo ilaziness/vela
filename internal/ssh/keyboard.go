@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 	cryptossh "golang.org/x/crypto/ssh"
 
-	"github.com/ilaziness/vexo/internal/utils"
+	"github.com/ilaziness/vela/internal/utils"
 )
 
 const (

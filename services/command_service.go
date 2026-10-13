@@ -1,7 +1,7 @@
 package services
 
 import (
-	"github.com/ilaziness/vexo/internal/command"
+	"github.com/ilaziness/vela/internal/command"
 )
 
 type BuiltinCommand = command.BuiltinCommand

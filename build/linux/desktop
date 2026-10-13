@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=Vexo
-Comment=Vexo is an SSH desktop client
+Name=Vela
+Comment=Vela is an SSH desktop client
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/Vexo %u
+Exec=/usr/local/bin/Vela %u
 Terminal=false
 Type=Application
-Icon=Vexo
+Icon=Vela
 Categories=Utility;
-StartupWMClass=Vexo
+StartupWMClass=Vela
 
  

@@ -18,8 +18,8 @@ import {
 import {
   LogService,
   SSHService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
-import * as BookmarkService from "../../bindings/github.com/ilaziness/vexo/services/bookmarkservice";
+} from "../../bindings/github.com/ilaziness/vela/services";
+import * as BookmarkService from "../../bindings/github.com/ilaziness/vela/services/bookmarkservice";
 import { SSHLinkInfo, toConnectRequest } from "../types/ssh";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";
@@ -27,7 +27,7 @@ import {
   SSHBookmark,
   BookmarkGroup,
   BookmarkListItem,
-} from "../../bindings/github.com/ilaziness/vexo/services/models";
+} from "../../bindings/github.com/ilaziness/vela/services/models";
 import { ProxyMode, ProxyType } from "../types/proxy";
 
 // 输入连接信息表单

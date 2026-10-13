@@ -8,8 +8,8 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/ilaziness/vexo/internal/system"
-	"github.com/ilaziness/vexo/services"
+	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/services"
 )
 
 //go:embed all:frontend/dist
@@ -29,7 +29,7 @@ func main() {
 
 	logService := services.NewLogService()
 	app := application.New(application.Options{
-		Name: "Vexo",
+		Name: "Vela",
 		Services: []application.Service{
 			application.NewService(logService),
 		},
@@ -45,7 +45,7 @@ func main() {
 	})
 
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Vexo",
+		Title: "Vela",
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,

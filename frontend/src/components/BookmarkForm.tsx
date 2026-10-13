@@ -25,9 +25,9 @@ import {
   AppService,
   KeyService,
   SSHService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
-import * as BookmarkService from "../../bindings/github.com/ilaziness/vexo/services/bookmarkservice";
-import { BookmarkListItem } from "../../bindings/github.com/ilaziness/vexo/services/models";
+} from "../../bindings/github.com/ilaziness/vela/services";
+import * as BookmarkService from "../../bindings/github.com/ilaziness/vela/services/bookmarkservice";
+import { BookmarkListItem } from "../../bindings/github.com/ilaziness/vela/services/models";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";
 import FormRow from "./FormRow";

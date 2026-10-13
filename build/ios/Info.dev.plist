@@ -3,15 +3,15 @@
 <plist version="1.0">
 	<dict>
 		<key>CFBundleDisplayName</key>
-		<string>Vexo (Dev)</string>
+		<string>Vela (Dev)</string>
 		<key>CFBundleExecutable</key>
-		<string>Vexo</string>
+		<string>Vela</string>
 		<key>CFBundleGetInfoString</key>
-		<string>Vexo is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients.</string>
+		<string>Vela is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients.</string>
 		<key>CFBundleIdentifier</key>
-		<string>com.ilaziness.vexo.dev</string>
+		<string>com.ilaziness.vela.dev</string>
 		<key>CFBundleName</key>
-		<string>Vexo (Dev)</string>
+		<string>Vela (Dev)</string>
 		<key>CFBundlePackageType</key>
 		<string>APPL</string>
 		<key>CFBundleShortVersionString</key>
@@ -30,7 +30,7 @@
 			<true/>
 		</dict>
 		<key>NSHumanReadableCopyright</key>
-		<string>(c) 2026, Vexo Team</string>
+		<string>(c) 2026, Vela Team</string>
 		<key>UILaunchStoryboardName</key>
 		<string>LaunchScreen</string>
 		<key>UIRequiredDeviceCapabilities</key>

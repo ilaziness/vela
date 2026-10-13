@@ -8,10 +8,10 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as transfer$0 from "../../../../ilaziness/vexo/internal/transfer/models.js";
+import * as transfer$0 from "../../../../ilaziness/vela/internal/transfer/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as services$0 from "../../../../ilaziness/vexo/services/models.js";
+import * as services$0 from "../../../../ilaziness/vela/services/models.js";
 
 function configure() {
     Object.freeze(Object.assign($Create.Events, {

@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/transfer"
+	"github.com/ilaziness/vela/internal/transfer"
 )
 
 func TestSftpTransferRepositoryCRUD(t *testing.T) {
@@ -54,7 +54,7 @@ func TestSftpTransferRepositoryCRUD(t *testing.T) {
 		t.Fatalf("expected deleted, got %#v err=%v", gone, err)
 	}
 	// ensure db file created under user data dir
-	if _, err := os.Stat(filepath.Join(dir, "vexo.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "vela.db")); err != nil {
 		t.Fatalf("db file missing: %v", err)
 	}
 }

@@ -61,6 +61,6 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/ilaziness/vexo/sync-backend
+        - github.com/ilaziness/vela/sync-backend
   exclusions:
     generated: lax

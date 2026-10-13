@@ -10,7 +10,7 @@ import {
   Stack,
 } from "@mui/material";
 import { Events } from "@wailsio/runtime";
-import { SSHService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
 
 interface Payload {
   host: string;

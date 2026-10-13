@@ -16,7 +16,7 @@ import {
 } from "@mui/material";
 import CodeIcon from "@mui/icons-material/Code";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import { ToolService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { EncodingType } from "../types/tool";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";

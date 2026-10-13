@@ -3,8 +3,8 @@ package services
 import (
 	"strings"
 
-	"github.com/ilaziness/vexo/internal/config"
-	"github.com/ilaziness/vexo/internal/ssh"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/ssh"
 )
 
 // resolveDialProxy picks the effective dial proxy: bookmark custom > none > inherit global.

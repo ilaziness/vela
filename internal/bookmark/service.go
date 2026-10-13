@@ -8,10 +8,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/database"
-	"github.com/ilaziness/vexo/internal/secret"
-	"github.com/ilaziness/vexo/internal/ssh"
-	"github.com/ilaziness/vexo/internal/utils"
+	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/secret"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/utils"
 )
 
 const PasswordMask = "********"

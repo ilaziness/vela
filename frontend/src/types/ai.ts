@@ -2,7 +2,7 @@
 
 // 注意：此文件中的类型定义已过时，不再使用
 // 当前使用的是从 Go 绑定自动生成的类型定义
-// 位置：frontend/bindings/github.com/ilaziness/vexo/services/index.ts
+// 位置：frontend/bindings/github.com/ilaziness/vela/services/index.ts
 
 // 模型提供商
 export type AIProvider =

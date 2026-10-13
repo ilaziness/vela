@@ -18,7 +18,7 @@ import {
   CommandInfo,
   UserCommand,
 } from "../types/command";
-import { SSHService, CommandService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { SSHService, CommandService } from "../../bindings/github.com/ilaziness/vela/services";
 import CommandTree from "../components/CommandTree";
 import CommandHistoryList from "../components/CommandHistory";
 import SessionSelector from "../components/SessionSelector";

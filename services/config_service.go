@@ -7,10 +7,10 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/ilaziness/vexo/internal/ai"
-	"github.com/ilaziness/vexo/internal/config"
-	"github.com/ilaziness/vexo/internal/secret"
-	internalsync "github.com/ilaziness/vexo/internal/sync"
+	"github.com/ilaziness/vela/internal/ai"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/secret"
+	internalsync "github.com/ilaziness/vela/internal/sync"
 )
 
 const (

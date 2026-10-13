@@ -7,17 +7,17 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/bookmark"
-	"github.com/ilaziness/vexo/internal/command"
-	"github.com/ilaziness/vexo/internal/config"
-	"github.com/ilaziness/vexo/internal/database"
-	"github.com/ilaziness/vexo/internal/secret"
-	"github.com/ilaziness/vexo/internal/sftp"
-	"github.com/ilaziness/vexo/internal/ssh"
-	"github.com/ilaziness/vexo/internal/sshkey"
-	"github.com/ilaziness/vexo/internal/termws"
-	"github.com/ilaziness/vexo/internal/transfer"
-	"github.com/ilaziness/vexo/internal/tunnel"
+	"github.com/ilaziness/vela/internal/bookmark"
+	"github.com/ilaziness/vela/internal/command"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/secret"
+	"github.com/ilaziness/vela/internal/sftp"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/sshkey"
+	"github.com/ilaziness/vela/internal/termws"
+	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/internal/tunnel"
 )
 
 func RegisterServices(a *application.App, mainWindow *application.WebviewWindow, log *zap.Logger, commandsJSON []byte) error {

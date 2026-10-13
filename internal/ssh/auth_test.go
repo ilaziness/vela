@@ -16,7 +16,7 @@ import (
 
 	cryptossh "golang.org/x/crypto/ssh"
 
-	"github.com/ilaziness/vexo/internal/sshkey"
+	"github.com/ilaziness/vela/internal/sshkey"
 )
 
 func newTestSigner(t *testing.T) cryptossh.Signer {

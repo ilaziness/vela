@@ -11,7 +11,7 @@ import {
   ConfigService,
   AppService,
   CommandService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
+} from "../../bindings/github.com/ilaziness/vela/services";
 import useTerminalStore from "../stores/terminal";
 import Loading from "./Loading";
 import TerminalContextMenu from "./TerminalContextMenu";

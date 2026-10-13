@@ -10,12 +10,12 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/ilaziness/vexo/internal/bookmark"
-	"github.com/ilaziness/vexo/internal/config"
-	"github.com/ilaziness/vexo/internal/sftp"
-	"github.com/ilaziness/vexo/internal/ssh"
-	"github.com/ilaziness/vexo/internal/termws"
-	"github.com/ilaziness/vexo/internal/tunnel"
+	"github.com/ilaziness/vela/internal/bookmark"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/sftp"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/termws"
+	"github.com/ilaziness/vela/internal/tunnel"
 )
 
 const EventHostKeyPrompt = "eventHostKeyPrompt"
@@ -308,7 +308,7 @@ func (s *SSHService) StartSessionLog(sessionID string) (path string, started boo
 	if len(prefix) > 8 {
 		prefix = prefix[:8]
 	}
-	filename := fmt.Sprintf("vexo-session-%s-%s.log", prefix, time.Now().Format("20060102-150405"))
+	filename := fmt.Sprintf("vela-session-%s-%s.log", prefix, time.Now().Format("20060102-150405"))
 	path, err = s.app.Dialog.SaveFile().
 		SetMessage("保存会话日志").
 		SetFilename(filename).

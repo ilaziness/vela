@@ -10,7 +10,7 @@ import {
   Chip,
 } from "@mui/material";
 import NetworkCheckIcon from "@mui/icons-material/NetworkCheck";
-import { ToolService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { PortCheckResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";

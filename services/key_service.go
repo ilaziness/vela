@@ -6,7 +6,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/sshkey"
+	"github.com/ilaziness/vela/internal/sshkey"
 )
 
 type SSHKeyInfo = sshkey.Info

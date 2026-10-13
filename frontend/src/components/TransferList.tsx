@@ -22,8 +22,8 @@ import {
 } from "@mui/icons-material";
 import { useTransferStore } from "../stores/transfer";
 import { formatFileSize, parseCallServiceError } from "../func/service";
-import { ProgressData } from "../../bindings/github.com/ilaziness/vexo/services/models";
-import { SftpService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { ProgressData } from "../../bindings/github.com/ilaziness/vela/services/models";
+import { SftpService } from "../../bindings/github.com/ilaziness/vela/services";
 import { useMessageStore } from "../stores/message";
 
 interface TransferListProps {

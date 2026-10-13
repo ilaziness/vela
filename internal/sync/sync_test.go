@@ -26,7 +26,7 @@ func TestDownloadTempDirLocation(t *testing.T) {
 
 	// 测试临时目录路径生成逻辑
 	tempBaseDir := filepath.Join(parentDir, "temp")
-	tempDir := filepath.Join(tempBaseDir, "vexo-sync-tmp-test")
+	tempDir := filepath.Join(tempBaseDir, "vela-sync-tmp-test")
 
 	// 验证临时目录应该在 parent/temp/ 下
 	if !strings.HasPrefix(tempDir, tempBaseDir) {

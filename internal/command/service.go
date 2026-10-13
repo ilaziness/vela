@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/database"
+	"github.com/ilaziness/vela/internal/database"
 )
 
 type BuiltinCommand struct {

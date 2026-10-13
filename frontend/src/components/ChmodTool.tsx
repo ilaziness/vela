@@ -13,7 +13,7 @@ import {
   Alert,
   Chip,
 } from "@mui/material";
-import { ToolService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { ChmodDirection, ChmodResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";

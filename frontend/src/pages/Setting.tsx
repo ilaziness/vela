@@ -21,8 +21,8 @@ import {
   Config,
   AppInfo,
   ConfigService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
-import { GetAppInfo } from "../../bindings/github.com/ilaziness/vexo/services/appservice";
+} from "../../bindings/github.com/ilaziness/vela/services";
+import { GetAppInfo } from "../../bindings/github.com/ilaziness/vela/services/appservice";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";
 

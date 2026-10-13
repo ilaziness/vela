@@ -42,9 +42,9 @@ import {
   LogService,
   ToolService,
   NewVersion,
-} from "../../bindings/github.com/ilaziness/vexo/services";
-import { UploadSync } from "../../bindings/github.com/ilaziness/vexo/services/syncservice";
-import { ReadConfig } from "../../bindings/github.com/ilaziness/vexo/services/configservice";
+} from "../../bindings/github.com/ilaziness/vela/services";
+import { UploadSync } from "../../bindings/github.com/ilaziness/vela/services/syncservice";
+import { ReadConfig } from "../../bindings/github.com/ilaziness/vela/services/configservice";
 import { useSSHTabsStore } from "../stores/ssh";
 import { ConnectionStatus } from "../types/ssh";
 import { useAIAssistantStore } from "../stores/aiAssistant";

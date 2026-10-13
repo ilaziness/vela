@@ -13,7 +13,7 @@ import {
   SSHService,
   BookmarkService,
   ConfigService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
+} from "../../bindings/github.com/ilaziness/vela/services";
 import { ConnectionStatus, SSHLinkInfo, toConnectRequest } from "../types/ssh";
 import Terminal from "./Terminal";
 import Sftp from "./Sftp";

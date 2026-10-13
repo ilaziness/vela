@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import {
   AIService,
-} from '../../bindings/github.com/ilaziness/vexo/services/index';
-import type { AISession } from '../../bindings/github.com/ilaziness/vexo/services/models';
+} from '../../bindings/github.com/ilaziness/vela/services/index';
+import type { AISession } from '../../bindings/github.com/ilaziness/vela/services/models';
 import { parseCallServiceError } from '../func/service';
 import { useMessageStore } from './message';
 import { loadStoredSidebarWidth, persistSidebarWidth, clampSidebarWidth } from '../func/aiSidebar';

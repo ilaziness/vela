@@ -45,8 +45,8 @@ import {
   SftpService,
   SSHService,
   ToolService,
-} from "../../bindings/github.com/ilaziness/vexo/services";
-import { ProgressData } from "../../bindings/github.com/ilaziness/vexo/services/models";
+} from "../../bindings/github.com/ilaziness/vela/services";
+import { ProgressData } from "../../bindings/github.com/ilaziness/vela/services/models";
 import { formatFileSize, parseCallServiceError } from "../func/service";
 import { sortFileList } from "../func/ftp";
 import { useMessageStore } from "../stores/message";

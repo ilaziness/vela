@@ -15,7 +15,7 @@ import {
   AccordionDetails,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { ToolService } from "../../bindings/github.com/ilaziness/vexo/services";
+import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { RegexMatchResult } from "../types/tool";
 
 export default function RegexTool() {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilaziness/vexo/internal/utils"
+	"github.com/ilaziness/vela/internal/utils"
 )
 
 const (

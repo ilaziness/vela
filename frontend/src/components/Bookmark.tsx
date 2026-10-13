@@ -17,7 +17,7 @@ import {
   LogService,
   SSHBookmark,
   BookmarkGroup,
-} from "../../bindings/github.com/ilaziness/vexo/services";
+} from "../../bindings/github.com/ilaziness/vela/services";
 import BookmarkTree from "./BookmarkTree";
 import BookmarkForm from "./BookmarkForm";
 import { useMessageStore } from "../stores/message";

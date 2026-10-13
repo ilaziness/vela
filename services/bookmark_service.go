@@ -7,9 +7,9 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/ilaziness/vexo/internal/bookmark"
-	"github.com/ilaziness/vexo/internal/config"
-	"github.com/ilaziness/vexo/internal/ssh"
+	"github.com/ilaziness/vela/internal/bookmark"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/ssh"
 )
 
 const (

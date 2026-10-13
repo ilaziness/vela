@@ -1,6 +1,6 @@
 import { useSSHTabsStore } from '../stores/ssh';
 import { ConnectionStatus, type SSHTab } from '../types/ssh';
-import { SSHContext } from '../../bindings/github.com/ilaziness/vexo/services/models';
+import { SSHContext } from '../../bindings/github.com/ilaziness/vela/services/models';
 
 /** SSH bind state of the currently active SSH tab (for AI sidebar). */
 export enum CurrentSSHBindStatus {

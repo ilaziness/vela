@@ -1,4 +1,5 @@
-export const SIDEBAR_WIDTH_STORAGE_KEY = 'vexo.ai.sidebarWidth';
+export const SIDEBAR_WIDTH_STORAGE_KEY = 'vela.ai.sidebarWidth';
+const LEGACY_SIDEBAR_WIDTH_STORAGE_KEY = 'vexo.ai.sidebarWidth';
 
 /** 与 SSHTabBody StatusBar 高度保持一致 */
 export const SSH_STATUS_BAR_HEIGHT = 25;
@@ -36,7 +37,14 @@ export function getSidebarContentWidth(sidebarWidth: number): number {
 
 export function loadStoredSidebarWidth(): number {
   try {
-    const stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    let stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!stored) {
+      stored = localStorage.getItem(LEGACY_SIDEBAR_WIDTH_STORAGE_KEY);
+      if (stored) {
+        localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, stored);
+        localStorage.removeItem(LEGACY_SIDEBAR_WIDTH_STORAGE_KEY);
+      }
+    }
     if (stored) {
       const parsed = Number.parseInt(stored, 10);
       if (!Number.isNaN(parsed)) {

@@ -19,7 +19,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
   BookmarkService,
   BookmarkGroup,
-} from "../../../bindings/github.com/ilaziness/vexo/services";
+} from "../../../bindings/github.com/ilaziness/vela/services";
 import { useSSHTabsStore } from "../../stores/ssh";
 import { ConnectionStatus } from "../../types/ssh";
 import { genTabIndex, parseCallServiceError } from "../../func/service";

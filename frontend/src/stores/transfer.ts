@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { ProgressData } from "../../bindings/github.com/ilaziness/vexo/services/models";
+import { ProgressData } from "../../bindings/github.com/ilaziness/vela/services/models";
 
 export interface TransferStore {
   transfers: Map<string, ProgressData[]>; // sessionID -> ProgressData[]

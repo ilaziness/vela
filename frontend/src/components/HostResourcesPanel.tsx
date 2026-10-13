@@ -8,7 +8,7 @@ import {
   Typography,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
-import { HostResources } from "../../bindings/github.com/ilaziness/vexo/internal/ssh/models";
+import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal/ssh/models";
 import { formatFileSize } from "../func/service";
 
 interface HostResourcesPanelProps {

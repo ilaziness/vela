@@ -14,15 +14,15 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/buildinfo"
-	"github.com/ilaziness/vexo/internal/httpproxy"
-	"github.com/ilaziness/vexo/internal/system"
-	"github.com/ilaziness/vexo/internal/termws"
+	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/httpproxy"
+	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/termws"
 )
 
 const (
 	EventNewVersion   = "eventNewVersion"
-	githubRepo        = "ilaziness/vexo"
+	githubRepo        = "ilaziness/vela"
 	checksumAssetName = "SHA256SUMS"
 )
 
@@ -151,7 +151,7 @@ func (cs *AppService) SelectFile() (string, error) {
 func (cs *AppService) GetAppInfo() AppInfo {
 	return AppInfo{
 		Version:   buildinfo.Version,
-		HomeURL:   "https://github.com/ilaziness/vexo",
+		HomeURL:   "https://github.com/ilaziness/vela",
 		RunMode:   buildinfo.Mode,
 		GitInfo:   buildinfo.GitInfo,
 		BuildTime: buildinfo.BuildTime,

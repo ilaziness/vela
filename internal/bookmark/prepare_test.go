@@ -6,8 +6,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/database"
-	"github.com/ilaziness/vexo/internal/secret"
+	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/secret"
 )
 
 func TestPrepareTestSwitchToStoredKeyKeepsPassword(t *testing.T) {

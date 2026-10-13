@@ -5,19 +5,19 @@
 !include "FileFunc.nsh"
 
 !ifndef INFO_PROJECTNAME
-    !define INFO_PROJECTNAME "Vexo"
+    !define INFO_PROJECTNAME "Vela"
 !endif
 !ifndef INFO_COMPANYNAME
-    !define INFO_COMPANYNAME "Vexo Team"
+    !define INFO_COMPANYNAME "Vela Team"
 !endif
 !ifndef INFO_PRODUCTNAME
-    !define INFO_PRODUCTNAME "Vexo"
+    !define INFO_PRODUCTNAME "Vela"
 !endif
 !ifndef INFO_PRODUCTVERSION
     !define INFO_PRODUCTVERSION "{{.VERSION}}"
 !endif
 !ifndef INFO_COPYRIGHT
-    !define INFO_COPYRIGHT "(c) 2026, Vexo Team"
+    !define INFO_COPYRIGHT "(c) 2026, Vela Team"
 !endif
 !ifndef PRODUCT_EXECUTABLE
     !define PRODUCT_EXECUTABLE "${INFO_PROJECTNAME}.exe"

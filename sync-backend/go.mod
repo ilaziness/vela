@@ -1,4 +1,4 @@
-module github.com/ilaziness/vexo/sync-backend
+module github.com/ilaziness/vela/sync-backend
 
 go 1.27.1
 

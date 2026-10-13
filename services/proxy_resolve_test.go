@@ -3,8 +3,8 @@ package services
 import (
 	"testing"
 
-	"github.com/ilaziness/vexo/internal/config"
-	"github.com/ilaziness/vexo/internal/ssh"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/ssh"
 )
 
 func TestResolveDialProxy(t *testing.T) {

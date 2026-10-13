@@ -6,8 +6,8 @@ import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import TransferList from "./TransferList";
 import SSHTunnel from "./SSHTunnel";
 import HostResourcesPanel from "./HostResourcesPanel";
-import { SSHService } from "../../bindings/github.com/ilaziness/vexo/services";
-import { HostResources } from "../../bindings/github.com/ilaziness/vexo/internal/ssh/models";
+import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
+import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal/ssh/models";
 import { parseCallServiceError } from "../func/service";
 
 const HOST_RESOURCES_POLL_MS = 5000;

@@ -1,6 +1,6 @@
 package services
 
-import "github.com/ilaziness/vexo/internal/tools"
+import "github.com/ilaziness/vela/internal/tools"
 
 type Tool = tools.Tool
 type PortCheckResult = tools.PortCheckResult

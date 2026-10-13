@@ -15,8 +15,8 @@ import (
 	"github.com/pkg/sftp"
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/ssh"
-	"github.com/ilaziness/vexo/internal/transfer"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/transfer"
 )
 
 const (

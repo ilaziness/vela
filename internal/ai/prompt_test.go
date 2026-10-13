@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilaziness/vexo/internal/ssh"
+	"github.com/ilaziness/vela/internal/ssh"
 )
 
 func TestBuildSystemPromptNoSSH(t *testing.T) {

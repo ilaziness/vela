@@ -13,8 +13,8 @@ import { useMessageStore } from "../../stores/message";
 import {
   Config,
   ConfigService,
-} from "../../../bindings/github.com/ilaziness/vexo/services";
-import { SelectDirectory } from "../../../bindings/github.com/ilaziness/vexo/services/appservice";
+} from "../../../bindings/github.com/ilaziness/vela/services";
+import { SelectDirectory } from "../../../bindings/github.com/ilaziness/vela/services/appservice";
 import { parseCallServiceError } from "../../func/service";
 
 interface GeneralSettingsProps {

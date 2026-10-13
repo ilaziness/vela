@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/ilaziness/vexo/internal/database"
-	internalsync "github.com/ilaziness/vexo/internal/sync"
+	"github.com/ilaziness/vela/internal/database"
+	internalsync "github.com/ilaziness/vela/internal/sync"
 )
 
 var ErrSyncNotConfigured = errors.New("sync not configured")
