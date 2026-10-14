@@ -20,6 +20,7 @@ import {
 } from "../../bindings/github.com/ilaziness/vela/services/index.ts";
 import { DragDropContext, Droppable, DropResult } from "@hello-pangea/dnd";
 import { useMessageStore } from "../stores/message";
+import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
 
 const AISideBar = React.lazy(() => import("./ai/AISideBar"));
 
@@ -166,7 +167,7 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
     <Box
       sx={{
         height: "100%",
-        width: "calc(100% - 42px)",
+        width: `calc(100% - ${APP_HEADER_RAIL_WIDTH}px)`,
         display: "flex",
         flexDirection: "column",
         flex: 1,
@@ -244,21 +245,22 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
         </Menu>
       </Box>
 
-      {/* content */}
+      {/* content: SSH body host + AI sidebar as flex siblings */}
       <Box
         sx={{
           width: "100%",
           height: `calc(100% - ${tabHeight})`,
-          position: "relative",
+          display: "flex",
+          flexDirection: "row",
+          overflow: "hidden",
         }}
       >
         <Box
           sx={{
-            width: "100%",
+            flex: 1,
+            minWidth: 0,
             height: "100%",
             position: "relative",
-            boxSizing: "border-box",
-            paddingRight: sidebarOpen ? `${sidebarWidth}px` : 0,
           }}
         >
           {sshTabs.map((item) => (
@@ -284,26 +286,22 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
         {aiSidebarMounted && (
           <Suspense
             fallback={
-              sidebarOpen ? (
-                <Box
-                  sx={{
-                    position: "absolute",
-                    top: 0,
-                    right: 0,
-                    width: sidebarWidth,
-                    height: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    bgcolor: "background.paper",
-                    borderLeft: 1,
-                    borderColor: "divider",
-                    zIndex: (theme) => theme.zIndex.drawer,
-                  }}
-                >
-                  <CircularProgress size={24} />
-                </Box>
-              ) : null
+              <Box
+                sx={{
+                  width: sidebarOpen ? sidebarWidth : 0,
+                  flexShrink: 0,
+                  height: "100%",
+                  overflow: "hidden",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  bgcolor: "background.paper",
+                  borderLeft: sidebarOpen ? 1 : 0,
+                  borderColor: "divider",
+                }}
+              >
+                {sidebarOpen ? <CircularProgress size={24} /> : null}
+              </Box>
             }
           >
             <AISideBar />

@@ -4,6 +4,9 @@ const LEGACY_SIDEBAR_WIDTH_STORAGE_KEY = 'vexo.ai.sidebarWidth';
 /** 与 SSHTabBody StatusBar 高度保持一致 */
 export const SSH_STATUS_BAR_HEIGHT = 25;
 
+/** 与 Header / SSHTabs 左侧栏宽度保持一致 */
+export const APP_HEADER_RAIL_WIDTH = 42;
+
 export const SIDEBAR_RESIZE_HANDLE_WIDTH = 4;
 
 export const SIDEBAR_WIDTH = {
@@ -18,9 +21,11 @@ export function clampSidebarWidth(width: number): number {
     SIDEBAR_WIDTH.MIN_TERMINAL,
     Math.max(320, Math.round(window.innerWidth * 0.45)),
   );
+  // 挤压布局下终端可用宽 = 视口 - 左侧栏 - 侧边栏，需从 max 中扣掉 header rail
+  const maxByTerminal = window.innerWidth - APP_HEADER_RAIL_WIDTH - minTerminal;
   const max = Math.max(
     SIDEBAR_WIDTH.MIN,
-    Math.min(window.innerWidth * SIDEBAR_WIDTH.MAX_RATIO, window.innerWidth - minTerminal),
+    Math.min(window.innerWidth * SIDEBAR_WIDTH.MAX_RATIO, maxByTerminal),
   );
   return Math.max(SIDEBAR_WIDTH.MIN, Math.min(width, max));
 }

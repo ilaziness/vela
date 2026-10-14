@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Slide, Box, Avatar, CircularProgress, Button, Typography } from "@mui/material";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Box, Avatar, CircularProgress, Button, Typography } from "@mui/material";
 import { ChatBox, ChatMessageAvatar } from "@mui/x-chat";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
@@ -12,8 +12,10 @@ import {
   persistSidebarWidth,
   SIDEBAR_RESIZE_HANDLE_WIDTH,
   SIDEBAR_WIDTH,
-  SSH_STATUS_BAR_HEIGHT,
 } from "../../func/aiSidebar";
+
+const SIDEBAR_WIDTH_TRANSITION = "width 225ms ease";
+const SIDEBAR_WIDTH_TRANSITION_MS = 225;
 
 const LetterAvatar = React.forwardRef<HTMLDivElement, any>(
   function LetterAvatar(props, ref) {
@@ -70,6 +72,9 @@ const AISideBar = () => {
 
   const [isResizing, setIsResizing] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
+  // 仅开合时做 width 过渡，避免窗口缩放/clamp 时终端跟着动画抖动
+  const [animateWidth, setAnimateWidth] = useState(false);
+  const prevOpenRef = useRef(sidebarOpen);
 
   useEffect(() => {
     if (!sidebarOpen) {
@@ -78,6 +83,14 @@ const AISideBar = () => {
     }
     void loadSessions();
   }, [sidebarOpen, loadSessions]);
+
+  useEffect(() => {
+    if (prevOpenRef.current === sidebarOpen) return;
+    prevOpenRef.current = sidebarOpen;
+    setAnimateWidth(true);
+    const timer = window.setTimeout(() => setAnimateWidth(false), SIDEBAR_WIDTH_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
+  }, [sidebarOpen]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -93,49 +106,60 @@ const AISideBar = () => {
   };
 
   useEffect(() => {
+    if (!isResizing) return;
+
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
       const newWidth = clampSidebarWidth(window.innerWidth - e.clientX);
       setSidebarWidth(newWidth, false);
     };
 
     const handleMouseUp = () => {
-      if (isResizing) {
-        persistSidebarWidth(useAIAssistantStore.getState().sidebarWidth);
-      }
+      persistSidebarWidth(useAIAssistantStore.getState().sidebarWidth);
       setIsResizing(false);
     };
 
-    if (isResizing) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    }
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
 
     return () => {
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isResizing, setSidebarWidth]);
 
   const showChat = Boolean(activeSessionId);
+  const visibleWidth = sidebarOpen ? sidebarWidth : 0;
 
   return (
-    <Slide in={sidebarOpen} direction="left" mountOnEnter>
+    <Box
+      aria-hidden={!sidebarOpen}
+      inert={!sidebarOpen || undefined}
+      sx={{
+        width: visibleWidth,
+        flexShrink: 0,
+        height: "100%",
+        overflow: "hidden",
+        transition: animateWidth && !isResizing ? SIDEBAR_WIDTH_TRANSITION : "none",
+        display: "flex",
+        bgcolor: "background.paper",
+        pointerEvents: sidebarOpen ? "auto" : "none",
+      }}
+    >
       <Box
-        aria-hidden={!sidebarOpen}
-        inert={!sidebarOpen || undefined}
-        sx={(theme) => ({
+        sx={{
           width: sidebarWidth,
           minWidth: SIDEBAR_WIDTH.MIN,
-          height: `calc(100% - ${SSH_STATUS_BAR_HEIGHT}px)`,
-          position: "absolute",
-          top: 0,
-          right: 0,
-          zIndex: theme.zIndex.drawer,
+          height: "100%",
           display: "flex",
-          bgcolor: "background.paper",
-          pointerEvents: sidebarOpen ? "auto" : "none",
-        })}
+          flexShrink: 0,
+        }}
       >
         <Box
           onMouseDown={handleMouseDown}
@@ -144,7 +168,7 @@ const AISideBar = () => {
           sx={{
             width: SIDEBAR_RESIZE_HANDLE_WIDTH,
             cursor: "col-resize",
-            backgroundColor: isHovering ? "primary.main" : "transparent",
+            backgroundColor: isHovering || isResizing ? "primary.main" : "transparent",
             transition: isResizing ? "none" : "background-color 0.2s",
             "&:hover": {
               backgroundColor: "primary.main",
@@ -238,7 +262,7 @@ const AISideBar = () => {
           </Box>
         </Box>
       </Box>
-    </Slide>
+    </Box>
   );
 };
 
