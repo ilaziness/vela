@@ -39,6 +39,7 @@ func init() {
 }
 
 var ErrAINotEnabled = errors.New("AI 助手尚未启用，请前往「设置 → AI」完成配置并启用后再试")
+var ErrGenerationStopped = errors.New("generation stopped")
 
 type AIMessage struct {
 	ID        string `json:"id"`
@@ -65,6 +66,7 @@ type SSHContext struct {
 
 type ChatRequest struct {
 	SessionID  string      `json:"session_id"`
+	RunID      string      `json:"run_id,omitempty"`
 	NewMessage string      `json:"new_message"`
 	SSHContext *SSHContext `json:"ssh_context,omitempty"`
 }
@@ -86,6 +88,7 @@ type approvalDecision struct {
 }
 
 type agentRun struct {
+	runID     string
 	cancel    context.CancelFunc
 	approvals map[string]chan approvalDecision
 	mu        sync.Mutex
@@ -102,6 +105,8 @@ type AIService struct {
 	engineMu sync.Mutex
 	runsMu   sync.Mutex
 	runs     map[string]*agentRun
+	// cancelled records run IDs cancelled via CancelChat before (or while) Chat registers.
+	cancelled map[string]struct{}
 }
 
 func NewAIService(app *application.App, logger *zap.Logger, configService *ConfigService, sshService *SSHService, db *database.Database) *AIService {
@@ -109,7 +114,7 @@ func NewAIService(app *application.App, logger *zap.Logger, configService *Confi
 	// live UI, and a 60s timeout would both delay startup and leave engine nil.
 	return &AIService{
 		app: app, logger: logger, configService: configService, sshService: sshService,
-		sessionRepo: db.AISessionRepo, runs: make(map[string]*agentRun),
+		sessionRepo: db.AISessionRepo, runs: make(map[string]*agentRun), cancelled: make(map[string]struct{}),
 	}
 }
 
@@ -261,8 +266,16 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	newMessage := strings.TrimSpace(req.NewMessage)
+	runID := strings.TrimSpace(req.RunID)
 	if sessionID == "" || newMessage == "" {
 		return nil, fmt.Errorf("session id and message are required")
+	}
+	// Clear pre-register cancel marks even when Chat fails before run registration.
+	if runID != "" {
+		defer s.clearCancelledRun(runID)
+	}
+	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
+		return nil, err
 	}
 	cfg, err := s.GetConfig()
 	if err != nil {
@@ -276,6 +289,9 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			zap.String("sessionId", sessionID),
 			zap.String("detail", err.Error()),
 		)
+		return nil, err
+	}
+	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
 		return nil, err
 	}
 
@@ -322,8 +338,19 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	run := &agentRun{cancel: cancel, approvals: make(map[string]chan approvalDecision)}
+	run := &agentRun{runID: runID, cancel: cancel, approvals: make(map[string]chan approvalDecision)}
 	s.runsMu.Lock()
+	if runID != "" {
+		if _, ok := s.cancelled[runID]; ok {
+			s.runsMu.Unlock()
+			cancel()
+			s.logger.Info("AI generation stopped before start",
+				zap.String("sessionId", sessionID),
+				zap.String("runId", runID),
+			)
+			return nil, ErrGenerationStopped
+		}
+	}
 	s.runs[sessionID] = run
 	s.runsMu.Unlock()
 	defer func() {
@@ -376,9 +403,14 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			s.logger.Info("AI generation stopped", zap.String("sessionId", sessionID))
 			if s.isCurrentRun(sessionID, run) {
-				_, _ = s.persistTurn(sessionID, aiResp)
+				if _, perr := s.persistTurn(sessionID, aiResp); perr != nil {
+					s.logger.Error("persist stopped AI turn failed",
+						zap.String("sessionId", sessionID),
+						zap.Error(perr),
+					)
+				}
 			}
-			return nil, fmt.Errorf("generation stopped")
+			return nil, ErrGenerationStopped
 		}
 		msg := ai.PublicGenerateError(err)
 		s.logger.Error("AI chat failed",
@@ -392,7 +424,12 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			Delta:     msg,
 		})
 		if s.isCurrentRun(sessionID, run) {
-			_, _ = s.persistTurn(sessionID, aiResp)
+			if _, perr := s.persistTurn(sessionID, aiResp); perr != nil {
+				s.logger.Error("persist failed AI turn failed",
+					zap.String("sessionId", sessionID),
+					zap.Error(perr),
+				)
+			}
 			last := &database.AIMessage{
 				SessionID: sessionID,
 				Role:      ai.RoleModel,
@@ -500,6 +537,67 @@ func (s *AIService) StopGeneration(sessionID string) error {
 	if run == nil {
 		return nil
 	}
+	s.rejectApprovalsAndCancel(run)
+	return nil
+}
+
+// CancelChat stops a specific send. If the run is already registered it is cancelled;
+// otherwise runID is marked so Chat can refuse to start.
+func (s *AIService) CancelChat(sessionID, runID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	runID = strings.TrimSpace(runID)
+	if sessionID == "" || runID == "" {
+		return fmt.Errorf("session id and run id are required")
+	}
+	s.runsMu.Lock()
+	run := s.runs[sessionID]
+	if run != nil && run.runID == runID {
+		s.runsMu.Unlock()
+		s.rejectApprovalsAndCancel(run)
+		return nil
+	}
+	// Not registered yet (or a different run is active): remember for Chat's start checks.
+	s.cancelled[runID] = struct{}{}
+	s.runsMu.Unlock()
+	// Bound pre-register marks so a late CancelChat after Chat finished cannot leak forever.
+	time.AfterFunc(time.Minute, func() { s.clearCancelledRun(runID) })
+	return nil
+}
+
+func (s *AIService) isRunCancelled(runID string) bool {
+	if runID == "" {
+		return false
+	}
+	s.runsMu.Lock()
+	_, ok := s.cancelled[runID]
+	s.runsMu.Unlock()
+	return ok
+}
+
+func (s *AIService) errIfRunCancelled(sessionID, runID string) error {
+	if !s.isRunCancelled(runID) {
+		return nil
+	}
+	s.logger.Info("AI generation stopped before start",
+		zap.String("sessionId", sessionID),
+		zap.String("runId", runID),
+	)
+	return ErrGenerationStopped
+}
+
+func (s *AIService) clearCancelledRun(runID string) {
+	if runID == "" {
+		return
+	}
+	s.runsMu.Lock()
+	delete(s.cancelled, runID)
+	s.runsMu.Unlock()
+}
+
+func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
+	if run == nil {
+		return
+	}
 	run.cancel()
 	run.mu.Lock()
 	for _, ch := range run.approvals {
@@ -509,7 +607,6 @@ func (s *AIService) StopGeneration(sessionID string) error {
 		}
 	}
 	run.mu.Unlock()
-	return nil
 }
 
 // aiHost adapts SSH + approval for internal/ai ports.

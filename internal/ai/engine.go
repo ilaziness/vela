@@ -152,8 +152,8 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 
 	messages := buildGenkitMessages(req.Messages, req.NewMessage, req.SystemPrompt)
 	promptLen := len(messages)
-	fail := func(resp *genkitAI.ModelResponse, err error) (*AgentResponse, error) {
-		return storedTurn(resp, promptLen), err
+	finish := func(resp *genkitAI.ModelResponse, streamed string, err error) (*AgentResponse, error) {
+		return applyStreamedText(storedTurn(resp, promptLen), streamed), err
 	}
 
 	activeTools := []genkitAI.ToolRef{planTool}
@@ -176,7 +176,7 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 	textID := "text-" + uuid.New().String()
 	reasoningID := "reasoning-" + uuid.New().String()
 
-	resp, err := e.consumeStream(ctx, g, opts, onEvent, textID, reasoningID)
+	resp, streamed, err := e.consumeStream(ctx, g, opts, onEvent, textID, reasoningID)
 	if err != nil && len(activeTools) > 0 && isNoToolSupport(err) {
 		e.logger.Warn("model does not support tools, retrying without tools", zap.Error(err))
 		optsNoTools := []genkitAI.GenerateOption{
@@ -187,12 +187,12 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 		if genConfig != nil {
 			optsNoTools = append(optsNoTools, genkitAI.WithConfig(genConfig))
 		}
-		resp, err = e.consumeStream(ctx, g, optsNoTools, onEvent, textID, reasoningID)
+		resp, streamed, err = e.consumeStream(ctx, g, optsNoTools, onEvent, textID, reasoningID)
 	}
 	if err != nil {
-		return fail(resp, fmt.Errorf("generate error: %w", err))
+		return finish(resp, streamed, fmt.Errorf("generate error: %w", err))
 	}
-	return storedTurn(resp, promptLen), nil
+	return finish(resp, streamed, nil)
 }
 
 func (e *AIEngine) consumeStream(
@@ -201,7 +201,8 @@ func (e *AIEngine) consumeStream(
 	opts []genkitAI.GenerateOption,
 	onEvent func(StreamEvent) error,
 	textID, reasoningID string,
-) (*genkitAI.ModelResponse, error) {
+) (*genkitAI.ModelResponse, string, error) {
+	var streamed strings.Builder
 	stream := genkit.GenerateStream(ctx, g, opts...)
 	for result, err := range stream {
 		if err != nil {
@@ -209,13 +210,13 @@ func (e *AIEngine) consumeStream(
 			if result != nil {
 				resp = result.Response
 			}
-			return resp, err
+			return resp, streamed.String(), err
 		}
 		if result == nil {
 			continue
 		}
 		if result.Done {
-			return result.Response, nil
+			return result.Response, streamed.String(), nil
 		}
 		if result.Chunk == nil {
 			continue
@@ -226,10 +227,11 @@ func (e *AIEngine) consumeStream(
 			continue
 		}
 		if text := result.Chunk.Text(); text != "" {
+			streamed.WriteString(text)
 			_ = onEvent(StreamEvent{Type: EventTextDelta, ID: textID, Delta: text})
 		}
 	}
-	return nil, nil
+	return nil, streamed.String(), nil
 }
 
 func isNoToolSupport(err error) bool {

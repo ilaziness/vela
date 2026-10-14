@@ -71,6 +71,7 @@ export class GenkitAdapter implements ChatAdapter {
     let chatPromise: ReturnType<typeof AIService.Chat>;
     let messageId: string;
     const capturedSessionId = sessionId;
+    const runID = `run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
     let pinnedSSHTarget = '';
     try {
@@ -78,6 +79,7 @@ export class GenkitAdapter implements ChatAdapter {
       pinnedSSHTarget = bind.context ? bind.targetLabel : '';
       const request = new ChatRequest({
         session_id: sessionId,
+        run_id: runID,
         new_message: newMessage,
         ...(bind.context ? { ssh_context: bind.context } : {}),
       });
@@ -230,11 +232,21 @@ export class GenkitAdapter implements ChatAdapter {
           }
         };
 
-        const onAbort = () => {
+        const unsubscribe = Events.On(EVENT_AI_STREAM_CHUNK, (event: any) => {
+          if (aborted) return;
+          if (useAIAssistantStore.getState().activeSessionId !== capturedSessionId) return;
+          const data = event.data as StreamEventData;
+          if (data?.sessionId !== capturedSessionId) return;
+          mapEvent(data);
+        });
+
+        let chatDone = false;
+
+        const closeAsAborted = () => {
           if (aborted) return;
           aborted = true;
           unsubscribe();
-          void AIService.StopGeneration(capturedSessionId).catch(() => {});
+          signal.removeEventListener('abort', onAbort);
           try {
             ensureStarted();
             closeOpenTextParts();
@@ -245,18 +257,24 @@ export class GenkitAdapter implements ChatAdapter {
           }
           endStreaming();
         };
-        signal.addEventListener('abort', onAbort);
 
-        const unsubscribe = Events.On(EVENT_AI_STREAM_CHUNK, (event: any) => {
+        const onAbort = () => {
           if (aborted) return;
-          if (useAIAssistantStore.getState().activeSessionId !== capturedSessionId) return;
-          const data = event.data as StreamEventData;
-          if (data?.sessionId !== capturedSessionId) return;
-          mapEvent(data);
-        });
+          // Chat 已结束后再 CancelChat 会把 cancelled 标记写回去并泄漏。
+          if (!chatDone) {
+            void AIService.CancelChat(capturedSessionId, runID).catch(() => {});
+          }
+          closeAsAborted();
+        };
+        signal.addEventListener('abort', onAbort);
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
 
         chatPromise
           .then(() => {
+            chatDone = true;
             if (aborted) return;
             unsubscribe();
             signal.removeEventListener('abort', onAbort);
@@ -272,7 +290,13 @@ export class GenkitAdapter implements ChatAdapter {
             controller.close();
           })
           .catch((err: any) => {
+            chatDone = true;
             if (aborted) return;
+            const errText = parseCallServiceError(err);
+            if (signal.aborted || /generation stopped/i.test(errText)) {
+              closeAsAborted();
+              return;
+            }
             unsubscribe();
             signal.removeEventListener('abort', onAbort);
             if (useAIAssistantStore.getState().activeSessionId !== capturedSessionId) {
@@ -281,7 +305,7 @@ export class GenkitAdapter implements ChatAdapter {
               return;
             }
             ensureStarted();
-            const message = formatAIChatError(parseCallServiceError(err));
+            const message = formatAIChatError(errText);
             useMessageStore.getState().errorMessage(message);
             closeOpenTextParts();
             enqueue({ type: 'text-start', id: textId });

@@ -218,7 +218,6 @@ func (c *Client) readLoop() {
 			cmds := c.capture.FeedInput(data)
 			if c.onCommand != nil {
 				for _, cmd := range cmds {
-					cmd := cmd
 					onCmd := c.onCommand
 					system.SafeGo(func() { onCmd(cmd) })
 				}

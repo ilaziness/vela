@@ -154,6 +154,63 @@ func storedTurn(resp *genkitAI.ModelResponse, promptLen int) *AgentResponse {
 	return out
 }
 
+// applyStreamedText fills in model text that was emitted as stream deltas but may be
+// missing from ModelResponse when generation is cancelled mid-stream.
+// Only used when the stored turn has no model text yet; streamed spans the whole run
+// and must not overwrite multi-turn model messages.
+func applyStreamedText(out *AgentResponse, streamed string) *AgentResponse {
+	if out == nil {
+		out = &AgentResponse{}
+	}
+	if hasModelText(out) {
+		return out
+	}
+	// Prefer streamed deltas; fall back to Content (e.g. Message.Text with empty Turn).
+	text := streamed
+	if text == "" {
+		text = out.Content
+	}
+	if text == "" {
+		return out
+	}
+	msg := ChatMessage{
+		Role:    RoleModel,
+		Content: text,
+		Parts:   UserTextPartsJSON(text),
+	}
+	if n := len(out.Turn); n > 0 && out.Turn[n-1].Role == RoleModel {
+		out.Turn[n-1] = msg
+	} else {
+		out.Turn = append(out.Turn, msg)
+	}
+	out.Content = text
+	return out
+}
+
+func hasModelText(out *AgentResponse) bool {
+	if out == nil {
+		return false
+	}
+	for _, m := range out.Turn {
+		if messageHasTextPart(m) {
+			return true
+		}
+	}
+	return false
+}
+
+func messageHasTextPart(m ChatMessage) bool {
+	if m.Role != RoleModel {
+		return false
+	}
+	for _, p := range UnmarshalParts(m.Parts) {
+		if p != nil && p.IsText() && p.Text != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // completeTurn drops orphan tool messages and a trailing unanswered tool request
 // so a failed generate cannot poison the next prompt.
 func completeTurn(turn []ChatMessage) []ChatMessage {

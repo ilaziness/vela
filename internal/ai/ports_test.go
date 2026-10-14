@@ -100,6 +100,43 @@ func TestCompleteTurnDropsTrailingToolRequest(t *testing.T) {
 	}
 }
 
+func TestApplyStreamedTextOnCancel(t *testing.T) {
+	got := applyStreamedText(&AgentResponse{}, "partial answer")
+	if got.Content != "partial answer" || len(got.Turn) != 1 || got.Turn[0].Role != RoleModel {
+		t.Fatalf("got=%+v", got)
+	}
+
+	reqPart := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "c1"})
+	toolOnly := &AgentResponse{
+		Content: "[" + ToolRunSSHCommand + "]",
+		Turn: []ChatMessage{
+			{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqPart})},
+		},
+	}
+	got = applyStreamedText(toolOnly, "before tool")
+	if got.Content != "before tool" || !messageHasTextPart(got.Turn[0]) {
+		t.Fatalf("tool-only should be filled with streamed text: %+v", got)
+	}
+
+	contentOnly := &AgentResponse{Content: "from message text"}
+	got = applyStreamedText(contentOnly, "")
+	if got.Content != "from message text" || len(got.Turn) != 1 || !messageHasTextPart(got.Turn[0]) {
+		t.Fatalf("Content without Turn should become persistable: %+v", got)
+	}
+
+	full := &AgentResponse{
+		Content: "phase2",
+		Turn: []ChatMessage{
+			{Role: RoleModel, Content: "phase1", Parts: UserTextPartsJSON("phase1")},
+			{Role: RoleModel, Content: "phase2", Parts: UserTextPartsJSON("phase2")},
+		},
+	}
+	got = applyStreamedText(full, "phase1phase2extra")
+	if got.Content != "phase2" || len(got.Turn) != 2 || got.Turn[0].Content != "phase1" {
+		t.Fatalf("must not overwrite multi-turn model text with full stream: %+v", got)
+	}
+}
+
 func TestTruncateEcho(t *testing.T) {
 	if got := truncateEcho("abc", 10); got != "abc" {
 		t.Fatalf("short=%q", got)

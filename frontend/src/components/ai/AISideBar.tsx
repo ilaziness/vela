@@ -5,6 +5,7 @@ import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
 import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
 import { aiPartRenderers } from "./aiPartRenderers";
+import ComposerSendStopButton from "./ComposerSendStopButton";
 import SessionPanel from "./SessionPanel";
 import {
   clampSidebarWidth,
@@ -194,7 +195,10 @@ const AISideBar = () => {
                   useAIAssistantStore.getState().setStreaming(false);
                   LogService.Error(`[AI Chat] ${err.source}: ${err.message}`);
                 }}
-                slots={{ messageAvatar: CustomMessageAvatar }}
+                slots={{
+                  messageAvatar: CustomMessageAvatar,
+                  composerSendButton: ComposerSendStopButton,
+                }}
                 slotProps={{
                   composerInput: { placeholder: "输入消息..." },
                 }}
