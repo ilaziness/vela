@@ -14,6 +14,16 @@ import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
 
 const EVENT_AI_STREAM_CHUNK = 'eventAIStreamChunk';
+const UPSERT_PLAN_TOOL = 'upsert_plan';
+const USE_SKILL_TOOL = 'use_skill';
+
+function isKnownChatTool(toolName: string): boolean {
+  return (
+    toolName === RUN_SSH_COMMAND_TOOL ||
+    toolName === UPSERT_PLAN_TOOL ||
+    toolName === USE_SKILL_TOOL
+  );
+}
 
 export const currentUser: ChatUser = {
   id: 'user',
@@ -180,31 +190,40 @@ export class GenkitAdapter implements ChatAdapter {
               }
               return;
             }
-            case 'tool-input-start':
+            case 'tool-input-start': {
               closeOpenTextParts();
+              const toolName = data.toolName || '';
               enqueue({
                 type: 'tool-input-start',
                 toolCallId: data.toolCallId || '',
-                toolName: data.toolName || '',
+                toolName,
+                ...(isKnownChatTool(toolName) ? {} : { dynamic: true }),
               } as ChatMessageChunk);
               return;
-            case 'tool-input-available':
+            }
+            case 'tool-input-available': {
+              const toolName = data.toolName || '';
               enqueue({
                 type: 'tool-input-available',
                 toolCallId: data.toolCallId || '',
-                toolName: data.toolName || '',
-                input: withPinnedSSHTarget(data.toolName || '', parseJSONValue(data.input) ?? {}),
+                toolName,
+                input: withPinnedSSHTarget(toolName, parseJSONValue(data.input) ?? {}),
+                ...(isKnownChatTool(toolName) ? {} : { dynamic: true }),
               } as ChatMessageChunk);
               return;
-            case 'tool-approval-request':
+            }
+            case 'tool-approval-request': {
+              const toolName = data.toolName || '';
               enqueue({
                 type: 'tool-approval-request',
                 toolCallId: data.toolCallId || '',
-                toolName: data.toolName || '',
+                toolName,
                 approvalId: data.approvalId || data.toolCallId,
-                input: withPinnedSSHTarget(data.toolName || '', parseJSONValue(data.input) ?? {}),
+                input: withPinnedSSHTarget(toolName, parseJSONValue(data.input) ?? {}),
+                ...(isKnownChatTool(toolName) ? {} : { dynamic: true }),
               } as ChatMessageChunk);
               return;
+            }
             case 'tool-output-available':
               enqueue({
                 type: 'tool-output-available',

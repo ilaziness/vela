@@ -112,6 +112,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 
 	a.OnShutdown(func() {
 		log.Debug("run app OnShutdown...")
+		aiService.ShutdownMCP()
 		termWS.Stop()
 		sshService.Close()
 		if err := db.Close(); err != nil {

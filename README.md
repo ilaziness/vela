@@ -89,11 +89,11 @@ _服务器连接配置管理_
 
 从 [Releases](https://github.com/ilaziness/vela/releases) 下载对应平台的包：
 
-| 平台 | 资源文件 | 说明 |
-|------|----------|------|
-| Windows | `Vela_*_windows_amd64.zip` | 解压后运行 `Vela.exe` |
-| Linux | `Vela_*_linux_amd64.tar.gz` | 解压后运行 `Vela` |
-| macOS | `Vela_*_darwin_arm64.zip` | 解压得到 `Vela.app`（见下方） |
+| 平台    | 资源文件                    | 说明                          |
+| ------- | --------------------------- | ----------------------------- |
+| Windows | `Vela_*_windows_amd64.zip`  | 解压后运行 `Vela.exe`         |
+| Linux   | `Vela_*_linux_amd64.tar.gz` | 解压后运行 `Vela`             |
+| macOS   | `Vela_*_darwin_arm64.zip`   | 解压得到 `Vela.app`（见下方） |
 
 ### macOS
 
@@ -112,6 +112,89 @@ open ~/Downloads/Vela.app
 3. 若仍被拦：在 Finder 中对 `Vela.app` **右键 → 打开** 并确认；或到 **系统设置 → 隐私与安全性** 中选择 **仍要打开**。
 
 ---
+
+---
+
+## AI：MCP 与 Skills 配置说明
+
+配置文件在「用户数据目录」下（**设置 → 通用 → 用户数据目录**，默认是程序旁的 `data` 文件夹）。
+
+也可在 **设置 → AI → MCP / Skills** 中打开对应文件或目录、开关启用状态，并刷新列表。
+
+### 配置 MCP
+
+格式与 Cursor / Claude Code 常见的 `mcp.json` 一致：顶层为 `mcpServers` 对象，服务器名为 key。
+
+1. 打开用户数据目录中的 `mcp.json`（没有时程序会自动生成 `{"mcpServers":{}}`）。
+2. 在 `mcpServers` 下添加服务器，保存后回到设置页点击「刷新」。
+3. 用开关启用/禁用；绿点表示可连接，红点表示已开启但当前连不上。只有「已开启且可用」的服务器会提供给 AI；对话里调用 MCP 工具时需要你批准。
+
+**字段说明**（每个 `mcpServers.<名称>` 条目）
+
+| 字段                       | 必填     | 说明                                                                 |
+| -------------------------- | -------- | -------------------------------------------------------------------- |
+| `command` / `args` / `env` | stdio 时 | 启动命令、参数；`env` 为对象，如 `{"API_KEY":"value"}`               |
+| `url` / `headers`          | http 时  | 服务地址与请求头（如 Authorization）                                 |
+| `type`                     | 否       | `stdio` 或 `http`；省略时有 `command` 视为 stdio，有 `url` 视为 http |
+| `enabled`                  | 否       | 是否启用，不写默认开启（设置页开关会写入此字段）                     |
+
+注意：`mcp.json` 里的密钥是明文保存的，请妥善保管该文件。旧版 `servers` 数组格式已不再支持，请按下面示例改写。
+
+**stdio 示例**
+
+```json
+{
+  "mcpServers": {
+    "example-time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "env": {
+        "API_KEY": "value"
+      }
+    }
+  }
+}
+```
+
+**http 示例**
+
+```json
+{
+  "mcpServers": {
+    "remote-docs": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer 你的令牌"
+      }
+    }
+  }
+}
+```
+
+### 配置 Skills
+
+1. 在用户数据目录下创建 `skills` 文件夹（没有时可在设置页点「打开 skills 目录」自动创建）。
+2. 每个技能一个子文件夹，文件夹内放 `SKILL.md`，例如：
+
+```
+data/skills/my-skill/SKILL.md
+```
+
+3. 回到设置页刷新；用开关控制是否启用。已启用的技能可被 AI 直接加载，无需批准。
+
+**SKILL.md 示例**
+
+```markdown
+---
+description: 简要说明这个技能做什么（可选，建议填写）
+---
+
+# 我的技能
+
+在这里写给 AI 的详细说明与步骤……
+```
+
+文件夹名就是技能名；改完文件后在设置里点「刷新」即可看到更新。
 
 ## 📄 许可证
 

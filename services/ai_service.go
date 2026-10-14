@@ -178,6 +178,7 @@ func (s *AIService) reloadEngine(cfg *AIConfig) error {
 	if s.engine == nil {
 		s.engine = ai.NewAIEngine(s.logger)
 	}
+	s.engine.SetUserDataDir(s.userDataDir())
 	if err := s.engine.SetConfig(engineCfg); err != nil {
 		return fmt.Errorf("set ai engine config failed: %w", err)
 	}

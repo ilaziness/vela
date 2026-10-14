@@ -140,11 +140,7 @@ const Setting: React.FC = () => {
                 />
               )}
 
-              {activeTab === "ai" && (
-                <Paper sx={{ p: 0 }} elevation={1}>
-                  <AISettings />
-                </Paper>
-              )}
+              {activeTab === "ai" && <AISettings />}
 
               {activeTab === "keys" && <KeySettings />}
 

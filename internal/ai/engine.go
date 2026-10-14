@@ -19,14 +19,16 @@ import (
 
 // AIEngine AI引擎
 type AIEngine struct {
-	logger    *zap.Logger
-	genkit    *genkit.Genkit
-	config    *Config
-	modelName string
-	genConfig any
-	planTool  genkitAI.ToolRef
-	sshTool   genkitAI.ToolRef
-	mu        sync.RWMutex
+	logger      *zap.Logger
+	genkit      *genkit.Genkit
+	config      *Config
+	modelName   string
+	genConfig   any
+	planTool    genkitAI.ToolRef
+	sshTool     genkitAI.ToolRef
+	userDataDir string
+	mcp         *mcpRuntime
+	mu          sync.RWMutex
 }
 
 // NewAIEngine 创建AI引擎
@@ -36,6 +38,7 @@ func NewAIEngine(logger *zap.Logger) *AIEngine {
 	}
 	return &AIEngine{
 		logger: logger,
+		mcp:    newMCPRuntime(logger),
 		config: &Config{
 			Enabled:        false,
 			Provider:       ProviderOllama,
@@ -49,7 +52,14 @@ func NewAIEngine(logger *zap.Logger) *AIEngine {
 	}
 }
 
-// Init 初始化插件、定义模型、构建配置
+// SetUserDataDir sets the directory for mcp.json and skills/.
+func (e *AIEngine) SetUserDataDir(dir string) {
+	e.mu.Lock()
+	e.userDataDir = strings.TrimSpace(dir)
+	e.mu.Unlock()
+}
+
+// Init initializes Genkit plugins, models, and tools.
 func (e *AIEngine) Init(ctx context.Context, cfg *Config) error {
 	var ollamaPlugin *ollama.Ollama
 	var g *genkit.Genkit
@@ -112,7 +122,15 @@ func (e *AIEngine) Init(ctx context.Context, cfg *Config) error {
 	e.genConfig = cfg.buildGenConfig()
 	e.planTool = tools.plan
 	e.sshTool = tools.ssh
+	userDataDir := e.userDataDir
+	mcp := e.mcp
 	e.mu.Unlock()
+
+	if userDataDir != "" && mcp != nil {
+		if err := mcp.Reload(ctx, true, userDataDir); err != nil {
+			e.logger.Warn("reload mcp after init failed", zap.Error(err))
+		}
+	}
 
 	return nil
 }
@@ -126,6 +144,8 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 	cfg := e.config
 	planTool := e.planTool
 	sshTool := e.sshTool
+	userDataDir := e.userDataDir
+	mcp := e.mcp
 	e.mu.RUnlock()
 
 	if g == nil || !cfg.Enabled {
@@ -160,11 +180,23 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 	if deps.EnableSSHTool() && sshTool != nil {
 		activeTools = append(activeTools, sshTool)
 	}
+	if mcp != nil {
+		for _, t := range mcp.ActiveTools() {
+			activeTools = append(activeTools, t)
+		}
+	}
 
+	middleware := []genkitAI.Middleware{toolStreamMiddleware{}}
+	if skillDirs, err := EnabledSkillPaths(userDataDir); err == nil && len(skillDirs) > 0 {
+		middleware = append(middleware, skillsMiddleware{SkillDirs: skillDirs})
+	} else if err != nil {
+		e.logger.Warn("list enabled skills failed", zap.Error(err))
+	}
 	opts := []genkitAI.GenerateOption{
 		genkitAI.WithModelName(modelName),
 		genkitAI.WithMessages(messages...),
 		genkitAI.WithMaxTurns(cfg.EffectiveMaxAgentTurns()),
+		genkitAI.WithUse(middleware...),
 	}
 	if len(activeTools) > 0 {
 		opts = append(opts, genkitAI.WithTools(activeTools...))
@@ -291,7 +323,11 @@ func (e *AIEngine) SetConfig(cfg *Config) error {
 		e.genConfig = nil
 		e.planTool = nil
 		e.sshTool = nil
+		mcp := e.mcp
 		e.mu.Unlock()
+		if mcp != nil {
+			mcp.Close()
+		}
 		return nil
 	}
 	return e.Init(context.Background(), cfg)
@@ -302,6 +338,54 @@ func (e *AIEngine) GetConfig() Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return *e.config
+}
+
+// Close disconnects MCP clients.
+func (e *AIEngine) Close() {
+	e.mu.RLock()
+	mcp := e.mcp
+	e.mu.RUnlock()
+	if mcp != nil {
+		mcp.Close()
+	}
+}
+
+// ReloadMCPAndSkills reloads mcp.json connections; skills are read from disk on each Run.
+// When Genkit is not initialized, servers are probed for status only (no retained stdio processes).
+func (e *AIEngine) ReloadMCPAndSkills(ctx context.Context) error {
+	e.mu.RLock()
+	g := e.genkit
+	userDataDir := e.userDataDir
+	mcp := e.mcp
+	e.mu.RUnlock()
+	if userDataDir == "" {
+		return fmt.Errorf("user data dir is not set")
+	}
+	if mcp == nil {
+		return nil
+	}
+	return mcp.Reload(ctx, g != nil, userDataDir)
+}
+
+// ListMCPServers returns cached MCP status without probing.
+// When the cache is empty, hydrates names/enabled/summary from mcp.json only.
+func (e *AIEngine) ListMCPServers() ([]MCPServerInfo, error) {
+	e.mu.RLock()
+	userDataDir := e.userDataDir
+	mcp := e.mcp
+	e.mu.RUnlock()
+	if mcp == nil {
+		return nil, nil
+	}
+	if userDataDir == "" {
+		return mcp.List(), nil
+	}
+	if !mcp.HasCachedInfos() {
+		if err := mcp.HydrateFromConfig(userDataDir); err != nil {
+			return nil, err
+		}
+	}
+	return mcp.List(), nil
 }
 
 func resolveModelName(cfg *Config) (string, error) {
