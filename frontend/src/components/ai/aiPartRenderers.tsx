@@ -1,7 +1,7 @@
 import { Box, Typography } from '@mui/material';
 import { ChatConfirmation } from '@mui/x-chat';
 import { useChat, type ChatPartRendererMap } from '@mui/x-chat/headless';
-import { PlanTaskPart, planFromToolPart } from './PlanTaskPart';
+import { planFromToolPart } from './PlanTaskPart';
 import { RUN_SSH_COMMAND_TOOL, SSH_TARGET_INPUT_KEY } from '../../func/aiContext';
 
 /** Custom renderers must cover every tool of that part type — returning null hides the built-in widget. */
@@ -15,9 +15,8 @@ function AgentToolPart({ part }: { part: any }) {
   const inv = part?.toolInvocation;
   if (!inv) return null;
 
-  const plan = planFromToolPart(part);
-  if (plan) {
-    return <PlanTaskPart plan={plan} />;
+  if (planFromToolPart(part)) {
+    return null;
   }
 
   const approvalId = String(inv.approvalId || inv.toolCallId || '');

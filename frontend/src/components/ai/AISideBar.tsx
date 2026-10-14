@@ -6,6 +6,7 @@ import { LogService } from "../../../bindings/github.com/ilaziness/vela/services
 import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
 import { aiPartRenderers } from "./aiPartRenderers";
 import ComposerSendStopButton from "./ComposerSendStopButton";
+import { ComposerPlanDockRoot } from "./DockedPlanPanel";
 import SessionPanel from "./SessionPanel";
 import {
   clampSidebarWidth,
@@ -222,6 +223,7 @@ const AISideBar = () => {
                 slots={{
                   messageAvatar: CustomMessageAvatar,
                   composerSendButton: ComposerSendStopButton,
+                  composerRoot: ComposerPlanDockRoot,
                 }}
                 slotProps={{
                   composerInput: { placeholder: "输入消息..." },
