@@ -410,7 +410,7 @@ function genkitRowsToMui(rows: AIMessage[]): ListChatMessage[] {
       out.push({
         id: m.id,
         role: 'user',
-        status: 'sent',
+        status: m.status === 'cancelled' ? 'cancelled' : 'sent',
         parts: genkitPartsToMui(parseGenkitParts(m.parts), m.content),
         createdAt: new Date(m.timestamp * 1000).toISOString(),
         conversationId: m.session_id,
@@ -419,12 +419,12 @@ function genkitRowsToMui(rows: AIMessage[]): ListChatMessage[] {
       continue;
     }
 
-    const nextParts = genkitPartsToMui(parseGenkitParts(m.parts), m.content);
+    const nextParts = genkitPartsToMui(parseGenkitParts(m.parts), m.content, m.status);
     if (!pending) {
       pending = {
         id: m.id,
         role: 'assistant',
-        status: 'sent',
+        status: m.status === 'cancelled' ? 'cancelled' : 'sent',
         parts: nextParts,
         createdAt: new Date(m.timestamp * 1000).toISOString(),
         conversationId: m.session_id,
@@ -432,6 +432,9 @@ function genkitRowsToMui(rows: AIMessage[]): ListChatMessage[] {
       };
     } else {
       pending.parts = mergeToolParts(pending.parts, nextParts);
+      if (m.status === 'cancelled') {
+        pending.status = 'cancelled';
+      }
     }
   }
   flush();
@@ -459,7 +462,7 @@ function parseGenkitParts(raw: string): any[] {
   }
 }
 
-function genkitPartsToMui(parts: any[], fallbackText: string): MessageParts {
+function genkitPartsToMui(parts: any[], fallbackText: string, rowStatus?: string): MessageParts {
   const out: any[] = [];
   for (const p of parts) {
     if (!p || typeof p !== 'object') continue;
@@ -484,14 +487,26 @@ function genkitPartsToMui(parts: any[], fallbackText: string): MessageParts {
     if (p.toolResponse) {
       const res = p.toolResponse;
       const toolName = String(res.name || '');
+      // Mixed success+deny rows keep status=""; per-part text decides. All-denied
+      // rows use status=denied (every toolResponse is a denial).
+      const reason = denialReasonFromToolOutput(res.output);
+      const denied = reason !== null || rowStatus === 'denied';
       out.push({
         type: toolPartType(toolName),
-        toolInvocation: {
-          toolCallId: String(res.ref || res.name || ''),
-          toolName,
-          state: 'output-available',
-          output: res.output ?? {},
-        },
+        toolInvocation: denied
+          ? {
+              toolCallId: String(res.ref || res.name || ''),
+              toolName,
+              state: 'output-denied',
+              input: {},
+              approval: { approved: false as const, reason: reason ?? 'user denied' },
+            }
+          : {
+              toolCallId: String(res.ref || res.name || ''),
+              toolName,
+              state: 'output-available',
+              output: res.output ?? {},
+            },
       });
       continue;
     }
@@ -505,10 +520,38 @@ function genkitPartsToMui(parts: any[], fallbackText: string): MessageParts {
   return out as MessageParts;
 }
 
+/** Returns the user-facing reason when output is a known denial string; otherwise null. */
+function denialReasonFromToolOutput(output: unknown): string | null {
+  let text = '';
+  if (typeof output === 'string') {
+    text = output;
+  } else if (output != null && typeof output !== 'object') {
+    text = String(output);
+  } else if (output && typeof output === 'object' && 'output' in output) {
+    const inner = (output as { output?: unknown }).output;
+    if (typeof inner === 'string') {
+      text = inner;
+    }
+  }
+  text = text.trim();
+  if (!text) {
+    return null;
+  }
+  // Omit trailing space so "…execution:" and "…execution: reason" both match after trim.
+  const prefixes = ['User denied command execution:', 'User denied tool execution:'];
+  for (const prefix of prefixes) {
+    if (text.startsWith(prefix)) {
+      return text.slice(prefix.length).trim() || 'user denied';
+    }
+  }
+  return null;
+}
+
 function mergeToolParts(existing: MessageParts, incoming: MessageParts): MessageParts {
   const merged = [...existing] as any[];
   for (const part of incoming as any[]) {
-    if (isToolMessagePart(part) && part.toolInvocation?.state === 'output-available') {
+    const state = part.toolInvocation?.state;
+    if (isToolMessagePart(part) && (state === 'output-available' || state === 'output-denied')) {
       const id = String(part.toolInvocation.toolCallId || '');
       if (id) {
         const idx = merged.findLastIndex(
@@ -519,8 +562,8 @@ function mergeToolParts(existing: MessageParts, incoming: MessageParts): Message
             ...merged[idx],
             toolInvocation: {
               ...merged[idx].toolInvocation,
-              state: 'output-available',
-              output: part.toolInvocation.output,
+              ...part.toolInvocation,
+              input: merged[idx].toolInvocation?.input ?? part.toolInvocation.input,
             },
           };
           continue;

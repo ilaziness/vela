@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"uuid"
 
@@ -18,9 +19,7 @@ func (t toolStreamMiddleware) Name() string { return "vela/tool-stream" }
 func (t toolStreamMiddleware) New(ctx context.Context) (*genkitAI.Hooks, error) {
 	_ = ctx
 	return &genkitAI.Hooks{
-		WrapTool: func(ctx context.Context, params *genkitAI.ToolParams, next genkitAI.ToolNext) (*genkitAI.MultipartToolResponse, error) {
-			return wrapToolCall(ctx, params, next)
-		},
+		WrapTool: wrapToolCall,
 	}, nil
 }
 
@@ -63,14 +62,18 @@ func wrapToolCall(
 		ApprovalID: approvalID, Input: inJSON,
 	})
 	approved, reason, err := deps.Approval.Wait(ctx, approvalID)
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		emitDeps(deps, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: name, ErrorText: err.Error()})
 		emitDeps(deps, StreamEvent{Type: EventFinishStep})
 		return &genkitAI.MultipartToolResponse{Output: fmt.Sprintf("approval wait failed: %v", err)}, nil
 	}
-	if !approved {
+	if !approved || errors.Is(err, context.Canceled) {
 		if reason == "" {
-			reason = "user denied"
+			if errors.Is(err, context.Canceled) {
+				reason = "stopped"
+			} else {
+				reason = "user denied"
+			}
 		}
 		emitDeps(deps, StreamEvent{
 			Type: EventToolOutputDenied, ToolCallID: callID, ToolName: name,

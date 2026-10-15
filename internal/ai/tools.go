@@ -1,7 +1,9 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -80,14 +82,18 @@ func registerTools(g *genkit.Genkit) agentTools {
 			})
 
 			approved, reason, err := deps.Approval.Wait(tc, approvalID)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				emit(tc, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: ToolRunSSHCommand, ErrorText: err.Error()})
 				emit(tc, StreamEvent{Type: EventFinishStep})
 				return fmt.Sprintf("approval wait failed: %v", err), nil
 			}
-			if !approved {
+			if !approved || errors.Is(err, context.Canceled) {
 				if reason == "" {
-					reason = "user denied"
+					if errors.Is(err, context.Canceled) {
+						reason = "stopped"
+					} else {
+						reason = "user denied"
+					}
 				}
 				emit(tc, StreamEvent{
 					Type: EventToolOutputDenied, ToolCallID: callID, ToolName: ToolRunSSHCommand,

@@ -17,13 +17,20 @@ type AISession struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Message UI status values (persisted for history replay; ignored by Genkit).
+const (
+	MessageStatusCancelled = "cancelled"
+	MessageStatusDenied    = "denied"
+)
+
 // AIMessage represents a message in an AI chat session
 type AIMessage struct {
 	ID        string    `json:"id"`
 	SessionID string    `json:"session_id"`
 	Role      string    `json:"role"` // Genkit: user | model | tool | system
 	Content   string    `json:"content"`
-	Parts     string    `json:"parts"` // JSON []*genkit Part
+	Parts     string    `json:"parts"`  // JSON []*genkit Part
+	Status    string    `json:"status"` // "" | cancelled | denied
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -37,6 +44,8 @@ type AISessionRepository interface {
 	CreateMessage(ctx context.Context, msg *AIMessage) error
 	CreateMessages(ctx context.Context, msgs []*AIMessage) error
 	ListMessages(ctx context.Context, sessionID string) ([]*AIMessage, error)
+	UpdateMessageStatus(ctx context.Context, id, status string) error
+	UpdateMessageStatuses(ctx context.Context, ids []string, status string) error
 }
 
 // SQLiteAISessionRepository implements AISessionRepository using SQLite
@@ -185,8 +194,8 @@ func (r *SQLiteAISessionRepository) CreateMessages(ctx context.Context, msgs []*
 			msg.Timestamp = now
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO ai_messages (id, session_id, role, content, parts, timestamp) VALUES (?, ?, ?, ?, ?, ?)`,
-			msg.ID, msg.SessionID, msg.Role, msg.Content, msg.Parts, msg.Timestamp.Unix()); err != nil {
+			`INSERT INTO ai_messages (id, session_id, role, content, parts, status, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			msg.ID, msg.SessionID, msg.Role, msg.Content, msg.Parts, msg.Status, msg.Timestamp.Unix()); err != nil {
 			return fmt.Errorf("create message failed: %w", err)
 		}
 	}
@@ -199,7 +208,7 @@ func (r *SQLiteAISessionRepository) CreateMessages(ctx context.Context, msgs []*
 // ListMessages lists messages for a session ordered by timestamp ASC
 func (r *SQLiteAISessionRepository) ListMessages(ctx context.Context, sessionID string) ([]*AIMessage, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, session_id, role, content, parts, timestamp FROM ai_messages WHERE session_id = ? ORDER BY timestamp ASC, rowid ASC`,
+		`SELECT id, session_id, role, content, parts, status, timestamp FROM ai_messages WHERE session_id = ? ORDER BY timestamp ASC, rowid ASC`,
 		sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("list messages failed: %w", err)
@@ -210,7 +219,7 @@ func (r *SQLiteAISessionRepository) ListMessages(ctx context.Context, sessionID 
 	for rows.Next() {
 		var msg AIMessage
 		var timestamp int64
-		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &msg.Parts, &timestamp); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &msg.Parts, &msg.Status, &timestamp); err != nil {
 			return nil, fmt.Errorf("scan message failed: %w", err)
 		}
 		msg.Timestamp = time.Unix(timestamp, 0)
@@ -221,4 +230,43 @@ func (r *SQLiteAISessionRepository) ListMessages(ctx context.Context, sessionID 
 	}
 
 	return messages, nil
+}
+
+// UpdateMessageStatus sets status for a single message by id.
+func (r *SQLiteAISessionRepository) UpdateMessageStatus(ctx context.Context, id, status string) error {
+	if id == "" {
+		return fmt.Errorf("message id is required")
+	}
+	return r.UpdateMessageStatuses(ctx, []string{id}, status)
+}
+
+// UpdateMessageStatuses sets the same status for multiple message ids.
+func (r *SQLiteAISessionRepository) UpdateMessageStatuses(ctx context.Context, ids []string, status string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin status tx failed: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `UPDATE ai_messages SET status = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare status update failed: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx, status, id); err != nil {
+			return fmt.Errorf("update message status failed: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit status update failed: %w", err)
+	}
+	return nil
 }

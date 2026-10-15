@@ -47,6 +47,7 @@ type AIMessage struct {
 	Role      string `json:"role"`
 	Content   string `json:"content"`
 	Parts     string `json:"parts"`
+	Status    string `json:"status"` // "" | cancelled | denied
 	Timestamp int64  `json:"timestamp"`
 }
 
@@ -304,6 +305,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 	messages := make([]ai.ChatMessage, len(history))
 	for i, msg := range history {
+		// Status is UI-only; Genkit replay uses role/content/parts.
 		messages[i] = ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts}
 	}
 	userMsg := &database.AIMessage{
@@ -349,6 +351,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 				zap.String("sessionId", sessionID),
 				zap.String("runId", runID),
 			)
+			s.markMessageCancelled(sessionID, userMsg.ID)
 			return nil, ErrGenerationStopped
 		}
 	}
@@ -404,12 +407,16 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			s.logger.Info("AI generation stopped", zap.String("sessionId", sessionID))
 			if s.isCurrentRun(sessionID, run) {
-				if _, perr := s.persistTurn(sessionID, aiResp); perr != nil {
+				if _, perr := s.persistCancelledTurn(sessionID, userMsg.ID, aiResp); perr != nil {
 					s.logger.Error("persist stopped AI turn failed",
 						zap.String("sessionId", sessionID),
 						zap.Error(perr),
 					)
 				}
+			} else {
+				// Newer run replaced this one; skip turn persist to avoid interleaving,
+				// but still mark the user message so history matches live cancel UI.
+				s.markMessageCancelled(sessionID, userMsg.ID)
 			}
 			return nil, ErrGenerationStopped
 		}
@@ -472,17 +479,45 @@ func (s *AIService) persistIfCurrent(sessionID string, run *agentRun, resp *ai.A
 }
 
 func (s *AIService) persistTurn(sessionID string, resp *ai.AgentResponse) (*database.AIMessage, error) {
+	return s.persistPreparedTurn(sessionID, ai.PrepareTurn(resp, false), false)
+}
+
+func (s *AIService) persistCancelledTurn(sessionID, userMsgID string, resp *ai.AgentResponse) (*database.AIMessage, error) {
+	last, err := s.persistPreparedTurn(sessionID, ai.PrepareTurn(resp, true), true)
+	s.markMessageCancelled(sessionID, userMsgID)
+	return last, err
+}
+
+func (s *AIService) markMessageCancelled(sessionID, msgID string) {
+	if msgID == "" {
+		return
+	}
+	if uerr := s.sessionRepo.UpdateMessageStatus(context.Background(), msgID, database.MessageStatusCancelled); uerr != nil {
+		s.logger.Error("mark cancelled user message failed",
+			zap.String("sessionId", sessionID),
+			zap.Error(uerr),
+		)
+	}
+}
+
+func (s *AIService) persistPreparedTurn(sessionID string, resp *ai.AgentResponse, cancelled bool) (*database.AIMessage, error) {
 	if resp == nil || len(resp.Turn) == 0 {
 		return nil, nil
 	}
 	ts := time.Now()
 	msgs := make([]*database.AIMessage, 0, len(resp.Turn))
 	for _, m := range resp.Turn {
+		status := m.Status
+		if cancelled && m.Role != ai.RoleTool {
+			// user/model bubbles: cancelled; tool rows keep denied (or empty if completed).
+			status = database.MessageStatusCancelled
+		}
 		msgs = append(msgs, &database.AIMessage{
 			SessionID: sessionID,
 			Role:      m.Role,
 			Content:   m.Content,
 			Parts:     m.Parts,
+			Status:    status,
 			Timestamp: ts,
 		})
 	}
@@ -599,7 +634,7 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 	if run == nil {
 		return
 	}
-	run.cancel()
+	// Prefer delivering denial so tools persist status=denied before ctx cancel races Wait.
 	run.mu.Lock()
 	for _, ch := range run.approvals {
 		select {
@@ -608,6 +643,7 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 		}
 	}
 	run.mu.Unlock()
+	run.cancel()
 }
 
 // aiHost adapts SSH + approval for internal/ai ports.
@@ -641,7 +677,7 @@ func (h *aiHost) Open(approvalID string) {
 
 func (h *aiHost) Wait(ctx context.Context, approvalID string) (bool, string, error) {
 	if h.run == nil {
-		return false, "cancelled", fmt.Errorf("no active generation")
+		return false, "stopped", fmt.Errorf("no active generation")
 	}
 	h.run.mu.Lock()
 	ch := h.run.approvals[approvalID]
@@ -659,18 +695,19 @@ func (h *aiHost) Wait(ctx context.Context, approvalID string) (bool, string, err
 	select {
 	case d, ok := <-ch:
 		if !ok {
-			return false, "cancelled", context.Canceled
+			return false, "stopped", context.Canceled
 		}
 		return d.Approved, d.Reason, nil
 	case <-ctx.Done():
 		select {
 		case d, ok := <-ch:
 			if !ok {
-				return false, "cancelled", context.Canceled
+				return false, "stopped", context.Canceled
 			}
 			return d.Approved, d.Reason, nil
 		default:
-			return false, "cancelled", ctx.Err()
+			// Match rejectApprovalsAndCancel / synthetic cancel denials ("stopped").
+			return false, "stopped", ctx.Err()
 		}
 	}
 }
@@ -695,7 +732,10 @@ func toAISession(s *database.AISession) *AISession {
 	return &AISession{ID: s.ID, Title: s.Title, CreatedAt: s.CreatedAt.Unix(), UpdatedAt: s.UpdatedAt.Unix()}
 }
 func toAIMessage(m *database.AIMessage) *AIMessage {
-	return &AIMessage{ID: m.ID, SessionID: m.SessionID, Role: m.Role, Content: m.Content, Parts: m.Parts, Timestamp: m.Timestamp.Unix()}
+	return &AIMessage{
+		ID: m.ID, SessionID: m.SessionID, Role: m.Role, Content: m.Content,
+		Parts: m.Parts, Status: m.Status, Timestamp: m.Timestamp.Unix(),
+	}
 }
 
 func jsonValue(raw json.RawMessage) any {

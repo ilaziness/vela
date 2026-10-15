@@ -29,6 +29,7 @@ var migrations = []Migration{
 	{Version: 10, Name: "add bookmark session options", Up: migrateAddBookmarkSessionOptions},
 	{Version: 11, Name: "add sftp transfers queue", Up: migrateAddSftpTransfers},
 	{Version: 12, Name: "add bookmark tags and color", Up: migrateAddBookmarkTagsColor},
+	{Version: 13, Name: "add ai_messages status", Up: migrateAddAIMessageStatus},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -366,6 +367,23 @@ func migrateAddBookmarkTagsColor(db *sql.DB, logger *zap.Logger) error {
 		if err != nil {
 			return fmt.Errorf("check column bookmarks.%s failed: %w", c.name, err)
 		}
+	}
+	return nil
+}
+
+// migrateAddAIMessageStatus adds ui status for cancel/deny replay (idempotent).
+func migrateAddAIMessageStatus(db *sql.DB, logger *zap.Logger) error {
+	var columnName string
+	err := db.QueryRow(`SELECT name FROM pragma_table_info('ai_messages') WHERE name = 'status'`).Scan(&columnName)
+	if err == sql.ErrNoRows {
+		if _, err := db.Exec(`ALTER TABLE ai_messages ADD COLUMN status TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add column ai_messages.status failed: %w", err)
+		}
+		logger.Debug("migration: added ai_messages.status column")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check column ai_messages.status failed: %w", err)
 	}
 	return nil
 }

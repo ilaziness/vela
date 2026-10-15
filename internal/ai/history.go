@@ -2,6 +2,8 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
 )
@@ -11,13 +13,18 @@ const (
 	RoleModel  = string(genkitAI.RoleModel)
 	RoleTool   = string(genkitAI.RoleTool)
 	RoleSystem = string(genkitAI.RoleSystem)
+
+	// MessageStatusDenied is UI-only on tool rows; Genkit replay ignores Status.
+	// Cancelled is applied at persist time in services (not set on ChatMessage here).
+	MessageStatusDenied = "denied"
 )
 
 // ChatMessage is one persisted Genkit message (role = user|model|tool|system).
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-	Parts   string `json:"parts,omitempty"` // JSON []*genkitAI.Part
+	Parts   string `json:"parts,omitempty"`  // JSON []*genkitAI.Part
+	Status  string `json:"status,omitempty"` // "" | denied (UI only; cancelled stamped at DB persist)
 }
 
 // AgentRequest is the input for a single agent Run.
@@ -79,14 +86,33 @@ func sanitizeTranscript(msgs []*genkitAI.Message) []*genkitAI.Message {
 		if m == nil {
 			continue
 		}
-		if m.Role == genkitAI.RoleTool {
-			if len(out) == 0 || out[len(out)-1].Role != genkitAI.RoleModel || !hasToolRequest(out[len(out)-1]) {
-				continue
-			}
+		if m.Role == genkitAI.RoleTool && !toolFollowsModelRequest(out) {
+			continue
 		}
 		out = append(out, m)
 	}
 	return trimIncompleteToolRound(out)
+}
+
+// toolFollowsModelRequest reports whether a tool message may follow out:
+// immediately after a model tool-request turn, or after other tool messages
+// in that same round (cancel may persist answered + synthetic denial rows).
+func toolFollowsModelRequest(out []*genkitAI.Message) bool {
+	for i := len(out) - 1; i >= 0; i-- {
+		m := out[i]
+		if m == nil {
+			continue
+		}
+		switch m.Role {
+		case genkitAI.RoleTool:
+			continue
+		case genkitAI.RoleModel:
+			return hasToolRequest(m)
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // trimIncompleteToolRound drops a trailing model message that still has
@@ -141,7 +167,8 @@ func storedTurn(resp *genkitAI.ModelResponse, promptLen int) *AgentResponse {
 			Parts:   MarshalParts(m.Content),
 		})
 	}
-	out.Turn = completeTurn(turn)
+	// Leave turn raw; PrepareTurn finalizes for persist (drop vs synthesize denials).
+	out.Turn = turn
 	for i := len(out.Turn) - 1; i >= 0; i-- {
 		if out.Turn[i].Role == RoleModel && out.Turn[i].Content != "" {
 			out.Content = out.Turn[i].Content
@@ -154,10 +181,26 @@ func storedTurn(resp *genkitAI.ModelResponse, promptLen int) *AgentResponse {
 	return out
 }
 
+// PrepareTurn finalizes a run's messages for persistence.
+// On cancel, unanswered tool requests get synthetic denied responses; otherwise incomplete tools are dropped.
+func PrepareTurn(resp *AgentResponse, cancelled bool) *AgentResponse {
+	if resp == nil {
+		return nil
+	}
+	if cancelled {
+		resp.Turn = completeTurnOnCancel(resp.Turn)
+	} else {
+		resp.Turn = completeTurn(resp.Turn)
+	}
+	annotateDeniedToolStatuses(resp.Turn)
+	return resp
+}
+
 // applyStreamedText fills in model text that was emitted as stream deltas but may be
 // missing from ModelResponse when generation is cancelled mid-stream.
 // Only used when the stored turn has no model text yet; streamed spans the whole run
 // and must not overwrite multi-turn model messages.
+// When the last model message is tool-request-only, text is prepended so tool parts stay.
 func applyStreamedText(out *AgentResponse, streamed string) *AgentResponse {
 	if out == nil {
 		out = &AgentResponse{}
@@ -179,12 +222,28 @@ func applyStreamedText(out *AgentResponse, streamed string) *AgentResponse {
 		Parts:   UserTextPartsJSON(text),
 	}
 	if n := len(out.Turn); n > 0 && out.Turn[n-1].Role == RoleModel {
-		out.Turn[n-1] = msg
+		parts := UnmarshalParts(out.Turn[n-1].Parts)
+		if hasToolRequestPart(parts) {
+			merged := append([]*genkitAI.Part{genkitAI.NewTextPart(text)}, parts...)
+			out.Turn[n-1].Parts = MarshalParts(merged)
+			out.Turn[n-1].Content = text
+		} else {
+			out.Turn[n-1] = msg
+		}
 	} else {
 		out.Turn = append(out.Turn, msg)
 	}
 	out.Content = text
 	return out
+}
+
+func hasToolRequestPart(parts []*genkitAI.Part) bool {
+	for _, p := range parts {
+		if p != nil && p.IsToolRequest() {
+			return true
+		}
+	}
+	return false
 }
 
 func hasModelText(out *AgentResponse) bool {
@@ -217,6 +276,22 @@ func completeTurn(turn []ChatMessage) []ChatMessage {
 	if len(turn) == 0 {
 		return turn
 	}
+	msgs := chatMessagesToGenkit(turn)
+	msgs = sanitizeTranscript(msgs)
+	return genkitToChatMessages(msgs, nil)
+}
+
+// completeTurnOnCancel keeps unanswered tool requests by synthesizing denied tool responses.
+func completeTurnOnCancel(turn []ChatMessage) []ChatMessage {
+	if len(turn) == 0 {
+		return turn
+	}
+	msgs := dropOrphanTools(chatMessagesToGenkit(turn))
+	msgs, deniedIdx := fillUnansweredToolRequests(msgs, "stopped")
+	return genkitToChatMessages(msgs, deniedIdx)
+}
+
+func chatMessagesToGenkit(turn []ChatMessage) []*genkitAI.Message {
 	msgs := make([]*genkitAI.Message, 0, len(turn))
 	for _, m := range turn {
 		role, ok := genkitRole(m.Role)
@@ -232,16 +307,184 @@ func completeTurn(turn []ChatMessage) []ChatMessage {
 		}
 		msgs = append(msgs, genkitAI.NewMessage(role, nil, parts...))
 	}
-	msgs = sanitizeTranscript(msgs)
+	return msgs
+}
+
+func genkitToChatMessages(msgs []*genkitAI.Message, deniedIdx map[int]bool) []ChatMessage {
 	out := make([]ChatMessage, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, ChatMessage{
+	for i, m := range msgs {
+		cm := ChatMessage{
 			Role:    string(m.Role),
 			Content: messageContent(m),
 			Parts:   MarshalParts(m.Content),
-		})
+		}
+		if deniedIdx[i] {
+			cm.Status = MessageStatusDenied
+		}
+		out = append(out, cm)
 	}
 	return out
+}
+
+func dropOrphanTools(msgs []*genkitAI.Message) []*genkitAI.Message {
+	out := make([]*genkitAI.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		if m.Role == genkitAI.RoleTool && !toolFollowsModelRequest(out) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func fillUnansweredToolRequests(msgs []*genkitAI.Message, reason string) ([]*genkitAI.Message, map[int]bool) {
+	answered := make(map[string]bool)
+	for _, m := range msgs {
+		if m == nil || m.Role != genkitAI.RoleTool {
+			continue
+		}
+		for _, p := range m.Content {
+			if p != nil && p.IsToolResponse() && p.ToolResponse != nil {
+				answered[toolRefKey(p.ToolResponse.Name, p.ToolResponse.Ref)] = true
+			}
+		}
+	}
+	denyReason := reason
+	if denyReason == "" {
+		denyReason = "user denied"
+	}
+	var synthetic []*genkitAI.Part
+	for _, m := range msgs {
+		if m == nil || m.Role != genkitAI.RoleModel {
+			continue
+		}
+		for _, p := range m.Content {
+			if p == nil || !p.IsToolRequest() || p.ToolRequest == nil {
+				continue
+			}
+			key := toolRefKey(p.ToolRequest.Name, p.ToolRequest.Ref)
+			if answered[key] {
+				continue
+			}
+			synthetic = append(synthetic, genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+				Name:   p.ToolRequest.Name,
+				Ref:    p.ToolRequest.Ref,
+				Output: fmt.Sprintf("User denied tool execution: %s", denyReason),
+			}))
+			answered[key] = true
+		}
+	}
+	deniedIdx := map[int]bool{}
+	if len(synthetic) == 0 {
+		return msgs, deniedIdx
+	}
+	// Prefer merging into the trailing tool message so Genkit replay stays one
+	// tool turn (answered outputs + synthetic denials). Frontend maps denial per part.
+	if n := len(msgs); n > 0 && msgs[n-1] != nil && msgs[n-1].Role == genkitAI.RoleTool {
+		msgs[n-1].Content = append(msgs[n-1].Content, synthetic...)
+		if toolGenkitMessageAllDenied(msgs[n-1]) {
+			deniedIdx[n-1] = true
+		}
+		return msgs, deniedIdx
+	}
+	msgs = append(msgs, genkitAI.NewMessage(genkitAI.RoleTool, nil, synthetic...))
+	deniedIdx[len(msgs)-1] = true
+	return msgs, deniedIdx
+}
+
+func toolGenkitMessageAllDenied(m *genkitAI.Message) bool {
+	if m == nil {
+		return false
+	}
+	saw := false
+	for _, p := range m.Content {
+		if p == nil || !p.IsToolResponse() || p.ToolResponse == nil {
+			continue
+		}
+		saw = true
+		if denialReasonFromOutput(p.ToolResponse.Output) == "" {
+			return false
+		}
+	}
+	return saw
+}
+
+func toolRefKey(name, ref string) string {
+	if ref != "" {
+		return ref
+	}
+	return name
+}
+
+func annotateDeniedToolStatuses(turn []ChatMessage) {
+	for i := range turn {
+		if turn[i].Role != RoleTool {
+			continue
+		}
+		if turn[i].Status == MessageStatusDenied {
+			continue
+		}
+		// Only mark the row denied when every toolResponse is a denial; mixed
+		// success+deny rows keep status empty and rely on per-part UI mapping.
+		if toolMessageAllDenied(turn[i]) {
+			turn[i].Status = MessageStatusDenied
+		}
+	}
+}
+
+func toolMessageAllDenied(m ChatMessage) bool {
+	saw := false
+	for _, p := range UnmarshalParts(m.Parts) {
+		if p == nil || !p.IsToolResponse() || p.ToolResponse == nil {
+			continue
+		}
+		saw = true
+		if denialReasonFromOutput(p.ToolResponse.Output) == "" {
+			return false
+		}
+	}
+	return saw
+}
+
+func denialReasonFromOutput(output any) string {
+	s := strings.TrimSpace(denialOutputText(output))
+	if s == "" || s == "<nil>" {
+		return ""
+	}
+	// Prefixes omit the trailing space so "…execution:" and "…execution: reason" both match after TrimSpace.
+	for _, prefix := range []string{
+		"User denied command execution:",
+		"User denied tool execution:",
+	} {
+		if strings.HasPrefix(s, prefix) {
+			reason := strings.TrimSpace(strings.TrimPrefix(s, prefix))
+			if reason == "" {
+				return "user denied"
+			}
+			return reason
+		}
+	}
+	return ""
+}
+
+// denialOutputText unwraps string / {output: string} the same way as the frontend mapper.
+func denialOutputText(output any) string {
+	switch v := output.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case map[string]any:
+		if s, ok := v["output"].(string); ok {
+			return s
+		}
+		return ""
+	default:
+		return fmt.Sprint(output)
+	}
 }
 
 func messageContent(m *genkitAI.Message) string {

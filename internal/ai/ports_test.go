@@ -100,6 +100,128 @@ func TestCompleteTurnDropsTrailingToolRequest(t *testing.T) {
 	}
 }
 
+func TestCompleteTurnOnCancelSynthesizesDeniedTools(t *testing.T) {
+	reqPart := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "c1"})
+	turn := []ChatMessage{
+		{Role: RoleModel, Content: "ok", Parts: UserTextPartsJSON("ok")},
+		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqPart})},
+	}
+	got := completeTurnOnCancel(turn)
+	if len(got) != 3 {
+		t.Fatalf("len=%d got=%+v", len(got), got)
+	}
+	if got[2].Role != RoleTool || got[2].Status != MessageStatusDenied {
+		t.Fatalf("expected denied tool row: %+v", got[2])
+	}
+	parts := UnmarshalParts(got[2].Parts)
+	if len(parts) != 1 || !parts[0].IsToolResponse() {
+		t.Fatalf("parts=%+v", parts)
+	}
+	if denialReasonFromOutput(parts[0].ToolResponse.Output) != "stopped" {
+		t.Fatalf("output=%v", parts[0].ToolResponse.Output)
+	}
+}
+
+func TestCompleteTurnOnCancelKeepsAnsweredAndSynthesizesRest(t *testing.T) {
+	reqA := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "a"})
+	reqB := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "b"})
+	respA := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+		Name: ToolRunSSHCommand, Ref: "a", Output: "ok-a",
+	})
+	turn := []ChatMessage{
+		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqA, reqB})},
+		{Role: RoleTool, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{respA})},
+	}
+	got := completeTurnOnCancel(turn)
+	if len(got) != 2 {
+		t.Fatalf("len=%d got=%+v", len(got), got)
+	}
+	if got[1].Role != RoleTool {
+		t.Fatalf("expected merged tool row: %+v", got[1])
+	}
+	// Mixed success + synthetic denial: do not mark the whole row denied.
+	if got[1].Status == MessageStatusDenied {
+		t.Fatalf("mixed tool row must not be status=denied: %+v", got[1])
+	}
+	parts := UnmarshalParts(got[1].Parts)
+	if len(parts) != 2 {
+		t.Fatalf("parts=%+v", parts)
+	}
+	if denialReasonFromOutput(parts[0].ToolResponse.Output) != "" {
+		t.Fatalf("answered output must stay: %v", parts[0].ToolResponse.Output)
+	}
+	if denialReasonFromOutput(parts[1].ToolResponse.Output) != "stopped" {
+		t.Fatalf("synthetic denial missing: %v", parts[1].ToolResponse.Output)
+	}
+	replay := sanitizeTranscript(chatMessagesToGenkit(got))
+	if len(replay) != 2 {
+		t.Fatalf("sanitize replay len=%d", len(replay))
+	}
+}
+
+func TestSanitizeTranscriptKeepsConsecutiveToolMessages(t *testing.T) {
+	reqA := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "a"})
+	reqB := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "b"})
+	respA := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{Name: ToolRunSSHCommand, Ref: "a", Output: "ok"})
+	respB := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+		Name: ToolRunSSHCommand, Ref: "b", Output: "User denied tool execution: stopped",
+	})
+	msgs := []*genkitAI.Message{
+		genkitAI.NewMessage(genkitAI.RoleModel, nil, reqA, reqB),
+		genkitAI.NewMessage(genkitAI.RoleTool, nil, respA),
+		genkitAI.NewMessage(genkitAI.RoleTool, nil, respB),
+	}
+	got := sanitizeTranscript(msgs)
+	if len(got) != 3 {
+		t.Fatalf("len=%d", len(got))
+	}
+}
+
+func TestDenialReasonFromOutput(t *testing.T) {
+	if got := denialReasonFromOutput("User denied tool execution: stopped"); got != "stopped" {
+		t.Fatalf("string=%q", got)
+	}
+	if got := denialReasonFromOutput(map[string]any{"output": "User denied command execution: no"}); got != "no" {
+		t.Fatalf("nested=%q", got)
+	}
+	if got := denialReasonFromOutput("User denied tool execution: "); got != "user denied" {
+		t.Fatalf("empty reason=%q", got)
+	}
+	if got := denialReasonFromOutput("ok"); got != "" {
+		t.Fatalf("success=%q", got)
+	}
+}
+
+func TestPrepareTurnMarksDeniedToolStatus(t *testing.T) {
+	reqPart := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "c1"})
+	respPart := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+		Name: ToolRunSSHCommand, Ref: "c1", Output: "User denied command execution: no thanks",
+	})
+	resp := PrepareTurn(&AgentResponse{Turn: []ChatMessage{
+		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqPart})},
+		{Role: RoleTool, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{respPart})},
+	}}, false)
+	if len(resp.Turn) != 2 || resp.Turn[1].Status != MessageStatusDenied {
+		t.Fatalf("got=%+v", resp.Turn)
+	}
+}
+
+func TestPrepareTurnMixedToolResponsesStayUndeniedStatus(t *testing.T) {
+	reqA := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "a"})
+	reqB := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "b"})
+	respA := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{Name: ToolRunSSHCommand, Ref: "a", Output: "ok"})
+	respB := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+		Name: ToolRunSSHCommand, Ref: "b", Output: "User denied command execution: no",
+	})
+	resp := PrepareTurn(&AgentResponse{Turn: []ChatMessage{
+		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqA, reqB})},
+		{Role: RoleTool, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{respA, respB})},
+	}}, false)
+	if len(resp.Turn) != 2 || resp.Turn[1].Status != "" {
+		t.Fatalf("mixed tool row status=%q turn=%+v", resp.Turn[1].Status, resp.Turn)
+	}
+}
+
 func TestApplyStreamedTextOnCancel(t *testing.T) {
 	got := applyStreamedText(&AgentResponse{}, "partial answer")
 	if got.Content != "partial answer" || len(got.Turn) != 1 || got.Turn[0].Role != RoleModel {
@@ -116,6 +238,10 @@ func TestApplyStreamedTextOnCancel(t *testing.T) {
 	got = applyStreamedText(toolOnly, "before tool")
 	if got.Content != "before tool" || !messageHasTextPart(got.Turn[0]) {
 		t.Fatalf("tool-only should be filled with streamed text: %+v", got)
+	}
+	parts := UnmarshalParts(got.Turn[0].Parts)
+	if !hasToolRequestPart(parts) {
+		t.Fatalf("tool request must be preserved: %+v", parts)
 	}
 
 	contentOnly := &AgentResponse{Content: "from message text"}
