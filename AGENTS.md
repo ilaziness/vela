@@ -129,6 +129,7 @@
 - `services/ai_service`：会话 RPC、流事件、`RespondToolApproval` / `StopGeneration`；适配 SSH `Exec` 与终端注解回显。
 - 前端：`MUI X Chat` + `GenkitAdapter`（Genkit transcript → Chat 气泡）；tool approval / step / 计划列表用库能力，不自造聊天协议。
 - `run_ssh_command` 走独立 Exec 回传模型，须用户批准；`echo_ssh_commands`（默认关）仅向终端 `OutputChan` 写注解，不写 Stdin、不重复执行。
+- 前端UI/交互尽量使用`MUI X Chat`内置提供支持的功能，不要自己重复造。
 
 ---
 
