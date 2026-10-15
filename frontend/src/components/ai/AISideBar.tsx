@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Box, Avatar, CircularProgress, Button, Typography } from "@mui/material";
+import TerminalIcon from "@mui/icons-material/Terminal";
 import { ChatBox, ChatMessageAvatar } from "@mui/x-chat";
+import type { ChatToolInvocationState } from "@mui/x-chat/headless";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
 import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
-import { aiPartRenderers } from "./aiPartRenderers";
 import ComposerSendStopButton from "./ComposerSendStopButton";
 import { ComposerPlanDockRoot } from "./DockedPlanPanel";
 import SessionPanel from "./SessionPanel";
+import { RUN_SSH_COMMAND_TOOL, UPSERT_PLAN_TOOL } from "../../func/aiContext";
 import {
   clampSidebarWidth,
   persistSidebarWidth,
@@ -17,6 +19,45 @@ import {
 
 const SIDEBAR_WIDTH_TRANSITION = "width 225ms ease";
 const SIDEBAR_WIDTH_TRANSITION_MS = 225;
+
+const chatLocaleText = {
+  messageToolApproveButtonLabel: "批准",
+  messageToolDenyButtonLabel: "拒绝",
+  messageToolInputLabel: "调用参数",
+  messageToolOutputLabel: "执行结果",
+  toolStateLabel: (state: ChatToolInvocationState) => {
+    switch (state) {
+      case "input-streaming":
+        return "准备中";
+      case "input-available":
+        return "待执行";
+      case "approval-requested":
+        return "待批准";
+      case "approval-responded":
+        return "已批准";
+      case "output-available":
+        return "已完成";
+      case "output-error":
+        return "失败";
+      case "output-denied":
+        return "已拒绝";
+      default:
+        return state;
+    }
+  },
+};
+
+/** Keep upsert_plan out of the message stream; DockedPlanPanel owns that UI. */
+function HiddenToolRoot() {
+  return null;
+}
+
+const toolPartProps = {
+  toolSlots: {
+    [RUN_SSH_COMMAND_TOOL]: { icon: TerminalIcon },
+    [UPSERT_PLAN_TOOL]: { root: HiddenToolRoot },
+  },
+};
 
 const LetterAvatar = React.forwardRef<HTMLDivElement, any>(
   function LetterAvatar(props, ref) {
@@ -210,7 +251,7 @@ const AISideBar = () => {
                 onActiveConversationChange={() => {}}
                 composerValue={composerValue}
                 onComposerValueChange={setComposerValue}
-                partRenderers={aiPartRenderers}
+                localeText={chatLocaleText}
                 features={{
                   attachments: false,
                   conversationHeader: false,
@@ -227,6 +268,12 @@ const AISideBar = () => {
                 }}
                 slotProps={{
                   composerInput: { placeholder: "输入消息..." },
+                  messageContent: {
+                    partProps: {
+                      tool: toolPartProps,
+                      "dynamic-tool": toolPartProps,
+                    },
+                  },
                 }}
                 sx={{ flex: 1, minHeight: 0 }}
               />

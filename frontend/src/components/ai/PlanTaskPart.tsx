@@ -3,6 +3,7 @@ import { Box, CircularProgress, Typography } from '@mui/material';
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
 import RadioButtonUncheckedOutlinedIcon from '@mui/icons-material/RadioButtonUncheckedOutlined';
 import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
+import { UPSERT_PLAN_TOOL } from '../../func/aiContext';
 
 export type PlanTaskStatus = 'pending' | 'running' | 'done' | 'failed';
 
@@ -205,7 +206,7 @@ export function planFromToolPart(part: {
   toolInvocation?: { input?: unknown; output?: unknown; toolName?: string };
 }): PlanSnapshot | null {
   const inv = part.toolInvocation;
-  if (!inv || inv.toolName !== 'upsert_plan') return null;
+  if (!inv || inv.toolName !== UPSERT_PLAN_TOOL) return null;
   return asPlan(inv.output) || asPlan(inv.input);
 }
 

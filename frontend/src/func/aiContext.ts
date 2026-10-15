@@ -22,6 +22,8 @@ export interface CurrentSSHBindState {
 export const SSH_TARGET_INPUT_KEY = '_sshTarget';
 
 export const RUN_SSH_COMMAND_TOOL = 'run_ssh_command';
+export const UPSERT_PLAN_TOOL = 'upsert_plan';
+export const USE_SKILL_TOOL = 'use_skill';
 
 function formatTargetLabel(user: string, host: string, port: number): string {
   return `${user}@${host}:${port}`;

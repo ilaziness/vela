@@ -9,13 +9,17 @@ import {
 } from '../../../bindings/github.com/ilaziness/vela/services/models';
 import { formatAIChatError } from '../../func/aiChatError';
 import { parseCallServiceError } from '../../func/service';
-import { getCurrentSSHBindState, RUN_SSH_COMMAND_TOOL, SSH_TARGET_INPUT_KEY } from '../../func/aiContext';
+import {
+  getCurrentSSHBindState,
+  RUN_SSH_COMMAND_TOOL,
+  SSH_TARGET_INPUT_KEY,
+  UPSERT_PLAN_TOOL,
+  USE_SKILL_TOOL,
+} from '../../func/aiContext';
 import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
 
 const EVENT_AI_STREAM_CHUNK = 'eventAIStreamChunk';
-const UPSERT_PLAN_TOOL = 'upsert_plan';
-const USE_SKILL_TOOL = 'use_skill';
 
 function isKnownChatTool(toolName: string): boolean {
   return (
@@ -23,6 +27,14 @@ function isKnownChatTool(toolName: string): boolean {
     toolName === UPSERT_PLAN_TOOL ||
     toolName === USE_SKILL_TOOL
   );
+}
+
+function toolPartType(toolName: string): 'tool' | 'dynamic-tool' {
+  return isKnownChatTool(toolName) ? 'tool' : 'dynamic-tool';
+}
+
+function isToolMessagePart(part: { type?: string } | null | undefined): boolean {
+  return part?.type === 'tool' || part?.type === 'dynamic-tool';
 }
 
 export const currentUser: ChatUser = {
@@ -457,11 +469,12 @@ function genkitPartsToMui(parts: any[], fallbackText: string): MessageParts {
     }
     if (p.toolRequest) {
       const req = p.toolRequest;
+      const toolName = String(req.name || '');
       out.push({
-        type: 'dynamic-tool',
+        type: toolPartType(toolName),
         toolInvocation: {
           toolCallId: String(req.ref || req.name || ''),
-          toolName: String(req.name || ''),
+          toolName,
           state: 'input-available',
           input: req.input ?? {},
         },
@@ -470,11 +483,12 @@ function genkitPartsToMui(parts: any[], fallbackText: string): MessageParts {
     }
     if (p.toolResponse) {
       const res = p.toolResponse;
+      const toolName = String(res.name || '');
       out.push({
-        type: 'dynamic-tool',
+        type: toolPartType(toolName),
         toolInvocation: {
           toolCallId: String(res.ref || res.name || ''),
-          toolName: String(res.name || ''),
+          toolName,
           state: 'output-available',
           output: res.output ?? {},
         },
@@ -494,11 +508,11 @@ function genkitPartsToMui(parts: any[], fallbackText: string): MessageParts {
 function mergeToolParts(existing: MessageParts, incoming: MessageParts): MessageParts {
   const merged = [...existing] as any[];
   for (const part of incoming as any[]) {
-    if (part?.type === 'dynamic-tool' && part.toolInvocation?.state === 'output-available') {
+    if (isToolMessagePart(part) && part.toolInvocation?.state === 'output-available') {
       const id = String(part.toolInvocation.toolCallId || '');
       if (id) {
         const idx = merged.findLastIndex(
-          (p: any) => p?.type === 'dynamic-tool' && p.toolInvocation?.toolCallId === id,
+          (p: any) => isToolMessagePart(p) && p.toolInvocation?.toolCallId === id,
         );
         if (idx >= 0) {
           merged[idx] = {
