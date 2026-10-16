@@ -32,8 +32,9 @@ type ProgressData struct {
 
 // NewOpts configures optional tracker fields.
 type NewOpts struct {
-	ID       string
-	OwnerKey string
+	ID        string
+	OwnerKey  string
+	Overwrite bool
 }
 
 type Registry struct {
@@ -78,6 +79,7 @@ func (r *Registry) NewWith(sessionID, transferType, localFile, remoteFile string
 		localFile:    localFile,
 		remoteFile:   remoteFile,
 		total:        total,
+		overwrite:    opts.Overwrite,
 		done:         make(chan struct{}),
 		ctx:          ctx,
 		cancelFunc:   cancel,
@@ -172,6 +174,8 @@ type Tracker struct {
 	cancelFunc   context.CancelFunc
 	cancelled    bool
 	interrupted  bool
+	overwrite    bool
+	err          error
 }
 
 func (t *Tracker) ID() string           { return t.id }
@@ -180,6 +184,15 @@ func (t *Tracker) TransferType() string { return t.transferType }
 func (t *Tracker) LocalFile() string    { return t.localFile }
 func (t *Tracker) RemoteFile() string   { return t.remoteFile }
 func (t *Tracker) TotalSize() int64     { return t.total }
+func (t *Tracker) Overwrite() bool      { return t.overwrite }
+
+// Wait blocks until Stop and returns the error recorded there.
+func (t *Tracker) Wait() error {
+	<-t.done
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	return t.err
+}
 
 func (t *Tracker) WasCancelled() bool {
 	t.mutex.Lock()
@@ -271,6 +284,9 @@ func (t *Tracker) startProgress() {
 
 func (t *Tracker) Stop(err error) {
 	t.stopOnce.Do(func() {
+		t.mutex.Lock()
+		t.err = err
+		t.mutex.Unlock()
 		if t.ticker != nil {
 			t.ticker.Stop()
 		}

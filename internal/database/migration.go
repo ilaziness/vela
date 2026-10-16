@@ -30,6 +30,7 @@ var migrations = []Migration{
 	{Version: 11, Name: "add sftp transfers queue", Up: migrateAddSftpTransfers},
 	{Version: 12, Name: "add bookmark tags and color", Up: migrateAddBookmarkTagsColor},
 	{Version: 13, Name: "add ai_messages status", Up: migrateAddAIMessageStatus},
+	{Version: 14, Name: "add sftp transfer overwrite", Up: migrateAddSftpTransferOverwrite},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -367,6 +368,22 @@ func migrateAddBookmarkTagsColor(db *sql.DB, logger *zap.Logger) error {
 		if err != nil {
 			return fmt.Errorf("check column bookmarks.%s failed: %w", c.name, err)
 		}
+	}
+	return nil
+}
+
+func migrateAddSftpTransferOverwrite(db *sql.DB, logger *zap.Logger) error {
+	var columnName string
+	err := db.QueryRow(`SELECT name FROM pragma_table_info('sftp_transfers') WHERE name = 'overwrite'`).Scan(&columnName)
+	if err == sql.ErrNoRows {
+		if _, err := db.Exec(`ALTER TABLE sftp_transfers ADD COLUMN overwrite INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add column sftp_transfers.overwrite failed: %w", err)
+		}
+		logger.Debug("migration: added sftp_transfers.overwrite column")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check column sftp_transfers.overwrite failed: %w", err)
 	}
 	return nil
 }

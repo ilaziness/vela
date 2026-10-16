@@ -17,6 +17,9 @@ type QueueRecord struct {
 	TotalSize    int64
 	Status       string
 	Error        string
+	// Overwrite is set for in-place edit transfers. Retry must replace the
+	// destination instead of resuming by size.
+	Overwrite bool
 }
 
 // QueueStore persists unfinished transfers across restarts.

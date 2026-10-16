@@ -64,7 +64,9 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	})
 	tunnelMgr := tunnel.NewManager(log, sshMgr)
 
+	sftpService := NewSftpService(a, sftpMgr, log)
 	sshService := NewSSHService(a, sshMgr, sftpMgr, tunnelMgr)
+	sshService.setSFTPCloseHooks(sftpService.CloseSessionEdits, sftpService.CleanupSessionEditDir, sftpService.CloseAllEdits, sftpService.CleanupAllEditDirs)
 	sshService.setSSHConfigGetter(func() config.SSHConfig {
 		return cfgStore.Config.SSH
 	})
@@ -93,7 +95,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 
 	a.RegisterService(application.NewService(appService))
 	a.RegisterService(application.NewService(sshService))
-	a.RegisterService(application.NewService(NewSftpService(a, sftpMgr)))
+	a.RegisterService(application.NewService(sftpService))
 	a.RegisterService(application.NewService(configService))
 	a.RegisterService(application.NewService(bookmarkService))
 	a.RegisterService(application.NewService(tunnelService))

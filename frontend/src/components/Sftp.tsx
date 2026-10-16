@@ -30,6 +30,7 @@ import {
   CreateNewFolder as CreateFolderIcon,
   Delete as DeleteIcon,
   Description as FileIcon,
+  Edit as EditIcon,
   DriveFileRenameOutline as RenameIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
@@ -274,6 +275,17 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     return selectedFiles();
   };
 
+  const handleEdit = async (file: FileInfo) => {
+    handleCloseMenu();
+    if (file.isDir) return;
+    try {
+      await SftpService.EditRemoteFile(linkID, remoteJoin(currentPath, file.name));
+    } catch (err: any) {
+      showMessageError(parseCallServiceError(err));
+      LogService.Error(`Failed to edit: ${err.message || err}`);
+    }
+  };
+
   const handleDownload = async (targets: FileInfo[]) => {
     handleCloseMenu();
     if (targets.length === 0) return;
@@ -507,6 +519,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const allSelected =
     fileList.length > 0 && selectedNames.size === fileList.length;
   const menuTargetCount = contextMenu ? menuActionTargets().length : 0;
+  const editTarget =
+    menuTargetCount === 1 && !menuActionTargets()[0].isDir
+      ? menuActionTargets()[0]
+      : null;
 
   return (
     <Box
@@ -709,6 +725,14 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             : { top: contextMenu.mouseY, left: contextMenu.mouseX }
         }
       >
+        {editTarget && (
+          <MenuItem onClick={() => void handleEdit(editTarget)}>
+            <ListItemIcon>
+              <EditIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>编辑</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem onClick={() => void handleDownload(menuActionTargets())}>
           <ListItemIcon>
             <DownloadIcon fontSize="small" />

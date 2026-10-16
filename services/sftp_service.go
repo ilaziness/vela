@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/transfer"
@@ -31,12 +32,17 @@ type TransferQueuedData struct {
 }
 
 type SftpService struct {
-	app *application.App
-	mgr *sftp.Manager
+	app    *application.App
+	mgr    *sftp.Manager
+	logger *zap.Logger
+	edits  *editBook
 }
 
-func NewSftpService(app *application.App, mgr *sftp.Manager) *SftpService {
-	return &SftpService{app: app, mgr: mgr}
+func NewSftpService(app *application.App, mgr *sftp.Manager, logger *zap.Logger) *SftpService {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &SftpService{app: app, mgr: mgr, logger: logger, edits: newEditBook()}
 }
 
 func (s *SftpService) ListFiles(sessionID, path string, showHidden bool) ([]FileInfo, error) {

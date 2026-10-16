@@ -1,6 +1,9 @@
 package transfer
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestTrackerStopIdempotent(t *testing.T) {
 	var n int
@@ -28,5 +31,18 @@ func TestNewWithRejectsDuplicateActiveID(t *testing.T) {
 	}
 	if !r.HasActive("same") {
 		t.Fatal("expected HasActive")
+	}
+}
+
+func TestTrackerStopRecordsErrorAndWait(t *testing.T) {
+	r := NewRegistry(nil)
+	tr, err := r.New("sess", TypeDownload, "local", "remote", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("download failed")
+	tr.Stop(want)
+	if got := tr.Wait(); got == nil || got.Error() != want.Error() {
+		t.Fatalf("Wait()=%v, want %v", got, want)
 	}
 }

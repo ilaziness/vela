@@ -189,6 +189,7 @@ func (sft *Manager) queueUpsertRunning(t *transfer.Tracker) {
 		RemoteFile:   t.RemoteFile(),
 		TotalSize:    t.TotalSize(),
 		Status:       transfer.StatusRunning,
+		Overwrite:    t.Overwrite(),
 	}); err != nil {
 		sft.logger.Warn("queue upsert failed", zap.String("id", t.ID()), zap.Error(err))
 	}
@@ -244,6 +245,13 @@ func (sft *Manager) uploadFile(sessionID string, localPathFile, remoteDir string
 	}
 
 	remoteFilePath := joinRemotePath(remoteDir, filepath.Base(localPathFile))
+	if tracker != nil && tracker.Overwrite() {
+		if tracker.RemoteFile() != "" {
+			remoteFilePath = tracker.RemoteFile()
+		}
+		return sft.uploadFileReplace(ftpClient, localFile, remoteFilePath, tracker)
+	}
+
 	var destSize int64
 	if st, statErr := ftpClient.Stat(remoteFilePath); statErr == nil && !st.IsDir() {
 		destSize = st.Size()
@@ -292,28 +300,184 @@ func (sft *Manager) uploadFile(sessionID string, localPathFile, remoteDir string
 	return err
 }
 
+const posixRenameExt = "posix-rename@openssh.com"
+
+func editStagingRemotePath(final string) string {
+	dir := path.Dir(final)
+	name := "." + path.Base(final) + ".vela-edit"
+	if dir == "." || dir == "" {
+		return name
+	}
+	return path.Join(dir, name)
+}
+
+// stagingReplacer is the subset of *sftp.Client used to swap in an edit upload.
+type stagingReplacer interface {
+	HasExtension(name string) (string, bool)
+	PosixRename(oldname, newname string) error
+	Rename(oldname, newname string) error
+	Stat(p string) (os.FileInfo, error)
+	Remove(path string) error
+}
+
+// uploadFileReplace writes a sibling temp file, then replaces the original.
+// It does not truncate the original first and does not call DecideResume.
+func (sft *Manager) uploadFileReplace(client *sftp.Client, local *os.File, remoteFinal string, tracker *transfer.Tracker) error {
+	if tracker == nil {
+		return errors.New(ErrTrackerRequired)
+	}
+	if remoteFinal == "" {
+		return fmt.Errorf("remote path is empty")
+	}
+	staging := editStagingRemotePath(remoteFinal)
+	if staging == remoteFinal {
+		return fmt.Errorf("edit staging path equals remote path")
+	}
+	if _, err := local.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	remoteFile, err := client.Create(staging)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(remoteFile, &transfer.Reader{Reader: local, Tracker: tracker})
+	closeErr := remoteFile.Close()
+	if copyErr != nil {
+		sft.removeStaging(client, staging)
+		return copyErr
+	}
+	if closeErr != nil {
+		sft.removeStaging(client, staging)
+		return closeErr
+	}
+	return sft.replaceStagedFile(client, staging, remoteFinal)
+}
+
+// replaceStagedFile moves staging onto remoteFinal.
+// PosixRename replaces an existing file without deleting it first.
+// Without that extension the original is removed and then renamed; if that
+// rename fails the new bytes exist only at staging.
+func (sft *Manager) replaceStagedFile(client stagingReplacer, staging, remoteFinal string) error {
+	if _, ok := client.HasExtension(posixRenameExt); ok {
+		err := client.PosixRename(staging, remoteFinal)
+		if err == nil {
+			return nil
+		}
+		if !sftpOpUnsupported(err) {
+			sft.removeStaging(client, staging)
+			return err
+		}
+		sft.logger.Warn("posix-rename unsupported, falling back to remove then rename",
+			zap.String("staging", staging), zap.String("remote", remoteFinal), zap.Error(err))
+	} else {
+		sft.logger.Debug("sftp server has no posix-rename; remove then rename",
+			zap.String("staging", staging), zap.String("remote", remoteFinal))
+	}
+	removed := false
+	if st, statErr := client.Stat(remoteFinal); statErr == nil {
+		if st.IsDir() {
+			sft.removeStaging(client, staging)
+			return fmt.Errorf("remote path is a directory")
+		}
+		if rmErr := client.Remove(remoteFinal); rmErr != nil {
+			sft.removeStaging(client, staging)
+			return rmErr
+		}
+		removed = true
+	} else if !os.IsNotExist(statErr) {
+		sft.removeStaging(client, staging)
+		return statErr
+	}
+	if err := client.Rename(staging, remoteFinal); err != nil {
+		if _, stErr := client.Stat(remoteFinal); stErr == nil {
+			sft.removeStaging(client, staging)
+			return err
+		}
+		if removed {
+			sft.logger.Error("edit rename failed after removing original",
+				zap.String("staging", staging), zap.String("remote", remoteFinal), zap.Error(err))
+			return fmt.Errorf("original remote file %s was removed but renaming %s into place failed; new contents remain at %s: %w",
+				remoteFinal, staging, staging, err)
+		}
+		sft.logger.Error("edit rename failed; new contents remain in staging",
+			zap.String("staging", staging), zap.String("remote", remoteFinal), zap.Error(err))
+		return fmt.Errorf("rename %s to %s failed; new contents remain at %s: %w", staging, remoteFinal, staging, err)
+	}
+	return nil
+}
+
+func sftpOpUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, sftp.ErrSSHFxOpUnsupported) {
+		return true
+	}
+	var st *sftp.StatusError
+	return errors.As(err, &st) && st.FxCode() == sftp.ErrSSHFxOpUnsupported
+}
+
+func (sft *Manager) removeStaging(client stagingReplacer, staging string) {
+	if err := client.Remove(staging); err != nil && !os.IsNotExist(err) {
+		sft.logger.Warn("delete remote edit temp failed", zap.String("path", staging), zap.Error(err))
+	}
+}
+
+func (sft *Manager) downloadFileTruncate(client *sftp.Client, localPathFile, remotePathFile string, tracker *transfer.Tracker) error {
+	if tracker == nil {
+		return errors.New(ErrTrackerRequired)
+	}
+	remoteFile, err := client.Open(remotePathFile)
+	if err != nil {
+		return err
+	}
+	defer remoteFile.Close()
+	localFile, err := os.OpenFile(localPathFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer localFile.Close()
+	_, err = io.Copy(&transfer.Writer{Writer: localFile, Tracker: tracker}, remoteFile)
+	return err
+}
+
 func (sft *Manager) UploadFile(sessionID, localPath, remotePath string) error {
 	info, err := os.Stat(localPath)
 	if err != nil {
 		return err
 	}
-	if err := sft.startUploadFileAsync(sessionID, localPath, remotePath, info.Size(), transfer.NewOpts{}); err != nil {
+	if _, err := sft.startUploadFileAsync(sessionID, localPath, remotePath, info.Size(), transfer.NewOpts{}); err != nil {
 		return err
 	}
 	sft.notifyQueued(sessionID, 1)
 	return nil
 }
 
-func (sft *Manager) startUploadFileAsync(sessionID, localPath, remotePath string, size int64, opts transfer.NewOpts) error {
+func (sft *Manager) startUploadFileAsync(sessionID, localPath, remotePath string, size int64, opts transfer.NewOpts) (*transfer.Tracker, error) {
 	tracker, err := sft.newTracker(sessionID, transfer.TypeUpload, localPath, joinRemotePath(remotePath, filepath.Base(localPath)), size, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	go func() {
 		err := sft.uploadFile(sessionID, localPath, remotePath, tracker)
 		sft.stopTracker(tracker, err)
 	}()
-	return nil
+	return tracker, nil
+}
+
+// startUploadReplaceAsync uploads to remoteFile by writing a sibling temp then renaming.
+// remoteFile is the final path stored on the queue, not the staging name.
+func (sft *Manager) startUploadReplaceAsync(sessionID, localPath, remoteFile string, size int64, opts transfer.NewOpts) (*transfer.Tracker, error) {
+	opts.Overwrite = true
+	tracker, err := sft.newTracker(sessionID, transfer.TypeUpload, localPath, remoteFile, size, opts)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		err := sft.uploadFile(sessionID, localPath, path.Dir(remoteFile), tracker)
+		sft.stopTracker(tracker, err)
+	}()
+	return tracker, nil
 }
 
 func (sft *Manager) downloadFile(sessionID string, localPathFile, remotePathFile string, tracker *transfer.Tracker) error {
@@ -332,6 +496,9 @@ func (sft *Manager) downloadFile(sessionID string, localPathFile, remotePathFile
 	localDir := filepath.Dir(localPathFile)
 	if err := os.MkdirAll(localDir, 0755); err != nil {
 		return err
+	}
+	if tracker != nil && tracker.Overwrite() {
+		return sft.downloadFileTruncate(ftpClient, localPathFile, remotePathFile, tracker)
 	}
 
 	var destSize int64
@@ -396,23 +563,43 @@ func (sft *Manager) DownloadFile(sessionID, localPathFile, remotePathFile string
 	if err != nil {
 		return err
 	}
-	if err := sft.startDownloadFileAsync(sessionID, localPathFile, remotePathFile, info.Size(), transfer.NewOpts{}); err != nil {
+	if _, err := sft.startDownloadFileAsync(sessionID, localPathFile, remotePathFile, info.Size(), transfer.NewOpts{}); err != nil {
 		return err
 	}
 	sft.notifyQueued(sessionID, 1)
 	return nil
 }
 
-func (sft *Manager) startDownloadFileAsync(sessionID, localPathFile, remotePathFile string, size int64, opts transfer.NewOpts) error {
+func (sft *Manager) startDownloadFileAsync(sessionID, localPathFile, remotePathFile string, size int64, opts transfer.NewOpts) (*transfer.Tracker, error) {
 	tracker, err := sft.newTracker(sessionID, transfer.TypeDownload, localPathFile, remotePathFile, size, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	go func() {
 		err := sft.downloadFile(sessionID, localPathFile, remotePathFile, tracker)
 		sft.stopTracker(tracker, err)
 	}()
-	return nil
+	return tracker, nil
+}
+
+// StartOverwriteDownload queues a full download that truncates the local file.
+func (sft *Manager) StartOverwriteDownload(sessionID, localFile, remoteFile string, size int64) (*transfer.Tracker, error) {
+	t, err := sft.startDownloadFileAsync(sessionID, localFile, remoteFile, size, transfer.NewOpts{Overwrite: true})
+	if err != nil {
+		return nil, err
+	}
+	sft.notifyQueued(sessionID, 1)
+	return t, nil
+}
+
+// StartOverwriteUpload queues a replace upload. remoteFile is the final path.
+func (sft *Manager) StartOverwriteUpload(sessionID, localFile, remoteFile string, size int64) (*transfer.Tracker, error) {
+	t, err := sft.startUploadReplaceAsync(sessionID, localFile, remoteFile, size, transfer.NewOpts{Overwrite: true})
+	if err != nil {
+		return nil, err
+	}
+	sft.notifyQueued(sessionID, 1)
+	return t, nil
 }
 
 func (sft *Manager) UploadDirectory(sessionID, localPath, remotePath string) error {
@@ -474,7 +661,7 @@ func (sft *Manager) UploadPaths(sessionID, remotePath string, localPaths []strin
 		if job.isDir {
 			startErr = sft.startUploadDirectoryAsync(sessionID, job.path, remotePath, job.size, transfer.NewOpts{})
 		} else {
-			startErr = sft.startUploadFileAsync(sessionID, job.path, remotePath, job.size, transfer.NewOpts{})
+			_, startErr = sft.startUploadFileAsync(sessionID, job.path, remotePath, job.size, transfer.NewOpts{})
 		}
 		if startErr != nil {
 			sft.logger.Warn("enqueue upload failed", zap.String("path", job.path), zap.Error(startErr))
@@ -669,7 +856,7 @@ func (sft *Manager) DownloadPaths(sessionID, localDir string, remotePaths []stri
 			startErr = sft.startDownloadDirectoryAsync(sessionID, localDir, job.remote, job.size, transfer.NewOpts{})
 		} else {
 			localFile := filepath.Join(localDir, path.Base(job.remote))
-			startErr = sft.startDownloadFileAsync(sessionID, localFile, job.remote, job.size, transfer.NewOpts{})
+			_, startErr = sft.startDownloadFileAsync(sessionID, localFile, job.remote, job.size, transfer.NewOpts{})
 		}
 		if startErr != nil {
 			sft.logger.Warn("enqueue download failed", zap.String("path", job.remote), zap.Error(startErr))
@@ -740,6 +927,18 @@ func (sft *Manager) Chown(sessionID, path string, uid, gid int) error {
 		return err
 	}
 	return ftpClient.Chown(path, uid, gid)
+}
+
+func (sft *Manager) Stat(sessionID, remotePath string) (FileInfo, error) {
+	ftpClient, err := sft.getSftpClient(sessionID)
+	if err != nil {
+		return FileInfo{}, err
+	}
+	info, err := ftpClient.Stat(remotePath)
+	if err != nil {
+		return FileInfo{}, err
+	}
+	return convertFileInfo(info), nil
 }
 
 func (sft *Manager) GetWd(sessionID string) (string, error) {
@@ -883,7 +1082,7 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 		return err
 	}
 
-	opts := transfer.NewOpts{ID: rec.ID, OwnerKey: rec.OwnerKey}
+	opts := transfer.NewOpts{ID: rec.ID, OwnerKey: rec.OwnerKey, Overwrite: rec.Overwrite}
 	var startErr error
 	switch strings.ToLower(rec.TransferType) {
 	case transfer.TypeUpload:
@@ -895,14 +1094,17 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 		if remoteParent == "." || remoteParent == "" {
 			remoteParent = "/"
 		}
-		if info.IsDir() {
+		switch {
+		case info.IsDir():
 			total, err := sft.calcLocalDirSize(rec.LocalFile)
 			if err != nil {
 				return err
 			}
 			startErr = sft.startUploadDirectoryAsync(sessionID, rec.LocalFile, remoteParent, total, opts)
-		} else {
-			startErr = sft.startUploadFileAsync(sessionID, rec.LocalFile, remoteParent, info.Size(), opts)
+		case rec.Overwrite:
+			_, startErr = sft.startUploadReplaceAsync(sessionID, rec.LocalFile, rec.RemoteFile, info.Size(), opts)
+		default:
+			_, startErr = sft.startUploadFileAsync(sessionID, rec.LocalFile, remoteParent, info.Size(), opts)
 		}
 	case transfer.TypeDownload:
 		ftpClient, err := sft.getSftpClient(sessionID)
@@ -920,7 +1122,7 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 			}
 			startErr = sft.startDownloadDirectoryAsync(sessionID, rec.LocalFile, rec.RemoteFile, total, opts)
 		} else {
-			startErr = sft.startDownloadFileAsync(sessionID, rec.LocalFile, rec.RemoteFile, info.Size(), opts)
+			_, startErr = sft.startDownloadFileAsync(sessionID, rec.LocalFile, rec.RemoteFile, info.Size(), opts)
 		}
 	default:
 		return fmt.Errorf("unknown transfer type: %s", rec.TransferType)

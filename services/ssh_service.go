@@ -93,14 +93,30 @@ func (r ConnectRequest) endpoint() ssh.Endpoint {
 }
 
 type SSHService struct {
-	app          *application.App
-	mgr          *ssh.Manager
-	sftp         *sftp.Manager
-	tunnels      *tunnel.Manager
-	termws       *termws.Server
-	bookmarks    *bookmark.Service
-	getSSHConfig func() config.SSHConfig
-	closing      sync.Map
+	app                  *application.App
+	mgr                  *ssh.Manager
+	sftp                 *sftp.Manager
+	tunnels              *tunnel.Manager
+	termws               *termws.Server
+	bookmarks            *bookmark.Service
+	getSSHConfig         func() config.SSHConfig
+	closing              sync.Map
+	onSFTPSessionEnd     func(sessionID string)
+	onSFTPSessionCleanup func(sessionID string)
+	onSFTPCloseAll       func()
+	onSFTPCloseAllClean  func()
+}
+
+// setSFTPCloseHooks runs edit cleanup around SFTP client close.
+// onSession may block to confirm an upload and runs before the client closes.
+// onSessionCleanup deletes temp files after the client closes and must not show a dialog.
+// onAll runs on app exit before clients close and must not show a dialog.
+// onAllCleanup deletes temp files after clients close and must not show a dialog.
+func (s *SSHService) setSFTPCloseHooks(onSession, onSessionCleanup func(sessionID string), onAll, onAllCleanup func()) {
+	s.onSFTPSessionEnd = onSession
+	s.onSFTPSessionCleanup = onSessionCleanup
+	s.onSFTPCloseAll = onAll
+	s.onSFTPCloseAllClean = onAllCleanup
 }
 
 func NewSSHService(app *application.App, mgr *ssh.Manager, sftpMgr *sftp.Manager, tunnels *tunnel.Manager) *SSHService {
@@ -227,7 +243,13 @@ func (s *SSHService) Close() {
 		s.termws.CloseAllClients()
 	}
 	s.tunnels.StopAllAfter(func() {
+		if s.onSFTPCloseAll != nil {
+			s.onSFTPCloseAll()
+		}
 		s.sftp.CloseAll()
+		if s.onSFTPCloseAllClean != nil {
+			s.onSFTPCloseAllClean()
+		}
 		s.mgr.CloseAll()
 	})
 }
@@ -242,7 +264,13 @@ func (s *SSHService) CloseByID(id string) error {
 	}
 	var err error
 	s.tunnels.StopSessionAfter(id, func() {
+		if s.onSFTPSessionEnd != nil {
+			s.onSFTPSessionEnd(id)
+		}
 		s.sftp.CloseSession(id)
+		if s.onSFTPSessionCleanup != nil {
+			s.onSFTPSessionCleanup(id)
+		}
 		err = s.mgr.CloseSession(id)
 	})
 	return err

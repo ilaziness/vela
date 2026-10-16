@@ -12,7 +12,7 @@ require (
 	github.com/pkg/sftp v1.13.11
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/things-go/go-socks5 v0.1.3
-	github.com/wailsapp/wails/v3 v3.0.0-beta.29
+	github.com/wailsapp/wails/v3 v3.0.0-beta.30
 	github.com/xx25/go-zmodem v0.0.0-20260928123519-057a34b28431
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.58.0
