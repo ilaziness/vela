@@ -1,5 +1,5 @@
 import React from "react";
-import { Autocomplete, TextField, Checkbox, InputAdornment, IconButton } from "@mui/material";
+import { Autocomplete, Box, TextField, Checkbox, IconButton } from "@mui/material";
 import { Refresh } from "@mui/icons-material";
 import { SSHTunnelSession } from "../types/command";
 
@@ -17,46 +17,45 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
   onRefresh,
 }) => {
   return (
-    <Autocomplete
-      multiple
-      options={sessions}
-      getOptionLabel={(option) => option.clientKey}
-      value={selectedSessions}
-      onChange={(_, newValue) => onChange(newValue)}
-      renderInput={(params) => (
-        <TextField
-          {...params}
-          label="选择要发送到的 SSH 会话"
-          placeholder="选择会话"
+    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5, my: 1 }}>
+      <Autocomplete
+        multiple
+        options={sessions}
+        getOptionLabel={(option) => option.clientKey}
+        isOptionEqualToValue={(option, value) => option.id === value.id}
+        value={selectedSessions}
+        onChange={(_, newValue) => onChange(newValue)}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label="选择要发送到的 SSH 会话"
+            placeholder="选择会话"
+            size="small"
+          />
+        )}
+        renderOption={(props, option) => {
+          const { key, ...optionProps } = props;
+          const checked = selectedSessions.some((session) => session.id === option.id);
+          return (
+            <li key={key} {...optionProps}>
+              <Checkbox checked={checked} />
+              {option.clientKey}
+            </li>
+          );
+        }}
+        sx={{ flex: 1 }}
+      />
+      {onRefresh && (
+        <IconButton
+          onClick={onRefresh}
           size="small"
-          slotProps={{
-            input: {
-              endAdornment: (
-                <InputAdornment position="end">
-                  {onRefresh && (
-                    <IconButton
-                      onClick={onRefresh}
-                      size="small"
-                      edge="end"
-                      title="刷新会话列表"
-                    >
-                      <Refresh fontSize="small" />
-                    </IconButton>
-                  )}
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
+          title="刷新会话列表"
+          sx={{ mt: 1 }}
+        >
+          <Refresh fontSize="small" />
+        </IconButton>
       )}
-      renderOption={(props, option) => (
-        <li {...props}>
-          <Checkbox checked={selectedSessions.includes(option)} />
-          {option.clientKey}
-        </li>
-      )}
-      sx={{ my: 1 }}
-    />
+    </Box>
   );
 };
 

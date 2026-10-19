@@ -79,8 +79,15 @@ const Command: React.FC = () => {
 
   const loadSessions = useCallback(async () => {
     try {
-      const sessionsData = await SSHService.GetActiveSessions();
-      setSessions(sessionsData as SSHTunnelSession[]);
+      const sessionsData = (await SSHService.GetActiveSessions()) as SSHTunnelSession[];
+      const next = sessionsData ?? [];
+      setSessions(next);
+      setSelectedSessions((prev) =>
+        prev.flatMap((selected) => {
+          const current = next.find((session) => session.id === selected.id);
+          return current ? [current] : [];
+        }),
+      );
     } catch (error) {
       errorMessage(`获取会话列表失败：${parseCallServiceError(error)}`);
     }
