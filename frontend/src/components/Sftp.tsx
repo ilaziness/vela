@@ -23,6 +23,7 @@ import {
   TableRow,
   TextField,
   Toolbar,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import {
@@ -39,7 +40,8 @@ import {
   Person as ChownIcon,
   UploadFile as UploadIcon,
 } from "@mui/icons-material";
-import MoreVertIcon from "@mui/icons-material/MoreVert";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { Events } from "@wailsio/runtime";
 import {
   LogService,
@@ -47,11 +49,20 @@ import {
   SSHService,
   ToolService,
 } from "../../bindings/github.com/ilaziness/vela/services";
+import { Entry } from "../../bindings/github.com/ilaziness/vela/internal/localfs/models";
 import { ProgressData } from "../../bindings/github.com/ilaziness/vela/services/models";
 import { formatFileSize, parseCallServiceError } from "../func/service";
 import { sortFileList } from "../func/ftp";
+import {
+  PaneSide,
+  allowPaneDragOver,
+  dragStartsOnControl,
+  readPaneDrag,
+  writePaneDrag,
+} from "../func/sftpPane";
 import { useMessageStore } from "../stores/message";
 import { useTransferStore } from "../stores/transfer";
+import LocalFilePane from "./LocalFilePane";
 import SftpNavbar from "./SftpNavbar";
 import {
   FileInfo,
@@ -75,6 +86,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const [fileList, setFileList] = useState<FileInfo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [showHiddenFiles, setShowHiddenFiles] = useState<boolean>(false);
+  const [localDir, setLocalDir] = useState("");
+  const [localParent, setLocalParent] = useState("");
+  const [localAtRoot, setLocalAtRoot] = useState(false);
+  const [localEntries, setLocalEntries] = useState<Entry[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localShowHidden, setLocalShowHidden] = useState(false);
+  const [localSelected, setLocalSelected] = useState<Set<string>>(new Set());
   const initStartedRef = useRef(false);
   const { errorMessage: showMessageError } = useMessageStore();
   const addProgress = useTransferStore((s) => s.addProgress);
@@ -113,10 +131,29 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
 
   const currentPathRef = useRef(currentPath);
   currentPathRef.current = currentPath;
+  const localDirRef = useRef(localDir);
+  localDirRef.current = localDir;
+  const localShowHiddenRef = useRef(localShowHidden);
+  localShowHiddenRef.current = localShowHidden;
+  const localListSeq = useRef(0);
+  const remoteListSeq = useRef(0);
+  const remoteListInFlight = useRef(false);
+  const remoteNavTarget = useRef<string | null>(null);
+  const localNavTarget = useRef<string | null>(null);
+  const [remoteNavigating, setRemoteNavigating] = useState(false);
+  const [localNavigating, setLocalNavigating] = useState(false);
 
   const refreshFileList = async (path?: string, showHidden?: boolean) => {
-    const targetPath = path !== undefined && path !== "" ? path : currentPath;
+    const targetPath =
+      path !== undefined && path !== "" ? path : currentPathRef.current;
     const showHiddenAll = showHidden ?? showHiddenFiles;
+    const seq = ++remoteListSeq.current;
+    const changing = targetPath !== currentPathRef.current;
+    remoteListInFlight.current = true;
+    if (changing) {
+      remoteNavTarget.current = targetPath;
+      setRemoteNavigating(true);
+    }
     setLoading(true);
     try {
       const files = await SftpService.ListFiles(
@@ -124,6 +161,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         targetPath,
         showHiddenAll,
       );
+      if (seq !== remoteListSeq.current) return false;
       const sorted = sortFileList(files);
       setFileList(sorted);
       setSelectedNames((prev) => {
@@ -132,17 +170,68 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         const next = new Set([...prev].filter((n) => names.has(n)));
         return next.size === prev.size ? prev : next;
       });
+      return true;
     } catch (err: any) {
+      if (seq !== remoteListSeq.current) return false;
       showMessageError(parseCallServiceError(err));
       LogService.Error(`Failed to list files: ${err.message || err}`);
       throw err;
     } finally {
-      setLoading(false);
+      if (seq === remoteListSeq.current) {
+        remoteListInFlight.current = false;
+        remoteNavTarget.current = null;
+        setRemoteNavigating(false);
+        setLoading(false);
+      }
     }
   };
 
   const refreshFileListRef = useRef(refreshFileList);
   refreshFileListRef.current = refreshFileList;
+
+  const refreshLocal = async (dir?: string, showHidden?: boolean) => {
+    const target = dir !== undefined ? dir : localDirRef.current;
+    const showHiddenAll = showHidden ?? localShowHiddenRef.current;
+    const seq = ++localListSeq.current;
+    const changing = dir !== undefined && dir !== localDirRef.current;
+    if (changing) {
+      localNavTarget.current = target;
+      setLocalNavigating(true);
+    }
+    setLocalLoading(true);
+    try {
+      const listing = await SftpService.ListLocal(target, showHiddenAll);
+      if (seq !== localListSeq.current) return false;
+      const entries = listing.entries ?? [];
+      localDirRef.current = listing.dir;
+      setLocalDir(listing.dir);
+      setLocalParent(listing.parent);
+      setLocalAtRoot(listing.atRoot);
+      setLocalEntries(entries);
+      setLocalSelected((prev) => {
+        if (prev.size === 0) return prev;
+        const paths = new Set(entries.map((entry) => entry.path));
+        const next = new Set([...prev].filter((path) => paths.has(path)));
+        return next.size === prev.size ? prev : next;
+      });
+      return true;
+    } catch (err: any) {
+      if (seq !== localListSeq.current) return false;
+      showMessageError(parseCallServiceError(err));
+      LogService.Error(`Failed to list local files: ${err.message || err}`);
+      return false;
+    } finally {
+      if (seq === localListSeq.current) {
+        localNavTarget.current = null;
+        setLocalNavigating(false);
+        setLocalLoading(false);
+      }
+    }
+  };
+
+  const refreshLocalRef = useRef(refreshLocal);
+  refreshLocalRef.current = refreshLocal;
+  const enqueueUploadRef = useRef<(paths: string[]) => void>(() => {});
 
   const loadPending = async () => {
     if (!ownerKey) return;
@@ -163,6 +252,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       await SSHService.StartSftp(linkID, ownerKey);
       LogService.Debug("SFTP connection established");
       const homePath = await SftpService.GetWd(linkID);
+      currentPathRef.current = homePath;
       setCurrentPath(homePath);
       await refreshFileList(homePath);
       await loadPending();
@@ -177,34 +267,44 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
 
   useEffect(() => {
     void initSftp();
+    void refreshLocalRef.current("");
   }, [linkID]);
 
   useEffect(() => {
     const unsubDrop = Events.On("eventSftpFilesDropped", (event) => {
       const { sessionID, localPaths } = event.data;
       if (sessionID !== linkID || !localPaths?.length) return;
-
-      SftpService.UploadPaths(linkID, currentPathRef.current, localPaths).catch(
-        (err) => showMessageError(parseCallServiceError(err)),
-      );
+      enqueueUploadRef.current(localPaths);
     });
     return unsubDrop;
-  }, [linkID, showMessageError]);
+  }, [linkID]);
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let refreshRemote = false;
+    let refreshLocalPane = false;
     const unsubProgress = Events.On("eventProgress", (event) => {
       const data = event.data as ProgressData;
-      if (
-        !data.done ||
-        data.sessionID !== linkID ||
-        data.transferType !== "upload"
-      ) {
+      if (!data.done || data.sessionID !== linkID) {
+        return;
+      }
+      if (data.transferType === "upload") {
+        refreshRemote = true;
+      } else if (data.transferType === "download") {
+        refreshLocalPane = true;
+      } else {
         return;
       }
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
-        void refreshFileListRef.current();
+        if (refreshRemote && !remoteNavTarget.current) {
+          void refreshFileListRef.current();
+        }
+        if (refreshLocalPane && !localNavTarget.current) {
+          void refreshLocalRef.current();
+        }
+        refreshRemote = false;
+        refreshLocalPane = false;
       }, 400);
     });
     return () => {
@@ -222,11 +322,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     const newPath = remoteJoin(currentPath, file.name);
     try {
       setFullScreenLoading(true);
-      await refreshFileList(newPath);
+      const applied = await refreshFileList(newPath);
+      if (!applied) return;
+      currentPathRef.current = newPath;
       setCurrentPath(newPath);
       clearSelection();
     } finally {
-      setFullScreenLoading(false);
+      if (!remoteListInFlight.current) setFullScreenLoading(false);
     }
   };
 
@@ -369,7 +471,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       showMessageError(parseCallServiceError(err));
       LogService.Error(`Failed to rename: ${err.message || err}`);
     } finally {
-      setFullScreenLoading(false);
+      if (!remoteListInFlight.current) setFullScreenLoading(false);
       setRenamingItem(null);
       setRenamingName("");
     }
@@ -457,7 +559,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     } catch (err: any) {
       showMessageError(parseCallServiceError(err));
     } finally {
-      setFullScreenLoading(false);
+      if (!remoteListInFlight.current) setFullScreenLoading(false);
       setNewFileName("");
     }
   };
@@ -481,7 +583,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     } catch (err: any) {
       showMessageError(parseCallServiceError(err));
     } finally {
-      setFullScreenLoading(false);
+      if (!remoteListInFlight.current) setFullScreenLoading(false);
       setNewFileName("");
     }
   };
@@ -492,11 +594,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     const newPath = parentPath || "/";
     try {
       setFullScreenLoading(true);
-      await refreshFileList(newPath);
+      const applied = await refreshFileList(newPath);
+      if (!applied) return;
+      currentPathRef.current = newPath;
       setCurrentPath(newPath);
       clearSelection();
     } finally {
-      setFullScreenLoading(false);
+      if (!remoteListInFlight.current) setFullScreenLoading(false);
     }
   };
 
@@ -513,6 +617,61 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     } catch {
       setChmodSymbolic("");
     }
+  };
+
+  const selectedLocalPaths = (): string[] =>
+    localEntries
+      .filter((entry) => localSelected.has(entry.path))
+      .map((entry) => entry.path);
+
+  const pathsForLocalDrag = (entry: Entry): string[] => {
+    if (localSelected.has(entry.path)) return selectedLocalPaths();
+    return [entry.path];
+  };
+
+  const pathsForRemoteDrag = (file: FileInfo): string[] => {
+    const targets = selectedNames.has(file.name) ? selectedFiles() : [file];
+    return targets.map((item) => remoteJoin(currentPath, item.name));
+  };
+
+  const enqueueUpload = (paths: string[]) => {
+    if (paths.length === 0) return;
+    if (remoteNavTarget.current) {
+      showMessageError("远程目录正在切换");
+      return;
+    }
+    SftpService.UploadPaths(linkID, currentPathRef.current, paths).catch(
+      (err) => {
+        showMessageError(parseCallServiceError(err));
+        LogService.Error(`Failed to upload paths: ${err.message || err}`);
+      },
+    );
+  };
+  enqueueUploadRef.current = enqueueUpload;
+
+  const enqueueDownload = (paths: string[]) => {
+    if (paths.length === 0 || !localDirRef.current) return;
+    if (localNavTarget.current) {
+      showMessageError("本地目录正在切换");
+      return;
+    }
+    SftpService.DownloadPaths(linkID, localDirRef.current, paths).catch(
+      (err) => {
+        showMessageError(parseCallServiceError(err));
+        LogService.Error(`Failed to download paths: ${err.message || err}`);
+      },
+    );
+  };
+
+  const handlePaneDrop = (target: PaneSide, event: React.DragEvent) => {
+    const data = readPaneDrag(event.dataTransfer);
+    if (!data || data.side === target) return;
+    event.preventDefault();
+    if (target === PaneSide.Remote) {
+      enqueueUpload(data.paths);
+      return;
+    }
+    enqueueDownload(data.paths);
   };
 
   const selectionCount = selectedNames.size;
@@ -533,84 +692,208 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         position: "relative",
       }}
     >
-      {sftpLoaded && (
-        <SftpNavbar
-          currentPath={currentPath}
-          onPathChange={async (path: string) => {
-            try {
-              setFullScreenLoading(true);
-              await refreshFileList(path);
-              setCurrentPath(path);
-              clearSelection();
-            } finally {
-              setFullScreenLoading(false);
-            }
-          }}
-          onRefresh={async () => {
-            try {
-              setFullScreenLoading(true);
-              await refreshFileList();
-            } finally {
-              setFullScreenLoading(false);
-            }
-          }}
-          onNavigateToParent={navigateToParent}
-          disableParentButton={currentPath === "/"}
-          showHiddenFiles={showHiddenFiles}
-          onToggleShowHidden={() => {
-            const newShowHiddenFiles = !showHiddenFiles;
-            setShowHiddenFiles(newShowHiddenFiles);
-            refreshFileList(undefined, newShowHiddenFiles).then(() => {});
-          }}
-        />
-      )}
-
-      {selectionCount > 0 && (
-        <Toolbar
-          variant="dense"
+      {!sftpLoaded ? (
+        <Box
           sx={{
-            minHeight: 40,
-            gap: 1,
-            borderBottom: 1,
-            borderColor: "divider",
-            bgcolor: "action.selected",
+            flex: 1,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
           }}
         >
-          <Typography variant="body2" sx={{ flex: 1 }}>
-            已选 {selectionCount} 项
-          </Typography>
-          <Button
-            size="small"
-            startIcon={<DownloadIcon />}
-            onClick={() => {
-              void handleDownload(selectedFiles());
-            }}
-          >
-            下载
-          </Button>
-          <Button
-            size="small"
-            color="error"
-            startIcon={<DeleteIcon />}
-            onClick={() => openDeleteConfirm(selectedFiles())}
-          >
-            删除
-          </Button>
-          <Button size="small" onClick={clearSelection}>
-            取消选择
-          </Button>
-        </Toolbar>
-      )}
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          <Box sx={{ display: "flex", alignItems: "stretch" }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <SftpNavbar
+                currentPath={localDir}
+                onPathChange={(path: string) => {
+                  void refreshLocal(path);
+                }}
+                onRefresh={() => {
+                  void refreshLocal();
+                }}
+                onNavigateToParent={() => {
+                  if (localAtRoot) return;
+                  void refreshLocal(localParent);
+                }}
+                disableParentButton={localAtRoot}
+                showHiddenFiles={localShowHidden}
+                onToggleShowHidden={() => {
+                  const next = !localShowHidden;
+                  setLocalShowHidden(next);
+                  void refreshLocal(localDir, next);
+                }}
+              />
+            </Box>
+            <Box
+              sx={{
+                width: 40,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                borderBottom: 1,
+                borderColor: "divider",
+              }}
+            >
+              <Tooltip title="上传到远程当前目录">
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled={localSelected.size === 0 || remoteNavigating}
+                    onClick={() => enqueueUpload(selectedLocalPaths())}
+                  >
+                    <ArrowForwardIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="下载到本地当前目录">
+                <span>
+                  <IconButton
+                    size="small"
+                    disabled={selectionCount === 0 || !localDir || localNavigating}
+                    onClick={() =>
+                      enqueueDownload(
+                        selectedFiles().map((file) =>
+                          remoteJoin(currentPath, file.name),
+                        ),
+                      )
+                    }
+                  >
+                    <ArrowBackIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <SftpNavbar
+                currentPath={currentPath}
+                onPathChange={async (path: string) => {
+                  try {
+                    setFullScreenLoading(true);
+                    const applied = await refreshFileList(path);
+                    if (!applied) return;
+                    currentPathRef.current = path;
+                    setCurrentPath(path);
+                    clearSelection();
+                  } finally {
+                    if (!remoteListInFlight.current) setFullScreenLoading(false);
+                  }
+                }}
+                onRefresh={async () => {
+                  try {
+                    setFullScreenLoading(true);
+                    await refreshFileList();
+                  } finally {
+                    if (!remoteListInFlight.current) setFullScreenLoading(false);
+                  }
+                }}
+                onNavigateToParent={navigateToParent}
+                disableParentButton={currentPath === "/"}
+                showHiddenFiles={showHiddenFiles}
+                onToggleShowHidden={() => {
+                  const newShowHiddenFiles = !showHiddenFiles;
+                  setShowHiddenFiles(newShowHiddenFiles);
+                  refreshFileList(undefined, newShowHiddenFiles).then(() => {});
+                }}
+              />
+            </Box>
+          </Box>
 
-      <Box
-        component="div"
-        id={`sftp-drop-${linkID}`}
-        data-file-drop-target=""
-        className="sftp-drop-zone"
-        onContextMenu={(e) => handleBlankContextMenu(e)}
-        sx={{ flex: 1, overflow: "auto", position: "relative" }}
-      >
-        {!sftpLoaded || loading ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
+            <LocalFilePane
+              entries={localEntries}
+              loading={localLoading}
+              selectedPaths={localSelected}
+              onToggle={(path) => {
+                setLocalSelected((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(path)) next.delete(path);
+                  else next.add(path);
+                  return next;
+                });
+              }}
+              onToggleAll={() => {
+                if (
+                  localEntries.length > 0 &&
+                  localSelected.size === localEntries.length
+                ) {
+                  setLocalSelected(new Set());
+                  return;
+                }
+                setLocalSelected(new Set(localEntries.map((entry) => entry.path)));
+              }}
+              onOpen={(entry) => {
+                if (!entry.isDir) return;
+                void refreshLocal(entry.path);
+              }}
+              pathsForDrag={pathsForLocalDrag}
+              onDragOver={allowPaneDragOver}
+              onDrop={(event) => handlePaneDrop(PaneSide.Local, event)}
+            />
+            <Box
+              sx={{ width: 40, borderLeft: 1, borderRight: 1, borderColor: "divider" }}
+            />
+            <Box
+              sx={{
+                flex: 1,
+                minWidth: 0,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+                position: "relative",
+              }}
+            >
+              {selectionCount > 0 && (
+                <Toolbar
+                  variant="dense"
+                  sx={{
+                    minHeight: 40,
+                    gap: 1,
+                    borderBottom: 1,
+                    borderColor: "divider",
+                    bgcolor: "action.selected",
+                  }}
+                >
+                  <Typography variant="body2" sx={{ flex: 1 }}>
+                    已选 {selectionCount} 项
+                  </Typography>
+                  <Button
+                    size="small"
+                    startIcon={<DownloadIcon />}
+                    onClick={() => {
+                      void handleDownload(selectedFiles());
+                    }}
+                  >
+                    下载
+                  </Button>
+                  <Button
+                    size="small"
+                    color="error"
+                    startIcon={<DeleteIcon />}
+                    onClick={() => openDeleteConfirm(selectedFiles())}
+                  >
+                    删除
+                  </Button>
+                  <Button size="small" onClick={clearSelection}>
+                    取消选择
+                  </Button>
+                </Toolbar>
+              )}
+              <Box
+                component="div"
+                id={`sftp-drop-${linkID}`}
+                data-file-drop-target=""
+                className="sftp-drop-zone"
+                onContextMenu={(e) => handleBlankContextMenu(e)}
+                onDragOver={allowPaneDragOver}
+                onDrop={(event) => handlePaneDrop(PaneSide.Remote, event)}
+                sx={{ flex: 1, overflow: "auto", position: "relative" }}
+              >
+        {loading ? (
           <Box
             sx={{
               display: "flex",
@@ -638,7 +921,6 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                   <TableCell>名称</TableCell>
                   <TableCell align="center">大小</TableCell>
                   <TableCell align="center">修改时间</TableCell>
-                  <TableCell align="center">操作</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -649,11 +931,22 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                       hover
                       key={file.name}
                       selected={selected}
+                      draggable
                       sx={{
                         cursor: file.isDir ? "pointer" : "default",
                       }}
                       onContextMenu={(e) => handleContextMenu(e, file)}
                       onDoubleClick={() => handleItemClick(file)}
+                      onDragStart={(event) => {
+                        if (dragStartsOnControl(event.target)) {
+                          event.preventDefault();
+                          return;
+                        }
+                        writePaneDrag(event.dataTransfer, {
+                          side: PaneSide.Remote,
+                          paths: pathsForRemoteDrag(file),
+                        });
+                      }}
                     >
                       <TableCell padding="checkbox">
                         <Checkbox
@@ -696,16 +989,6 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                       <TableCell align="center">
                         {new Date(file.modTime).toLocaleString()}
                       </TableCell>
-                      <TableCell align="center">
-                        <IconButton
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleContextMenu(e, file);
-                          }}
-                        >
-                          <MoreVertIcon />
-                        </IconButton>
-                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -713,7 +996,39 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             </Table>
           </TableContainer>
         )}
-      </Box>
+              </Box>
+              {fullScreenLoading && (
+                <Box
+                  sx={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                    backgroundColor: "rgba(0, 0, 0, 0.5)",
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    zIndex: 9999,
+                  }}
+                >
+                  <Box sx={{ width: "80%", maxWidth: 400 }}>
+                    <LinearProgress />
+                    <Typography
+                      variant="h6"
+                      color="white"
+                      align="center"
+                      sx={{ mt: 2 }}
+                    >
+                      请稍候...
+                    </Typography>
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          </Box>
+        </>
+      )}
 
       <Menu
         open={contextMenu !== null}
@@ -1033,34 +1348,6 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         </DialogActions>
       </Dialog>
 
-      {fullScreenLoading && (
-        <Box
-          sx={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            zIndex: 9999,
-          }}
-        >
-          <Box sx={{ width: "80%", maxWidth: 400 }}>
-            <LinearProgress />
-            <Typography
-              variant="h6"
-              color="white"
-              align="center"
-              sx={{ mt: 2 }}
-            >
-              请稍候...
-            </Typography>
-          </Box>
-        </Box>
-      )}
     </Box>
   );
 };

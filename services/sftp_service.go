@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/localfs"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/transfer"
 )
@@ -47,6 +48,11 @@ func NewSftpService(app *application.App, mgr *sftp.Manager, logger *zap.Logger)
 
 func (s *SftpService) ListFiles(sessionID, path string, showHidden bool) ([]FileInfo, error) {
 	return s.mgr.ListFiles(sessionID, path, showHidden)
+}
+
+// ListLocal reads a local directory. An empty dir uses the user home directory.
+func (s *SftpService) ListLocal(dir string, showHidden bool) (localfs.Listing, error) {
+	return localfs.List(dir, showHidden)
 }
 func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	localPath, err := s.app.Dialog.OpenFile().SetTitle("选择文件").PromptForSingleSelection()
@@ -95,6 +101,12 @@ func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) erro
 func (s *SftpService) UploadPaths(sessionID, remotePath string, localPaths []string) error {
 	return s.mgr.UploadPaths(sessionID, remotePath, localPaths)
 }
+
+// DownloadPaths downloads remote files and directories into localDir.
+func (s *SftpService) DownloadPaths(sessionID, localDir string, remotePaths []string) error {
+	return s.mgr.DownloadPaths(sessionID, localDir, remotePaths)
+}
+
 func (s *SftpService) DownloadPathsDialog(sessionID string, remotePaths []string) error {
 	localDir, err := s.app.Dialog.OpenFile().SetTitle("选择保存目录").
 		CanChooseDirectories(true).CanChooseFiles(false).PromptForSingleSelection()
