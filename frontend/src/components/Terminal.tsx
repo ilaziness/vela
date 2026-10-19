@@ -1,4 +1,10 @@
-import React, { useEffect, useEffectEvent, useState, memo } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useState,
+  memo,
+} from "react";
 import { Box } from "@mui/material";
 import type { Terminal as TerminalLib } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
@@ -22,7 +28,18 @@ import TerminalCommandHints, {
 } from "./TerminalCommandHints";
 import { terminalInstances } from "../stores/terminalInstances";
 import { parseCallServiceError, sleep } from "../func/service";
-import { applyShellInput, matchCommandHints } from "../func/shellLineBuf";
+import {
+  HINT_INDEX_NONE,
+  SCREEN_SYNC_QUIET_MS,
+  SCREEN_SYNC_WATCH_MS,
+  hasContentAfterCursor,
+  inferPromptCols,
+  planHintInput,
+  matchCommandHints,
+  readScreenCommand,
+  stepHintIndex,
+  type ScreenBuffer,
+} from "../func/shellLineBuf";
 import { useSSHTabsStore } from "../stores/ssh";
 import { useMessageStore } from "../stores/message";
 import { ConnectionStatus } from "../types/ssh";
@@ -37,6 +54,19 @@ import {
 import type { CommandHistory } from "../types/command";
 
 const EVENT_SESSION_LOG_STOPPED = "eventSSHSessionLogStopped";
+
+function screenBufferOf(t: TerminalLib): ScreenBuffer {
+  const buffer = t.buffer.active;
+  return {
+    type: buffer.type,
+    cursorX: buffer.cursorX,
+    cursorY: buffer.cursorY,
+    baseY: buffer.baseY,
+    length: buffer.length,
+    cols: t.cols,
+    getLine: (y) => buffer.getLine(y),
+  };
+}
 
 type XtermModules = {
   Terminal: typeof import("@xterm/xterm").Terminal;
@@ -130,7 +160,7 @@ function Terminal(props: {
   const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
   const [logging, setLogging] = useState(false);
   const [hintItems, setHintItems] = useState<string[]>([]);
-  const [hintActiveIndex, setHintActiveIndex] = useState(0);
+  const [hintActiveIndex, setHintActiveIndex] = useState(HINT_INDEX_NONE);
   const [hintAnchor, setHintAnchor] = useState<HintAnchor | null>(null);
   const termRef = React.useRef<HTMLDivElement>(null);
   const term = React.useRef<TerminalLib>(null);
@@ -145,9 +175,15 @@ function Terminal(props: {
   const loggingRef = React.useRef(logging);
   loggingRef.current = logging;
   const lineBufRef = React.useRef("");
+  const promptColsRef = React.useRef<number | null>(null);
+  const screenSyncRef = React.useRef<{
+    reveal: boolean;
+    sawWrite: boolean;
+  } | null>(null);
+  const screenSyncTimerRef = React.useRef<number | null>(null);
   const historyCacheRef = React.useRef<string[]>([]);
   const hintItemsRef = React.useRef<string[]>([]);
-  const hintActiveIndexRef = React.useRef(0);
+  const hintActiveIndexRef = React.useRef(HINT_INDEX_NONE);
   const acceptingHintRef = React.useRef(false);
   const historyRefreshTimerRef = React.useRef<number | NodeJS.Timeout | null>(
     null,
@@ -212,13 +248,17 @@ function Terminal(props: {
     }
   };
 
-  const clearHints = () => {
+  const setHintIndex = useCallback((index: number) => {
+    hintActiveIndexRef.current = index;
+    setHintActiveIndex(index);
+  }, []);
+
+  const clearHints = useCallback(() => {
     hintItemsRef.current = [];
-    hintActiveIndexRef.current = 0;
+    setHintIndex(HINT_INDEX_NONE);
     setHintItems([]);
-    setHintActiveIndex(0);
     setHintAnchor(null);
-  };
+  }, [setHintIndex]);
 
   const updateHints = (prefix: string) => {
     const items = matchCommandHints(
@@ -232,12 +272,17 @@ function Terminal(props: {
       clearHints();
       return;
     }
-    // Prefer first completable (longer) item; exact match stays visible above.
-    const active = items[0] === prefix ? 1 : 0;
+    const prev = hintItemsRef.current;
+    const sameList =
+      prev.length === items.length &&
+      prev.every((item, i) => item === items[i]);
     hintItemsRef.current = items;
-    hintActiveIndexRef.current = active;
+    // A new list starts with nothing highlighted. Refreshing the same list
+    // must keep an arrow or hover selection.
+    if (!sameList) {
+      setHintIndex(HINT_INDEX_NONE);
+    }
     setHintItems(items);
-    setHintActiveIndex(active);
     setHintAnchor(anchor);
   };
 
@@ -257,7 +302,7 @@ function Terminal(props: {
     term.current?.paste(suffix);
     acceptingHintRef.current = false;
     lineBufRef.current = command;
-    updateHints(command);
+    clearHints();
     term.current?.focus();
   };
 
@@ -376,7 +421,7 @@ function Terminal(props: {
 
   useEffect(() => {
     setLoggingState(false);
-  }, [props.linkID]);
+  }, [props.linkID, clearHints]);
 
   useEffect(() => {
     const unsubLog = Events.On(EVENT_SESSION_LOG_STOPPED, (event: any) => {
@@ -511,22 +556,15 @@ function Terminal(props: {
           if (items.length === 0) {
             return true;
           }
-          if (ev.key === "ArrowUp") {
+          if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
             ev.preventDefault();
-            setHintActiveIndex((i) => {
-              const next = i <= 0 ? items.length - 1 : i - 1;
-              hintActiveIndexRef.current = next;
-              return next;
-            });
-            return false;
-          }
-          if (ev.key === "ArrowDown") {
-            ev.preventDefault();
-            setHintActiveIndex((i) => {
-              const next = i >= items.length - 1 ? 0 : i + 1;
-              hintActiveIndexRef.current = next;
-              return next;
-            });
+            setHintIndex(
+              stepHintIndex(
+                hintActiveIndexRef.current,
+                items.length,
+                ev.key === "ArrowDown" ? 1 : -1,
+              ),
+            );
             return false;
           }
           if (ev.key === "Escape") {
@@ -536,7 +574,7 @@ function Terminal(props: {
           }
           if (ev.key === "Tab" || ev.key === "Enter") {
             const selected = items[hintActiveIndexRef.current];
-            if (selected) {
+            if (hintActiveIndexRef.current >= 0 && selected) {
               // Select into terminal only (exact = dismiss; longer = paste suffix).
               // Never send here — user presses Enter again to run.
               ev.preventDefault();
@@ -547,14 +585,95 @@ function Terminal(props: {
           return true;
         });
 
+        const stopScreenSync = () => {
+          screenSyncRef.current = null;
+          if (screenSyncTimerRef.current != null) {
+            clearTimeout(screenSyncTimerRef.current);
+            screenSyncTimerRef.current = null;
+          }
+        };
+
+        const applyScreenLine = () => {
+          const sync = screenSyncRef.current;
+          const t = term.current;
+          if (!sync || !t || !mountedRef.current) {
+            return;
+          }
+          if (t.buffer.active.type !== "normal") {
+            return;
+          }
+          const cols = promptColsRef.current;
+          if (cols == null) {
+            return;
+          }
+          const cmd = readScreenCommand(screenBufferOf(t), cols);
+          if (
+            cmd === lineBufRef.current &&
+            (!sync.reveal || hintItemsRef.current.length > 0)
+          ) {
+            return;
+          }
+          lineBufRef.current = cmd;
+          if (sync.reveal) {
+            updateHints(cmd);
+            return;
+          }
+          clearHints();
+        };
+
+        const scheduleScreenSync = () => {
+          if (screenSyncTimerRef.current != null) {
+            clearTimeout(screenSyncTimerRef.current);
+          }
+          const wait = screenSyncRef.current?.sawWrite
+            ? SCREEN_SYNC_QUIET_MS
+            : SCREEN_SYNC_WATCH_MS;
+          screenSyncTimerRef.current = window.setTimeout(() => {
+            screenSyncTimerRef.current = null;
+            if (!screenSyncRef.current?.sawWrite) {
+              screenSyncRef.current = null;
+              return;
+            }
+            applyScreenLine();
+            screenSyncRef.current = null;
+          }, wait);
+        };
+
+        const requestScreenSync = (reveal: boolean) => {
+          screenSyncRef.current = { reveal, sawWrite: false };
+          if (!reveal) {
+            clearHints();
+          }
+          scheduleScreenSync();
+        };
+
+        term.current.onWriteParsed(() => {
+          const sync = screenSyncRef.current;
+          if (!sync) {
+            return;
+          }
+          sync.sawWrite = true;
+          scheduleScreenSync();
+        });
+
         term.current.onData((data) => {
           if (acceptingHintRef.current) {
             // paste during accept already applied to lineBuf
             return;
           }
-          const { buf, submitted } = applyShellInput(lineBufRef.current, data);
-          lineBufRef.current = buf;
-          if (submitted) {
+          const t = term.current;
+          const midLine = t
+            ? hasContentAfterCursor(screenBufferOf(t))
+            : false;
+          const plan = planHintInput(
+            lineBufRef.current,
+            data,
+            midLine,
+            screenSyncRef.current !== null,
+          );
+          if (plan.kind === "submit") {
+            stopScreenSync();
+            lineBufRef.current = "";
             // Refresh from backend so secrets skipped server-side never enter the hint cache.
             clearHints();
             if (historyRefreshTimerRef.current) {
@@ -568,7 +687,28 @@ function Terminal(props: {
             }, 300);
             return;
           }
-          updateHints(buf);
+          if (plan.kind === "local") {
+            lineBufRef.current = plan.buf;
+            if (plan.reveal) {
+              updateHints(plan.buf);
+            } else {
+              clearHints();
+            }
+            return;
+          }
+          // Cursor is still on the pre-key line, so measure the prompt before the shell redraws.
+          if (
+            t &&
+            !midLine &&
+            (promptColsRef.current == null ||
+              (lineBufRef.current === "" && screenSyncRef.current === null))
+          ) {
+            const cols = inferPromptCols(screenBufferOf(t), lineBufRef.current);
+            if (cols != null) {
+              promptColsRef.current = cols;
+            }
+          }
+          requestScreenSync(plan.reveal);
         });
 
         ws.onopen = async () => {
@@ -700,6 +840,11 @@ function Terminal(props: {
       setSearchAddon(null);
       clearHints();
       lineBufRef.current = "";
+      screenSyncRef.current = null;
+      if (screenSyncTimerRef.current != null) {
+        clearTimeout(screenSyncTimerRef.current);
+        screenSyncTimerRef.current = null;
+      }
       if (historyRefreshTimerRef.current) {
         clearTimeout(historyRefreshTimerRef.current);
         historyRefreshTimerRef.current = null;
@@ -717,7 +862,7 @@ function Terminal(props: {
       }
       observer.disconnect();
     };
-  }, [props.linkID]);
+  }, [props.linkID, clearHints]);
 
   return (
     <Box
@@ -750,10 +895,7 @@ function Terminal(props: {
         activeIndex={hintActiveIndex}
         anchor={hintAnchor}
         onSelect={acceptHint}
-        onHover={(index) => {
-          hintActiveIndexRef.current = index;
-          setHintActiveIndex(index);
-        }}
+        onHover={setHintIndex}
       />
       <TerminalContextMenu
         contextMenu={contextMenu}

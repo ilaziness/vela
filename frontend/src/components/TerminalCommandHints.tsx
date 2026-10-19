@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { List, ListItemButton, ListItemText, Paper } from "@mui/material";
+import useTerminalStore from "../stores/terminal";
 
 export const TERMINAL_HINTS_MAX = 8;
 
@@ -24,6 +25,8 @@ export default function TerminalCommandHints({
   onSelect,
   onHover,
 }: TerminalCommandHintsProps) {
+  const fontFamily = useTerminalStore((s) => s.fontFamily);
+  const fontSize = useTerminalStore((s) => s.fontSize);
   const paperRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: 0, top: 0, ready: false });
 
@@ -83,7 +86,19 @@ export default function TerminalCommandHints({
         borderRadius: 1,
       }}
     >
-      <List dense disablePadding>
+      <List
+        dense
+        disablePadding
+        sx={{
+          "& .MuiListItemText-primary": {
+            fontFamily,
+            fontSize: `${fontSize}px`,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          },
+        }}
+      >
         {items.map((cmd, index) => (
           <ListItemButton
             key={`${index}-${cmd}`}
@@ -92,20 +107,7 @@ export default function TerminalCommandHints({
             onClick={() => onSelect(cmd)}
             sx={{ py: 0.25, px: 1 }}
           >
-            <ListItemText
-              primary={cmd}
-              slotProps={{
-                primary: {
-                  sx: {
-                    fontFamily: "monospace",
-                    fontSize: "0.8125rem",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  },
-                },
-              }}
-            />
+            <ListItemText primary={cmd} />
           </ListItemButton>
         ))}
       </List>
