@@ -134,6 +134,13 @@ export function createAppTheme(font = "", fontSize = 14) {
   },
 
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        html: {
+          fontSize,
+        },
+      },
+    },
     MuiChatBox: {
       styleOverrides: {
         threadPane: ({ theme: t }) => ({
@@ -187,6 +194,7 @@ export function createAppTheme(font = "", fontSize = 14) {
     typography: {
       fontFamily: appFontFamily(font),
       fontSize,
+      htmlFontSize: fontSize,
     },
   });
 }

@@ -22,8 +22,7 @@ const FormRow: React.FC<FormRowProps> = ({
       sx={{
         width: labelWidth,
         flexShrink: 0,
-        fontWeight: 500,
-        fontSize: "0.95rem",
+        fontWeight: 600,
       }}
     >
       {label}
