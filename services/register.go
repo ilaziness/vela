@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -20,16 +21,14 @@ import (
 	"github.com/ilaziness/vela/internal/tunnel"
 )
 
-func RegisterServices(a *application.App, mainWindow *application.WebviewWindow, log *zap.Logger, commandsJSON []byte) error {
+func RegisterServices(a *application.App, mainWindow *application.WebviewWindow, cfgStore *config.Store, log *zap.Logger, commandsJSON []byte) error {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	windows := NewWindows(a, mainWindow)
-
-	cfgStore, err := config.Load(log)
-	if err != nil {
-		return err
+	if cfgStore == nil || cfgStore.Config == nil {
+		return fmt.Errorf("config store is nil")
 	}
+	windows := NewWindows(a, mainWindow, cfgStore.Config.General.Frameless)
 	vault := secret.NewVault()
 	configService := NewConfigService(a, windows, cfgStore, vault)
 

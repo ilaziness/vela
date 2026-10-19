@@ -16,11 +16,19 @@ import (
 const (
 	EventInputPassword      = "eventInputPassword"
 	EventInputPasswordClose = "eventInputPasswordClose"
+	EventAppearance         = "eventAppearance"
 )
 
 func init() {
 	application.RegisterEvent[string](EventInputPassword)
 	application.RegisterEvent[string](EventInputPasswordClose)
+	application.RegisterEvent[Appearance](EventAppearance)
+}
+
+// Appearance is the UI font broadcast after general settings are saved.
+type Appearance struct {
+	Font     string
+	FontSize int
 }
 
 type Config = config.Config
@@ -54,6 +62,11 @@ func (cs *ConfigService) userDataDir() string {
 func (cs *ConfigService) ShowWindow()  { cs.windows.ShowSetting() }
 func (cs *ConfigService) CloseWindow() { cs.windows.CloseSetting() }
 
+// IsFrameless reports the frame mode this process was started with.
+func (cs *ConfigService) IsFrameless() bool {
+	return cs.windows.IsFrameless()
+}
+
 func (cs *ConfigService) SetTheme(theme string) {
 	cs.current().General.Theme = theme
 	_ = cs.store.Save()
@@ -85,11 +98,37 @@ func (cs *ConfigService) SaveSyncConfig(syncConfig internalsync.SyncConfig) erro
 }
 
 func (cs *ConfigService) SaveGeneralConfig(generalConfig GeneralConfig) error {
+	generalConfig.Normalize()
+	// 通用设置不编辑主题。沿用内存里的值，避免设置页打开后在主窗口改过的主题被旧快照覆盖。
+	generalConfig.Theme = cs.current().General.Theme
 	if err := cs.store.ApplyUserDataDir(generalConfig.UserDataDir); err != nil {
 		return err
 	}
 	cs.current().General = generalConfig
-	return cs.store.Save()
+	if err := cs.store.Save(); err != nil {
+		return err
+	}
+	cs.app.Event.Emit(EventAppearance, Appearance{
+		Font:     generalConfig.Font,
+		FontSize: generalConfig.FontSize,
+	})
+	if generalConfig.Frameless != cs.windows.IsFrameless() {
+		cs.showFramelessRestartDialog()
+	}
+	return nil
+}
+
+func (cs *ConfigService) showFramelessRestartDialog() {
+	dlg := cs.app.Dialog.Info().
+		SetTitle("Vela").
+		SetMessage("无边框模式已更改，需要重新启动应用后生效。")
+	ok := dlg.AddButton("确定")
+	dlg.SetDefaultButton(ok)
+	dlg.SetCancelButton(ok)
+	if cs.windows.Setting != nil {
+		dlg.AttachToWindow(cs.windows.Setting)
+	}
+	dlg.Show()
 }
 
 func (cs *ConfigService) SaveTerminalConfig(terminalConfig TerminalConfig) error {

@@ -45,6 +45,9 @@ type Config struct {
 type GeneralConfig struct {
 	UserDataDir string `toml:"user_data_dir"`
 	Theme       string `toml:"theme"`
+	Frameless   bool   `toml:"frameless"`
+	Font        string `toml:"font"`
+	FontSize    int    `toml:"font_size"`
 }
 
 type TerminalConfig struct {
@@ -83,6 +86,7 @@ func Default() *Config {
 		General: GeneralConfig{
 			UserDataDir: filepath.Join(execDir, "data"),
 			Theme:       "dark",
+			FontSize:    14,
 		},
 		Terminal: TerminalConfig{
 			Font:       strings.Join(defaultFontFamily, ","),
@@ -95,6 +99,36 @@ func Default() *Config {
 			AutoReconnect:       true,
 		},
 	}
+}
+
+// Normalize clamps the UI font size and strips characters that would break CSS.
+// An empty font keeps the system stack.
+func (c *GeneralConfig) Normalize() {
+	c.Font = sanitizeUIFont(c.Font)
+	if c.FontSize < 8 || c.FontSize > 72 {
+		c.FontSize = 14
+	}
+}
+
+func sanitizeUIFont(font string) string {
+	font = strings.TrimSpace(font)
+	if font == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(font))
+	for _, r := range font {
+		switch r {
+		case ';', '{', '}', '<', '>', '\\', '"', '\'':
+			continue
+		default:
+			if r < 0x20 {
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // Normalize fills invalid/missing fields with defaults after loading from disk.
@@ -175,6 +209,8 @@ func Load(logger *zap.Logger) (*Store, error) {
 			_ = os.WriteFile(userConfigPath, data, 0600)
 		}
 	}
+
+	finalConfig.General.Normalize()
 
 	logger.Debug("config loaded", zap.String("appConfigPath", appConfigPath), zap.String("userConfigPath", userConfigPath))
 

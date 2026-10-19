@@ -25,6 +25,7 @@ import {
 import { GetAppInfo } from "../../bindings/github.com/ilaziness/vela/services/appservice";
 import { useMessageStore } from "../stores/message";
 import { parseCallServiceError } from "../func/service";
+import { useFrameless } from "../hooks/useFrameless";
 
 const Setting: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
@@ -32,6 +33,7 @@ const Setting: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [appInfo, setAppInfo] = useState<AppInfo>({} as AppInfo);
   const { successMessage, errorMessage } = useMessageStore();
+  const frameless = useFrameless() === true;
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -82,12 +84,14 @@ const Setting: React.FC = () => {
 
   return (
     <>
-      <Box sx={{ height: 40 }}>
-        <OpBar />
-      </Box>
+      {frameless && (
+        <Box sx={{ height: 40 }}>
+          <OpBar />
+        </Box>
+      )}
       <Box
         sx={{
-          height: "calc(100% - 40px)",
+          height: frameless ? "calc(100% - 40px)" : "100%",
           display: "flex",
           flexDirection: "column",
         }}

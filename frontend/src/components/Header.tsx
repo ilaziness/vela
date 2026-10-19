@@ -55,6 +55,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../stores/message";
 import ThemeSwitcher from "./ThemeSwitcher";
 import { Events } from "@wailsio/runtime";
+import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import BookmarkManager from "./Bookmark";
 import Loading from "./Loading";
 import {
@@ -72,6 +73,7 @@ export default function Header() {
   const { toggleSidebarOpen } = useAIAssistantStore();
   const bookmarkManageOpen = useUIStore((s) => s.bookmarkManageOpen);
   const setBookmarkManageOpen = useUIStore((s) => s.setBookmarkManageOpen);
+  const frameless = useFrameless();
 
   const [bookmarks, setBookmarks] = useState<BookmarkGroup[]>([]);
   const [bookmarkAnchorEl, setBookmarkAnchorEl] = useState<null | HTMLElement>(
@@ -295,7 +297,12 @@ export default function Header() {
         spacing={1}
         sx={{ alignItems: "center", padding: 0.5, height: "100%" }}
       >
-        <Box sx={{ "--wails-draggable": "drag", cursor: "move" }}>
+        <Box
+          sx={{
+            ...dragRegionSx(frameless),
+            cursor: frameless ? "move" : undefined,
+          }}
+        >
           <img
             src="/appicon.png"
             alt="Logo"
@@ -420,7 +427,7 @@ export default function Header() {
             position="static"
             color="default"
             elevation={1}
-            sx={{ "--wails-draggable": "drag" }}
+            sx={{ ...dragRegionSx(frameless) }}
           >
             <Toolbar>
               <IconButton

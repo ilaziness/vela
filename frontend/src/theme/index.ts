@@ -83,10 +83,50 @@ export const ThemeOptions: ThemeOption[] = [
   },
 ];
 
+const SYSTEM_FONT_FAMILY = [
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"Segoe UI"',
+  "Roboto",
+  '"Helvetica Neue"',
+  "Arial",
+  "sans-serif",
+  '"Apple Color Emoji"',
+  '"Segoe UI Emoji"',
+  '"Segoe UI Symbol"',
+].join(",");
+
+export function sanitizeAppFont(font: string): string {
+  return font.replaceAll(/[;{}<>\\'"\u0000-\u001f]/g, "").trim();
+}
+
+function quoteFontName(name: string): string {
+  if (/\s/.test(name)) {
+    return `"${name}"`;
+  }
+  return name;
+}
+
+export function appFontFamily(font: string): string {
+  const trimmed = sanitizeAppFont(font);
+  if (!trimmed) {
+    return SYSTEM_FONT_FAMILY;
+  }
+  const families = trimmed
+    .split(",")
+    .map((part) => quoteFontName(part.trim()))
+    .filter((part) => part !== "");
+  if (families.length === 0) {
+    return SYSTEM_FONT_FAMILY;
+  }
+  return [...families, SYSTEM_FONT_FAMILY].join(",");
+}
+
 /**
  * SSH GUI 客户端主题配置
  */
-const theme = createTheme({
+export function createAppTheme(font = "", fontSize = 14) {
+  return createTheme({
   colorSchemes: {
     light,
     dark: createColorScheme(dark),
@@ -144,20 +184,9 @@ const theme = createTheme({
     },
   },
 
-  typography: {
-    fontFamily: [
-      "-apple-system",
-      "BlinkMacSystemFont",
-      '"Segoe UI"',
-      "Roboto",
-      '"Helvetica Neue"',
-      "Arial",
-      "sans-serif",
-      '"Apple Color Emoji"',
-      '"Segoe UI Emoji"',
-      '"Segoe UI Symbol"',
-    ].join(","),
-  },
-});
-
-export default theme;
+    typography: {
+      fontFamily: appFontFamily(font),
+      fontSize,
+    },
+  });
+}

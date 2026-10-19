@@ -16,6 +16,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "eventAIStreamChunk": services$0.AIStreamChunkData;
+            "eventAppearance": services$0.Appearance;
             "eventBookmarkUpdate": string;
             "eventConnectBookmark": string;
             "eventHostKeyPrompt": string;

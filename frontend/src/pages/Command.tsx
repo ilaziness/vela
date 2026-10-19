@@ -25,9 +25,11 @@ import SessionSelector from "../components/SessionSelector";
 import CommandInput from "../components/CommandInput";
 import AddCommandDialog from "../components/AddCommandDialog";
 import OpBar from "../components/OpBar";
+import { useFrameless } from "../hooks/useFrameless";
 
 const Command: React.FC = () => {
   const { errorMessage, successMessage } = useMessageStore();
+  const frameless = useFrameless() === true;
 
   // 命令数据
   const [commandsByCategory, setCommandsByCategory] = useState<{
@@ -234,20 +236,21 @@ const Command: React.FC = () => {
 
   return (
     <>
-      {/* 顶部工具栏 */}
-      <Box
-        sx={{
-          height: 40,
-          flexShrink: 0,
-        }}
-      >
-        <OpBar />
-      </Box>
+      {frameless && (
+        <Box
+          sx={{
+            height: 40,
+            flexShrink: 0,
+          }}
+        >
+          <OpBar />
+        </Box>
+      )}
 
       {/* 主内容区 */}
       <Box
         sx={{
-          height: "calc(100% - 40px)",
+          height: frameless ? "calc(100% - 40px)" : "100%",
           display: "flex",
           flexDirection: "row",
           overflow: "hidden",

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import {
   Box,
+  Stack,
   Typography,
   Paper,
   TextField,
   Button,
   IconButton,
+  FormControlLabel,
+  Switch,
 } from "@mui/material";
 import { MoreHoriz } from "@mui/icons-material";
 import FormRow from "../FormRow";
@@ -16,6 +19,7 @@ import {
 } from "../../../bindings/github.com/ilaziness/vela/services";
 import { SelectDirectory } from "../../../bindings/github.com/ilaziness/vela/services/appservice";
 import { parseCallServiceError } from "../../func/service";
+import { sanitizeAppFont } from "../../theme";
 
 interface GeneralSettingsProps {
   config: Config["General"];
@@ -54,9 +58,22 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
       return;
     }
 
+    const fontSize = localConfig.FontSize ?? 0;
+    if (fontSize < 8 || fontSize > 72) {
+      errorMessage("字体大小必须在 8–72 之间");
+      return;
+    }
+
     setSaving(true);
     try {
-      await ConfigService.SaveGeneralConfig({ ...localConfig, UserDataDir: userDataDir });
+      const font = sanitizeAppFont(localConfig.Font ?? "");
+      await ConfigService.SaveGeneralConfig({
+        ...localConfig,
+        UserDataDir: userDataDir,
+        Font: font,
+        FontSize: fontSize,
+      });
+      setLocalConfig((prev) => ({ ...prev, Font: font, FontSize: fontSize }));
       successMessage("通用配置保存成功");
     } catch (error) {
       console.error("Failed to save general config:", error);
@@ -72,6 +89,7 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
         通用设置
       </Typography>
       <Paper sx={{ p: 3 }} elevation={1}>
+        <Stack spacing={2}>
         <FormRow label="用户数据目录">
           <Box sx={{ display: "flex", gap: 1 }}>
             <TextField
@@ -93,6 +111,50 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
             />
           </Box>
         </FormRow>
+        <FormRow label="无边框">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={Boolean(localConfig.Frameless)}
+                onChange={(e) => handleChange("Frameless", e.target.checked)}
+              />
+            }
+            label={localConfig.Frameless ? "已开启" : "已关闭"}
+          />
+        </FormRow>
+        <FormRow label="字体">
+          <TextField
+            fullWidth
+            size="small"
+            value={localConfig.Font || ""}
+            onChange={(e) => handleChange("Font", e.target.value)}
+            placeholder="留空使用系统字体"
+          />
+        </FormRow>
+        <FormRow label="字体大小">
+          <TextField
+            fullWidth
+            size="small"
+            type="number"
+            slotProps={{
+              htmlInput: {
+                min: 8,
+                max: 72,
+                step: 1,
+              },
+            }}
+            value={localConfig.FontSize || ""}
+            onChange={(e) => {
+              const value =
+                e.target.value === ""
+                  ? 0
+                  : Number.parseInt(e.target.value, 10);
+              handleChange("FontSize", Number.isNaN(value) ? 0 : value);
+            }}
+            placeholder="例如: 14"
+          />
+        </FormRow>
+        </Stack>
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 3 }}>
           <Button variant="contained" onClick={handleSave} loading={saving}>
             保存

@@ -16,20 +16,22 @@ import * as services$0 from "../../../../ilaziness/vela/services/models.js";
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
         "eventAIStreamChunk": $$createType0,
-        "eventNewVersion": $$createType1,
-        "eventProgress": $$createType2,
-        "eventSftpFilesDropped": $$createType3,
-        "eventShortcut": $$createType4,
-        "eventTransferQueued": $$createType5,
+        "eventAppearance": $$createType1,
+        "eventNewVersion": $$createType2,
+        "eventProgress": $$createType3,
+        "eventSftpFilesDropped": $$createType4,
+        "eventShortcut": $$createType5,
+        "eventTransferQueued": $$createType6,
     }));
 }
 
 // Private type creation functions
 const $$createType0 = services$0.AIStreamChunkData.createFrom;
-const $$createType1 = services$0.NewVersion.createFrom;
-const $$createType2 = transfer$0.ProgressData.createFrom;
-const $$createType3 = services$0.SftpFilesDroppedData.createFrom;
-const $$createType4 = services$0.ShortcutEvent.createFrom;
-const $$createType5 = services$0.TransferQueuedData.createFrom;
+const $$createType1 = services$0.Appearance.createFrom;
+const $$createType2 = services$0.NewVersion.createFrom;
+const $$createType3 = transfer$0.ProgressData.createFrom;
+const $$createType4 = services$0.SftpFilesDroppedData.createFrom;
+const $$createType5 = services$0.ShortcutEvent.createFrom;
+const $$createType6 = services$0.TransferQueuedData.createFrom;
 
 configure();

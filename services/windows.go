@@ -6,15 +6,16 @@ import (
 )
 
 type Windows struct {
-	app     *application.App
-	Main    *application.WebviewWindow
-	Setting *application.WebviewWindow
-	Command *application.WebviewWindow
-	Tool    *application.WebviewWindow
+	app       *application.App
+	Main      *application.WebviewWindow
+	Setting   *application.WebviewWindow
+	Command   *application.WebviewWindow
+	Tool      *application.WebviewWindow
+	frameless bool
 }
 
-func NewWindows(app *application.App, main *application.WebviewWindow) *Windows {
-	w := &Windows{app: app, Main: main}
+func NewWindows(app *application.App, main *application.WebviewWindow, frameless bool) *Windows {
+	w := &Windows{app: app, Main: main, frameless: frameless}
 	RegisterFileDropHandler(app, main)
 	main.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		for _, window := range app.Window.GetAll() {
@@ -24,31 +25,36 @@ func NewWindows(app *application.App, main *application.WebviewWindow) *Windows 
 	return w
 }
 
+// IsFrameless reports the frame mode chosen when this process created its windows.
+func (w *Windows) IsFrameless() bool {
+	return w.frameless
+}
+
 func (w *Windows) newSettingWindow() *application.WebviewWindow {
 	return w.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "设置", URL: "/#/setting", Width: 1200, Height: 800,
-		MinWidth: 1200, MinHeight: 800, DefaultContextMenuDisabled: true, Hidden: true, Frameless: true,
+		MinWidth: 1200, MinHeight: 800, DefaultContextMenuDisabled: true, Hidden: true, Frameless: w.frameless,
 	})
 }
 
 func (w *Windows) newCommandWindow() *application.WebviewWindow {
 	return w.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "命令面板", URL: "/#/command", Width: 1600, Height: 900,
-		MinWidth: 1600, MinHeight: 900, DefaultContextMenuDisabled: true, Hidden: true, Frameless: true,
+		MinWidth: 1600, MinHeight: 900, DefaultContextMenuDisabled: true, Hidden: true, Frameless: w.frameless,
 	})
 }
 
 func (w *Windows) newToolWindow() *application.WebviewWindow {
 	return w.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "运维工具", URL: "/#/tools", Width: 1200, Height: 800,
-		MinWidth: 800, MinHeight: 600, DefaultContextMenuDisabled: true, Hidden: true, Frameless: true,
+		MinWidth: 800, MinHeight: 600, DefaultContextMenuDisabled: true, Hidden: true, Frameless: w.frameless,
 	})
 }
 
 func (w *Windows) NewMainWindow() {
 	win := w.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title: "Vela", URL: "/#/submainwindow", Width: 1440, Height: 800,
-		MinWidth: 1440, MinHeight: 800, DefaultContextMenuDisabled: true, Frameless: true, EnableFileDrop: true,
+		MinWidth: 1440, MinHeight: 800, DefaultContextMenuDisabled: true, Frameless: w.frameless, EnableFileDrop: true,
 	})
 	RegisterFileDropHandler(w.app, win)
 	win.Show()

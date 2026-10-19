@@ -11,6 +11,7 @@ import { useToolStore } from "../stores/tool";
 import { Tool } from "../types/tool";
 import OpBar from "../components/OpBar";
 import { getToolIcon } from "../func/toolIcons";
+import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 
 interface ToolCardProps {
   readonly tool: Tool;
@@ -69,6 +70,7 @@ function ToolCard({ tool, onClick }: ToolCardProps) {
 export default function Tools() {
   const navigate = useNavigate();
   const { tools, fetchTools } = useToolStore();
+  const frameless = useFrameless();
 
   useEffect(() => {
     fetchTools();
@@ -87,10 +89,11 @@ export default function Tools() {
         bgcolor: "background.default",
       }}
     >
-      {/* 操作栏 */}
-      <Box sx={{ height: 40 }}>
-        <OpBar />
-      </Box>
+      {frameless === true && (
+        <Box sx={{ height: 40 }}>
+          <OpBar />
+        </Box>
+      )}
 
       {/* 标题栏 */}
       <Box
@@ -101,7 +104,7 @@ export default function Tools() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          "--wails-draggable": "drag",
+          ...dragRegionSx(frameless),
         }}
       >
         <Typography variant="h5" component="h1">

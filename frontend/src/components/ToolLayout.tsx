@@ -12,6 +12,7 @@ import { useNavigate, useParams } from "react-router";
 import { useToolStore } from "../stores/tool";
 import OpBar from "./OpBar";
 import { getToolIcon } from "../func/toolIcons";
+import { useFrameless } from "../hooks/useFrameless";
 
 interface ToolLayoutProps {
   readonly children: React.ReactNode;
@@ -21,6 +22,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
   const navigate = useNavigate();
   const { toolId } = useParams<{ toolId: string }>();
   const { tools, fetchTools } = useToolStore();
+  const frameless = useFrameless() === true;
 
   useEffect(() => {
     if (tools.length === 0) {
@@ -41,10 +43,11 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
         bgcolor: "background.default",
       }}
     >
-      {/* 操作栏 */}
-      <Box sx={{ height: 40 }}>
-        <OpBar />
-      </Box>
+      {frameless && (
+        <Box sx={{ height: 40 }}>
+          <OpBar />
+        </Box>
+      )}
 
       {/* 内容区域 */}
       <Box sx={{ flex: 1, display: "flex", overflow: "hidden" }}>

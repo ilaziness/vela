@@ -21,6 +21,7 @@ import {
 import { DragDropContext, Droppable, DropResult } from "@hello-pangea/dnd";
 import { useMessageStore } from "../stores/message";
 import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
+import { toggleWindowMaximise, useFrameless } from "../hooks/useFrameless";
 
 const AISideBar = React.lazy(() => import("./ai/AISideBar"));
 
@@ -48,6 +49,7 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
   const sidebarOpen = useAIAssistantStore((state) => state.sidebarOpen);
   const sidebarWidth = useAIAssistantStore((state) => state.sidebarWidth);
   const [aiSidebarMounted, setAiSidebarMounted] = useState(false);
+  const frameless = useFrameless() === true;
 
   useEffect(() => {
     if (sidebarOpen) {
@@ -184,7 +186,6 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
           height: tabHeight,
           pr: 1,
           bgcolor: "background.paper",
-          "--wails-draggable": "drag",
         }}
       >
         <DragDropContext onDragEnd={handleDragEnd}>
@@ -198,7 +199,8 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
                 {...provided.droppableProps}
                 sx={{
                   display: "flex",
-                  flex: 1,
+                  flex: frameless ? "0 1 auto" : 1,
+                  minWidth: 0,
                   height: tabHeight,
                   overflow: "auto",
                   scrollbarWidth: "none",
@@ -231,7 +233,22 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
             )}
           </Droppable>
         </DragDropContext>
-        <OpBar draggable={false} showBorder={false} onClose={onClose} />
+        {frameless && (
+          <Box
+            onDoubleClick={() => {
+              toggleWindowMaximise();
+            }}
+            sx={{
+              flex: "1 0 0",
+              alignSelf: "stretch",
+              minWidth: 0,
+              "--wails-draggable": "drag",
+            }}
+          />
+        )}
+        {frameless && (
+          <OpBar draggable={false} showBorder={false} onClose={onClose} />
+        )}
         <Menu
           open={isOpen}
           anchorEl={anchorEl}

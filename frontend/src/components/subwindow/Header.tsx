@@ -27,6 +27,7 @@ import { bookmarkColorHex } from "../../func/bookmarkMeta";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../../stores/message";
 import { Events } from "@wailsio/runtime";
+import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
 import {
   BookmarkIconView,
   GroupIconView,
@@ -35,6 +36,7 @@ import {
 export default function Header() {
   const { sshTabs, pushTab, setCurrentTab } = useSSHTabsStore();
   const { errorMessage } = useMessageStore();
+  const frameless = useFrameless();
 
   const [bookmarks, setBookmarks] = useState<BookmarkGroup[]>([]);
   const [bookmarkAnchorEl, setBookmarkAnchorEl] = useState<null | HTMLElement>(
@@ -145,7 +147,12 @@ export default function Header() {
       })}
     >
       <Stack direction="column" spacing={1} sx={{ alignItems: "center", padding: 0.5 }}>
-        <Box sx={{ "--wails-draggable": "drag", cursor: "move" }}>
+        <Box
+          sx={{
+            ...dragRegionSx(frameless),
+            cursor: frameless ? "move" : undefined,
+          }}
+        >
           <img
             src="/appicon.png"
             alt="Logo"
