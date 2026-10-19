@@ -28,6 +28,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../../stores/message";
 import { Events } from "@wailsio/runtime";
 import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
+import { railIconButtonSx } from "../railIconButtonSx";
 import {
   BookmarkIconView,
   GroupIconView,
@@ -162,7 +163,7 @@ export default function Header() {
 
         {menuItems.map((item, index) => (
           <Tooltip key={index} title={item.title}>
-            <IconButton size="small" onClick={item.onClick}>
+            <IconButton sx={railIconButtonSx} onClick={item.onClick}>
               {item.icon}
             </IconButton>
           </Tooltip>

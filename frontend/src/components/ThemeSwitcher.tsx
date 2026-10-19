@@ -5,6 +5,7 @@ import PaletteIcon from "@mui/icons-material/Palette";
 import useTerminalStore from "../stores/terminal";
 import { AppTheme } from "../types/ssh";
 import { ThemeOptions } from "../theme";
+import { railIconButtonSx } from "./railIconButtonSx";
 import { SetTheme } from "../../bindings/github.com/ilaziness/vela/services/configservice";
 import { LogService } from "../../bindings/github.com/ilaziness/vela/services";
 
@@ -74,7 +75,7 @@ export default function ThemeSwitcher() {
   return (
     <>
       <Tooltip title="主题切换">
-        <IconButton size="small" onClick={handleMenuOpen}>
+        <IconButton sx={railIconButtonSx} onClick={handleMenuOpen}>
           <PaletteIcon />
         </IconButton>
       </Tooltip>

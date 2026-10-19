@@ -31,7 +31,7 @@ import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import HandymanIcon from "@mui/icons-material/Handyman";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import AddToQueueIcon from "@mui/icons-material/AddToQueue";
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import UpgradeIcon from "@mui/icons-material/Upgrade";
 import {
   AppService,
@@ -54,14 +54,12 @@ import { bookmarkColorHex } from "../func/bookmarkMeta";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../stores/message";
 import ThemeSwitcher from "./ThemeSwitcher";
+import { railIconButtonSx } from "./railIconButtonSx";
 import { Events } from "@wailsio/runtime";
 import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import BookmarkManager from "./Bookmark";
 import Loading from "./Loading";
-import {
-  BookmarkIconView,
-  GroupIconView,
-} from "./icons/bookmarkIcons";
+import { BookmarkIconView, GroupIconView } from "./icons/bookmarkIcons";
 
 const UpdateAvailableDialog = React.lazy(
   () => import("./UpdateAvailableDialog"),
@@ -312,7 +310,7 @@ export default function Header() {
 
         {menuItems.map((item, index) => (
           <Tooltip key={index} title={item.title}>
-            <IconButton size="small" onClick={item.onClick}>
+            <IconButton sx={railIconButtonSx} onClick={item.onClick}>
               {item.icon}
             </IconButton>
           </Tooltip>
@@ -325,17 +323,17 @@ export default function Header() {
         {newVersion ? (
           <Tooltip title="发现新版本">
             <IconButton
-              size="small"
+              sx={railIconButtonSx}
               color="primary"
               onClick={() => setUpdateDialogOpen(true)}
             >
-              <UpgradeIcon fontSize="small" />
+              <UpgradeIcon />
             </IconButton>
           </Tooltip>
         ) : null}
 
         <Tooltip title="设置">
-          <IconButton size="small" onClick={showSettingWindow}>
+          <IconButton sx={railIconButtonSx} onClick={showSettingWindow}>
             <SettingsIcon />
           </IconButton>
         </Tooltip>
@@ -397,7 +395,8 @@ export default function Header() {
                               pl: 4,
                               borderLeft: 5,
                               borderColor:
-                                bookmarkColorHex(bookmark.color) || "transparent",
+                                bookmarkColorHex(bookmark.color) ||
+                                "transparent",
                             }}
                             onClick={() => handleBookmarkSelect(bookmark.id)}
                           >
