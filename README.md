@@ -143,7 +143,7 @@ open ~/Downloads/Vela.app
 | `type`                     | 否       | `stdio` 或 `http`；省略时有 `command` 视为 stdio，有 `url` 视为 http |
 | `enabled`                  | 否       | 是否启用，不写默认开启（设置页开关会写入此字段）                     |
 
-注意：`mcp.json` 里的密钥是明文保存的，请妥善保管该文件。旧版 `servers` 数组格式已不再支持，请按下面示例改写。
+注意：`mcp.json` 里的密钥是明文保存的，请妥善保管该文件。
 
 **stdio 示例**
 
