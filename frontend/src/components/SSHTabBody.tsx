@@ -68,10 +68,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
   linkIDRef.current = linkID;
   lastSSHInfoRef.current = lastSSHInfo;
 
-  const tabInfo = useMemo(
-    () => getByIndex(tabIndex),
-    [tabIndex, getByIndex],
-  );
+  const tabInfo = useMemo(() => getByIndex(tabIndex), [tabIndex, getByIndex]);
   const sftpIndex = 1;
   const ownerKey = useMemo(() => {
     const info = lastSSHInfo || tabInfo?.sshInfo;
@@ -159,9 +156,9 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
       const cfg = await ConfigService.ReadConfig();
       autoReconnect = cfg?.SSH?.autoReconnect ?? true;
     } catch (err) {
-      LogService.Error(
-        `ReadConfig for auto-reconnect failed: ${err}`,
-      ).then(() => {});
+      LogService.Error(`ReadConfig for auto-reconnect failed: ${err}`).then(
+        () => {},
+      );
     }
     if (!autoReconnect) {
       clearLinkID();
@@ -416,7 +413,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
               "&.MuiTab-root": {
                 height: tabHeight,
                 minHeight: tabHeight,
-                fontSize: 12,
+                fontSize: "0.85rem",
                 minWidth: 80,
                 width: 80,
                 p: 0.5,
