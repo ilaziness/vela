@@ -20,7 +20,6 @@ import {
 } from "../../bindings/github.com/ilaziness/vela/services/index.ts";
 import { DragDropContext, Droppable, DropResult } from "@hello-pangea/dnd";
 import { useMessageStore } from "../stores/message";
-import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
 import { toggleWindowMaximise, useFrameless } from "../hooks/useFrameless";
 
 const AISideBar = React.lazy(() => import("./ai/AISideBar"));
@@ -169,10 +168,10 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
     <Box
       sx={{
         height: "100%",
-        width: `calc(100% - ${APP_HEADER_RAIL_WIDTH}px)`,
+        flex: 1,
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
-        flex: 1,
       }}
     >
       {/* tabs */}

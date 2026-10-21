@@ -114,9 +114,10 @@ const AISideBar = () => {
 
   const [isResizing, setIsResizing] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
-  // 仅开合时做 width 过渡，避免窗口缩放/clamp 时终端跟着动画抖动
+  // 开合：先开 transition 再改宽；openRef 延后更新以兼容 StrictMode；拖拽/clamp 即时改宽
   const [animateWidth, setAnimateWidth] = useState(false);
-  const prevOpenRef = useRef(sidebarOpen);
+  const [visibleWidth, setVisibleWidth] = useState(0);
+  const openRef = useRef(false);
 
   useEffect(() => {
     if (!sidebarOpen) {
@@ -127,12 +128,30 @@ const AISideBar = () => {
   }, [sidebarOpen, loadSessions]);
 
   useEffect(() => {
-    if (prevOpenRef.current === sidebarOpen) return;
-    prevOpenRef.current = sidebarOpen;
-    setAnimateWidth(true);
-    const timer = window.setTimeout(() => setAnimateWidth(false), SIDEBAR_WIDTH_TRANSITION_MS);
-    return () => window.clearTimeout(timer);
-  }, [sidebarOpen]);
+    const openChanged = openRef.current !== sidebarOpen;
+
+    if (openChanged) {
+      setAnimateWidth(true);
+      const targetOpen = sidebarOpen;
+      const targetWidth = sidebarWidth;
+      const frame = window.requestAnimationFrame(() => {
+        openRef.current = targetOpen;
+        setVisibleWidth(targetOpen ? targetWidth : 0);
+      });
+      const timer = window.setTimeout(
+        () => setAnimateWidth(false),
+        SIDEBAR_WIDTH_TRANSITION_MS,
+      );
+      return () => {
+        window.cancelAnimationFrame(frame);
+        window.clearTimeout(timer);
+      };
+    }
+
+    if (sidebarOpen) {
+      setVisibleWidth(sidebarWidth);
+    }
+  }, [sidebarOpen, sidebarWidth]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -177,7 +196,6 @@ const AISideBar = () => {
   }, [isResizing, setSidebarWidth]);
 
   const showChat = Boolean(activeSessionId);
-  const visibleWidth = sidebarOpen ? sidebarWidth : 0;
 
   return (
     <Box
@@ -188,7 +206,8 @@ const AISideBar = () => {
         flexShrink: 0,
         height: "100%",
         overflow: "hidden",
-        transition: animateWidth && !isResizing ? SIDEBAR_WIDTH_TRANSITION : "none",
+        transition:
+          animateWidth && !isResizing ? SIDEBAR_WIDTH_TRANSITION : "none",
         display: "flex",
         bgcolor: "background.paper",
         pointerEvents: sidebarOpen ? "auto" : "none",

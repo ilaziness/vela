@@ -3,13 +3,6 @@ import {
   IconButton,
   Stack,
   Tooltip,
-  Menu,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Collapse,
   Dialog,
   AppBar,
   Toolbar,
@@ -24,8 +17,6 @@ import SettingsIcon from "@mui/icons-material/Settings";
 import AddBoxIcon from "@mui/icons-material/AddBox";
 import BookmarksIcon from "@mui/icons-material/Bookmarks";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import CloseIcon from "@mui/icons-material/Close";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import HandymanIcon from "@mui/icons-material/Handyman";
@@ -35,9 +26,7 @@ import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import UpgradeIcon from "@mui/icons-material/Upgrade";
 import {
   AppService,
-  BookmarkService,
   ConfigService,
-  BookmarkGroup,
   CommandService,
   LogService,
   ToolService,
@@ -46,11 +35,10 @@ import {
 import { UploadSync } from "../../bindings/github.com/ilaziness/vela/services/syncservice";
 import { ReadConfig } from "../../bindings/github.com/ilaziness/vela/services/configservice";
 import { useSSHTabsStore } from "../stores/ssh";
-import { ConnectionStatus } from "../types/ssh";
 import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useUIStore } from "../stores/ui";
 import { genTabIndex, parseCallServiceError } from "../func/service";
-import { bookmarkColorHex } from "../func/bookmarkMeta";
+import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../stores/message";
 import ThemeSwitcher from "./ThemeSwitcher";
@@ -58,28 +46,22 @@ import { railIconButtonSx } from "./railIconButtonSx";
 import { Events } from "@wailsio/runtime";
 import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import BookmarkManager from "./Bookmark";
+import BookmarkConnectPanel from "./BookmarkConnectPanel";
 import Loading from "./Loading";
-import { BookmarkIconView, GroupIconView } from "./icons/bookmarkIcons";
 
 const UpdateAvailableDialog = React.lazy(
   () => import("./UpdateAvailableDialog"),
 );
 
 export default function Header() {
-  const { sshTabs, pushTab, setCurrentTab } = useSSHTabsStore();
+  const { sshTabs, pushTab } = useSSHTabsStore();
   const { errorMessage, successMessage } = useMessageStore();
   const { toggleSidebarOpen } = useAIAssistantStore();
   const bookmarkManageOpen = useUIStore((s) => s.bookmarkManageOpen);
   const setBookmarkManageOpen = useUIStore((s) => s.setBookmarkManageOpen);
   const frameless = useFrameless();
 
-  const [bookmarks, setBookmarks] = useState<BookmarkGroup[]>([]);
-  const [bookmarkAnchorEl, setBookmarkAnchorEl] = useState<null | HTMLElement>(
-    null,
-  );
-  const [expandedGroups, setExpandedGroups] = useState<{
-    [key: string]: boolean;
-  }>({});
+  const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newVersion, setNewVersion] = useState<NewVersion | null>(null);
@@ -113,8 +95,8 @@ export default function Header() {
     AppService.NewMainWindow();
   }, []);
 
-  const handleBookmark = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    setBookmarkAnchorEl(event.currentTarget);
+  const handleToggleBookmarkPanel = useCallback(() => {
+    setBookmarkPanelOpen((prev) => !prev);
   }, []);
 
   const handleBackupClick = useCallback(async () => {
@@ -144,7 +126,12 @@ export default function Header() {
         icon: <AddToQueueIcon />,
         onClick: handleNewMainWindow,
       },
-      { title: "书签", icon: <BookmarkIcon />, onClick: handleBookmark },
+      {
+        title: "书签",
+        icon: <BookmarkIcon />,
+        onClick: handleToggleBookmarkPanel,
+        active: bookmarkPanelOpen,
+      },
       {
         title: "书签管理",
         icon: <BookmarksIcon />,
@@ -174,36 +161,15 @@ export default function Header() {
     [
       handleAddTab,
       handleNewMainWindow,
-      handleBookmark,
+      handleToggleBookmarkPanel,
+      bookmarkPanelOpen,
       handleBackupClick,
       handleAIAssistant,
       setBookmarkManageOpen,
     ],
   );
 
-  const loadBookmarks = useCallback(async () => {
-    try {
-      const config = await BookmarkService.ListBookmarks();
-      if (config && Array.isArray(config)) {
-        const validBookmarks = config.filter(
-          (group): group is BookmarkGroup =>
-            group !== null && group !== undefined,
-        );
-        setBookmarks(validBookmarks);
-      } else {
-        setBookmarks([]);
-      }
-    } catch (error) {
-      console.error("Failed to load bookmarks:", error);
-      errorMessage(`Failed to load bookmarks:${error}`);
-    }
-  }, [errorMessage]);
-
   useEffect(() => {
-    loadBookmarks();
-    const unsubscribeBookmark = Events.On("eventBookmarkUpdate", () => {
-      loadBookmarks();
-    });
     const unsubscribeUpdate = Events.On("eventNewVersion", (event: any) => {
       const data = event?.data as NewVersion | undefined;
       if (data?.Version) {
@@ -212,50 +178,9 @@ export default function Header() {
     });
 
     return () => {
-      unsubscribeBookmark();
       unsubscribeUpdate();
     };
-  }, [loadBookmarks]);
-
-  const closeBookmarkMenu = () => {
-    setBookmarkAnchorEl(null);
-    setExpandedGroups({});
-  };
-
-  const toggleGroup = (groupName: string) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [groupName]: !prev[groupName],
-    }));
-  };
-
-  const handleBookmarkSelect = async (bookmarkID: string) => {
-    closeBookmarkMenu();
-    try {
-      const bookmark = await BookmarkService.GetBookmarkByID(bookmarkID);
-      if (!bookmark) {
-        errorMessage("bookmark not found");
-        return;
-      }
-      const sshInfo = {
-        bookmarkID: bookmark.id,
-        host: bookmark.host,
-        port: bookmark.port,
-        user: bookmark.user,
-        proxyJumpID: bookmark.proxy_jump_id,
-      };
-      const newIndex = genTabIndex();
-      pushTab({
-        index: newIndex,
-        name: bookmark.title,
-        sshInfo,
-        connectionStatus: ConnectionStatus.Connecting,
-      });
-      setCurrentTab(newIndex);
-    } catch (err) {
-      errorMessage(parseCallServiceError(err));
-    }
-  };
+  }, []);
 
   const handleCancelBackup = () => {
     setConfirmDialogOpen(false);
@@ -281,201 +206,152 @@ export default function Header() {
 
   return (
     <Box
-      component={"header"}
-      sx={(theme) => ({
-        width: "42px",
+      component="header"
+      sx={{
+        display: "flex",
+        flexDirection: "row",
+        flexShrink: 0,
         height: "100%",
-        overflow: "hidden",
-        backgroundColor: theme.palette.background.paper,
-        borderRight: `1px solid ${theme.palette.divider}`,
-      })}
+      }}
     >
-      <Stack
-        direction="column"
-        spacing={1}
-        sx={{ alignItems: "center", padding: 0.5, height: "100%" }}
+      <Box
+        sx={(theme) => ({
+          width: APP_HEADER_RAIL_WIDTH,
+          flexShrink: 0,
+          height: "100%",
+          overflow: "hidden",
+          backgroundColor: theme.palette.background.paper,
+          borderRight: `1px solid ${theme.palette.divider}`,
+        })}
       >
-        <Box
-          sx={{
-            ...dragRegionSx(frameless),
-            cursor: frameless ? "move" : undefined,
-          }}
+        <Stack
+          direction="column"
+          spacing={1}
+          sx={{ alignItems: "center", padding: 0.5, height: "100%" }}
         >
-          <img
-            src="/appicon.png"
-            alt="Logo"
-            style={{ width: "32px", height: "32px" }}
-          />
-        </Box>
-
-        {menuItems.map((item, index) => (
-          <Tooltip key={index} title={item.title}>
-            <IconButton sx={railIconButtonSx} onClick={item.onClick}>
-              {item.icon}
-            </IconButton>
-          </Tooltip>
-        ))}
-
-        <Box sx={{ flex: 1 }} />
-
-        <ThemeSwitcher />
-
-        {newVersion ? (
-          <Tooltip title="发现新版本">
-            <IconButton
-              sx={railIconButtonSx}
-              color="primary"
-              onClick={() => setUpdateDialogOpen(true)}
-            >
-              <UpgradeIcon />
-            </IconButton>
-          </Tooltip>
-        ) : null}
-
-        <Tooltip title="设置">
-          <IconButton sx={railIconButtonSx} onClick={showSettingWindow}>
-            <SettingsIcon />
-          </IconButton>
-        </Tooltip>
-
-        {updateDialogMounted && (
-          <React.Suspense fallback={null}>
-            <UpdateAvailableDialog
-              open={updateDialogOpen}
-              onClose={() => setUpdateDialogOpen(false)}
-              newVersion={newVersion}
-            />
-          </React.Suspense>
-        )}
-
-        <Menu
-          anchorEl={bookmarkAnchorEl}
-          open={Boolean(bookmarkAnchorEl)}
-          onClose={closeBookmarkMenu}
-          slotProps={{
-            paper: {
-              elevation: 8,
-              sx: {
-                overflow: "visible",
-                mt: 1,
-                minWidth: 200,
-              },
-            },
-          }}
-        >
-          <List dense>
-            {bookmarks.map((group) => (
-              <div key={group.name}>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={() => toggleGroup(group.name)}>
-                    <ListItemIcon sx={{ minWidth: 32 }}>
-                      {expandedGroups[group.name] ? (
-                        <ExpandMoreIcon fontSize="small" />
-                      ) : (
-                        <ChevronRightIcon fontSize="small" />
-                      )}
-                    </ListItemIcon>
-                    <ListItemIcon sx={{ minWidth: 28 }}>
-                      <GroupIconView icon={group.icon} fontSize={18} />
-                    </ListItemIcon>
-                    <ListItemText primary={group.name} />
-                  </ListItemButton>
-                </ListItem>
-                <Collapse
-                  in={expandedGroups[group.name]}
-                  timeout="auto"
-                  unmountOnExit
-                >
-                  <List component="div" disablePadding dense>
-                    {(group.bookmarks || []).map((bookmark) =>
-                      bookmark ? (
-                        <ListItem key={bookmark.id} disablePadding>
-                          <ListItemButton
-                            sx={{
-                              pl: 4,
-                              borderLeft: 5,
-                              borderColor:
-                                bookmarkColorHex(bookmark.color) ||
-                                "transparent",
-                            }}
-                            onClick={() => handleBookmarkSelect(bookmark.id)}
-                          >
-                            <ListItemIcon sx={{ minWidth: 24 }}>
-                              <BookmarkIconView
-                                icon={bookmark.icon}
-                                fontSize={16}
-                              />
-                            </ListItemIcon>
-                            <ListItemText primary={bookmark.title} />
-                          </ListItemButton>
-                        </ListItem>
-                      ) : null,
-                    )}
-                  </List>
-                </Collapse>
-              </div>
-            ))}
-          </List>
-        </Menu>
-        <Dialog
-          fullScreen
-          open={bookmarkManageOpen}
-          onClose={() => setBookmarkManageOpen(false)}
-        >
-          <AppBar
-            position="static"
-            color="default"
-            elevation={1}
-            sx={{ ...dragRegionSx(frameless) }}
+          <Box
+            sx={{
+              ...dragRegionSx(frameless),
+              cursor: frameless ? "move" : undefined,
+            }}
           >
-            <Toolbar>
-              <IconButton
-                edge="start"
-                onClick={() => setBookmarkManageOpen(false)}
-                size="large"
-              >
-                <CloseIcon />
-              </IconButton>
-              <Typography sx={{ ml: 1 }} variant="h6">
-                书签管理
-              </Typography>
-            </Toolbar>
-          </AppBar>
-          <Box sx={{ height: "calc(100% - 64px)" }}>
-            <BookmarkManager
-              onRequestClose={() => setBookmarkManageOpen(false)}
+            <img
+              src="/appicon.png"
+              alt="Logo"
+              style={{ width: "32px", height: "32px" }}
             />
           </Box>
-        </Dialog>
 
-        <Dialog
-          open={confirmDialogOpen}
-          onClose={handleCancelBackup}
-          maxWidth="xs"
-          fullWidth
-        >
-          <DialogTitle>确认上传</DialogTitle>
-          <DialogContent>
-            <Typography>确定要上传备份吗？</Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCancelBackup}>取消</Button>
-            <Button variant="contained" onClick={handleConfirmBackup}>
-              确定
-            </Button>
-          </DialogActions>
-        </Dialog>
+          {menuItems.map((item, index) => (
+            <Tooltip key={index} title={item.title}>
+              <IconButton
+                sx={railIconButtonSx}
+                onClick={item.onClick}
+                color={item.active ? "primary" : "default"}
+                aria-pressed={item.active ? true : undefined}
+              >
+                {item.icon}
+              </IconButton>
+            </Tooltip>
+          ))}
 
-        <Backdrop
-          open={uploading}
-          sx={(theme) => ({
-            zIndex: theme.zIndex.modal + 1,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-          })}
+          <Box sx={{ flex: 1 }} />
+
+          <ThemeSwitcher />
+
+          {newVersion ? (
+            <Tooltip title="发现新版本">
+              <IconButton
+                sx={railIconButtonSx}
+                color="primary"
+                onClick={() => setUpdateDialogOpen(true)}
+              >
+                <UpgradeIcon />
+              </IconButton>
+            </Tooltip>
+          ) : null}
+
+          <Tooltip title="设置">
+            <IconButton sx={railIconButtonSx} onClick={showSettingWindow}>
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+      </Box>
+
+      <BookmarkConnectPanel
+        open={bookmarkPanelOpen}
+        onRequestClose={() => setBookmarkPanelOpen(false)}
+      />
+
+      {updateDialogMounted && (
+        <React.Suspense fallback={null}>
+          <UpdateAvailableDialog
+            open={updateDialogOpen}
+            onClose={() => setUpdateDialogOpen(false)}
+            newVersion={newVersion}
+          />
+        </React.Suspense>
+      )}
+
+      <Dialog
+        fullScreen
+        open={bookmarkManageOpen}
+        onClose={() => setBookmarkManageOpen(false)}
+      >
+        <AppBar
+          position="static"
+          color="default"
+          elevation={1}
+          sx={{ ...dragRegionSx(frameless) }}
         >
-          <Loading message="正在上传备份..." size={60} />
-        </Backdrop>
-      </Stack>
+          <Toolbar>
+            <IconButton
+              edge="start"
+              onClick={() => setBookmarkManageOpen(false)}
+              size="large"
+            >
+              <CloseIcon />
+            </IconButton>
+            <Typography sx={{ ml: 1 }} variant="h6">
+              书签管理
+            </Typography>
+          </Toolbar>
+        </AppBar>
+        <Box sx={{ height: "calc(100% - 64px)" }}>
+          <BookmarkManager
+            onRequestClose={() => setBookmarkManageOpen(false)}
+          />
+        </Box>
+      </Dialog>
+
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={handleCancelBackup}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>确认上传</DialogTitle>
+        <DialogContent>
+          <Typography>确定要上传备份吗？</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBackup}>取消</Button>
+          <Button variant="contained" onClick={handleConfirmBackup}>
+            确定
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Backdrop
+        open={uploading}
+        sx={(theme) => ({
+          zIndex: theme.zIndex.modal + 1,
+          backgroundColor: "rgba(0, 0, 0, 0.5)",
+        })}
+      >
+        <Loading message="正在上传备份..." size={60} />
+      </Backdrop>
     </Box>
   );
 }
