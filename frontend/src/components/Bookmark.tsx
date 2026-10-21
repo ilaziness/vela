@@ -162,6 +162,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       startup_cmd: "",
       env_vars: "",
       term: "",
+      charset: "utf-8",
       tags: [],
       color: BookmarkColor.None,
     };

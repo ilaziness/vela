@@ -17,12 +17,14 @@ const (
 	EventInputPassword      = "eventInputPassword"
 	EventInputPasswordClose = "eventInputPasswordClose"
 	EventAppearance         = "eventAppearance"
+	EventTerminal           = "eventTerminal"
 )
 
 func init() {
 	application.RegisterEvent[string](EventInputPassword)
 	application.RegisterEvent[string](EventInputPasswordClose)
 	application.RegisterEvent[Appearance](EventAppearance)
+	application.RegisterEvent[TerminalConfig](EventTerminal)
 }
 
 // Appearance is the UI font broadcast after general settings are saved.
@@ -132,8 +134,13 @@ func (cs *ConfigService) showFramelessRestartDialog() {
 }
 
 func (cs *ConfigService) SaveTerminalConfig(terminalConfig TerminalConfig) error {
+	terminalConfig.Normalize()
 	cs.current().Terminal = terminalConfig
-	return cs.store.Save()
+	if err := cs.store.Save(); err != nil {
+		return err
+	}
+	cs.app.Event.Emit(EventTerminal, terminalConfig)
+	return nil
 }
 
 func (cs *ConfigService) SaveSSHConfig(sshConfig SSHConfig) error {

@@ -64,6 +64,12 @@ const TERM_OPTIONS = [
   "tmux-256color",
 ] as const;
 
+const CHARSET_OPTIONS = [
+  { value: "utf-8", label: "UTF-8" },
+  { value: "gbk", label: "GBK" },
+  { value: "gb18030", label: "GB18030" },
+] as const;
+
 const emptyBookmark = (): SSHBookmark => ({
   id: "",
   title: "",
@@ -89,6 +95,7 @@ const emptyBookmark = (): SSHBookmark => ({
   startup_cmd: "",
   env_vars: "",
   term: "",
+  charset: "utf-8",
   tags: [],
   color: BookmarkColor.None,
 });
@@ -141,6 +148,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         startup_cmd: bookmark.startup_cmd || "",
         env_vars: bookmark.env_vars || "",
         term: bookmark.term || "",
+        charset: bookmark.charset || "utf-8",
         tags: normalizeBookmarkTags(bookmark.tags),
         color: normalizeBookmarkColor(bookmark.color),
       };
@@ -159,6 +167,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         ...data,
         startup_cmd: (data.startup_cmd || "").trim(),
         term: (data.term || "").trim(),
+        charset: data.charset || "utf-8",
         env_vars: envToJSON(env),
         tags: normalizeBookmarkTags(data.tags),
         color: normalizeBookmarkColor(data.color),
@@ -860,6 +869,22 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       !(TERM_OPTIONS as readonly string[]).includes(formData.term) && (
                         <MenuItem value={formData.term}>{formData.term}</MenuItem>
                       )}
+                  </TextField>
+                </FormRow>
+                <FormRow label="终端编码" labelWidth={120}>
+                  <TextField
+                    select
+                    fullWidth
+                    size="small"
+                    name="charset"
+                    value={formData.charset || "utf-8"}
+                    onChange={handleChange}
+                  >
+                    {CHARSET_OPTIONS.map((c) => (
+                      <MenuItem key={c.value} value={c.value}>
+                        {c.label}
+                      </MenuItem>
+                    ))}
                   </TextField>
                 </FormRow>
                 <FormRow label="环境变量" labelWidth={120}>

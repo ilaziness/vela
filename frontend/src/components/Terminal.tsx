@@ -14,7 +14,6 @@ import { Browser, Events } from "@wailsio/runtime";
 import {
   LogService,
   SSHService,
-  ConfigService,
   AppService,
   CommandService,
 } from "../../bindings/github.com/ilaziness/vela/services";
@@ -188,6 +187,7 @@ function Terminal(props: {
   const historyRefreshTimerRef = React.useRef<number | NodeJS.Timeout | null>(
     null,
   );
+  const bellFlashTimerRef = React.useRef<number | NodeJS.Timeout | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
     mouseY: number;
@@ -317,16 +317,47 @@ function Terminal(props: {
     }
   };
 
+  const openContextMenuAt = (clientX: number, clientY: number) => {
+    setContextMenu({
+      mouseX: clientX + 2,
+      mouseY: clientY - 6,
+    });
+  };
+
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        return;
+      }
+      const t =
+        terminalInstances.get(linkIDRef.current) ?? term.current ?? null;
+      t?.paste(text);
+      t?.focus();
+    } catch (err) {
+      console.error("Failed to read clipboard contents: ", err);
+    }
+  };
+
+  const copySelectionToClipboard = (selection: string) => {
+    if (!selection) {
+      return;
+    }
+    void navigator.clipboard.writeText(selection);
+  };
+
   const handleContextMenu = (event: React.MouseEvent) => {
     event.preventDefault();
-    setContextMenu(
-      contextMenu === null
-        ? {
-            mouseX: event.clientX + 2,
-            mouseY: event.clientY - 6,
-          }
-        : null,
-    );
+    const rightClickPaste = useTerminalStore.getState().rightClickPaste;
+    if (rightClickPaste && !event.shiftKey) {
+      void pasteFromClipboard();
+      return;
+    }
+    if (contextMenu !== null) {
+      setContextMenu(null);
+      return;
+    }
+    openContextMenuAt(event.clientX, event.clientY);
   };
 
   const handleClose = () => {
@@ -374,26 +405,11 @@ function Terminal(props: {
         openSearch();
         break;
       case ShortcutAction.TerminalCopy: {
-        const selection = instance?.getSelection() ?? "";
-        if (selection) {
-          void navigator.clipboard.writeText(selection);
-        }
+        copySelectionToClipboard(instance?.getSelection() ?? "");
         break;
       }
       case ShortcutAction.TerminalPaste:
-        void (async () => {
-          try {
-            const text = await navigator.clipboard.readText();
-            if (!text) {
-              return;
-            }
-            const term = terminalInstances.get(linkIDRef.current);
-            term?.paste(text);
-            term?.focus();
-          } catch (err) {
-            console.error("Failed to read clipboard contents: ", err);
-          }
-        })();
+        void pasteFromClipboard();
         break;
       case ShortcutAction.TerminalAddToChat: {
         const selection = instance?.getSelection() ?? "";
@@ -495,13 +511,12 @@ function Terminal(props: {
       }
       LogService.Debug("Initializing terminal for link ID: " + props.linkID);
       try {
-        const [config, mods] = await Promise.all([
-          ConfigService.ReadConfig(),
-          loadXtermModules(),
-        ]);
+        const mods = await loadXtermModules();
         if (!mountedRef.current) return;
-        const settings = config?.Terminal || useTerminalStore.getState();
-        LogService.Debug(`Terminal setting ${JSON.stringify(settings)}`);
+        const settings = useTerminalStore.getState();
+        LogService.Debug(
+          `Terminal prefs scrollback=${settings.scrollback} bell=${settings.bell}`,
+        );
         if (term.current) return;
         if (!termRef.current) {
           LogService.Error(
@@ -510,8 +525,8 @@ function Terminal(props: {
           setIsInitializing(false);
           return;
         }
-        // 获取当前终端主题
-        const terminalTheme = useTerminalStore.getState().getCurrentTheme();
+
+        const terminalTheme = settings.getCurrentTheme();
         applyThemeVars(terminalTheme);
         term.current = new mods.Terminal({
           allowProposedApi: true,
@@ -520,12 +535,40 @@ function Terminal(props: {
           fontFamily: settings.fontFamily,
           fontSize: settings.fontSize,
           lineHeight: settings.lineHeight,
+          scrollback: settings.scrollback,
           rightClickSelectsWord: true,
           theme: terminalTheme,
         });
         loadAddon(mods);
         term.current.open(termRef.current);
         terminalInstances.set(props.linkID, term.current);
+        // xterm v6: no bellStyle; visual flash via onBell when enabled.
+        term.current.onBell(() => {
+          if (!useTerminalStore.getState().bell || !termRef.current) {
+            return;
+          }
+          const el = termRef.current;
+          if (bellFlashTimerRef.current != null) {
+            globalThis.clearTimeout(bellFlashTimerRef.current);
+            bellFlashTimerRef.current = null;
+          }
+          el.style.opacity = "0.55";
+          bellFlashTimerRef.current = globalThis.setTimeout(() => {
+            bellFlashTimerRef.current = null;
+            if (termRef.current === el) {
+              el.style.opacity = "1";
+            }
+          }, 80);
+        });
+        term.current.onSelectionChange(() => {
+          if (!useTerminalStore.getState().copyOnSelect || !term.current) {
+            return;
+          }
+          if (!term.current.hasSelection()) {
+            return;
+          }
+          copySelectionToClipboard(term.current.getSelection());
+        });
         await sleep(50);
         if (!mountedRef.current) return;
         termFit.current?.fit();
@@ -767,15 +810,45 @@ function Terminal(props: {
     },
   );
 
-  // 监听终端主题变化，动态更新终端主题
+  // Live-apply terminal prefs (theme, font, scrollback, bell, …) to open sessions.
   useEffect(() => {
     const unsubscribe = useTerminalStore.subscribe((state, prevState) => {
-      if (state.theme !== prevState.theme && term.current) {
+      if (!term.current) {
+        return;
+      }
+      let needFit = false;
+      let needRefresh = false;
+
+      if (state.theme !== prevState.theme) {
         const newTheme = state.getCurrentTheme();
         term.current.options.theme = newTheme;
         applyThemeVars(newTheme);
-        term.current.refresh(0, term.current.rows - 1);
+        needRefresh = true;
         LogService.Debug(`Terminal theme updated to: ${state.theme}`);
+      }
+      if (state.fontFamily !== prevState.fontFamily) {
+        term.current.options.fontFamily = state.fontFamily;
+        needFit = true;
+      }
+      if (state.fontSize !== prevState.fontSize) {
+        term.current.options.fontSize = state.fontSize;
+        needFit = true;
+      }
+      if (state.lineHeight !== prevState.lineHeight) {
+        term.current.options.lineHeight = state.lineHeight;
+        needFit = true;
+      }
+      if (state.scrollback !== prevState.scrollback) {
+        term.current.options.scrollback = state.scrollback;
+        needRefresh = true;
+      }
+
+      if (needFit) {
+        termFit.current?.fit();
+        needRefresh = true;
+      }
+      if (needRefresh) {
+        term.current.refresh(0, term.current.rows - 1);
       }
     });
 
@@ -848,6 +921,10 @@ function Terminal(props: {
       if (historyRefreshTimerRef.current) {
         clearTimeout(historyRefreshTimerRef.current);
         historyRefreshTimerRef.current = null;
+      }
+      if (bellFlashTimerRef.current != null) {
+        clearTimeout(bellFlashTimerRef.current);
+        bellFlashTimerRef.current = null;
       }
       try {
         wsRef.current?.close();

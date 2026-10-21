@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 
 	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/termcharset"
 	"github.com/ilaziness/vela/internal/utils"
 	"github.com/ilaziness/vela/internal/zmodem"
 )
@@ -53,6 +54,7 @@ type Endpoint struct {
 	StartupCmd   string
 	Env          map[string]string
 	Term         string // empty → xterm-256color at RequestPty
+	Charset      string // utf-8 | gbk | gb18030; empty → utf-8
 }
 
 const defaultTermType = "xterm-256color"
@@ -104,6 +106,8 @@ type Session struct {
 	startupCmd     string
 	env            map[string]string
 	term           string
+	charset        string // canonical; empty/utf-8 → no codec
+	inEncoder      *termcharset.Stream
 	outputMu       sync.Mutex
 	gotOutput      bool
 	lastOutputAt   time.Time
@@ -436,6 +440,18 @@ func newSession(m *Manager, clientKey string, client *cryptossh.Client, target E
 		env:            target.Env,
 		term:           target.Term,
 	}
+	charset, err := termcharset.Normalize(target.Charset)
+	if err != nil {
+		charset = termcharset.UTF8
+	}
+	sc.charset = charset
+	// One encoder for Stdin (WriteCloser serializes concurrent writers).
+	// Decoders are created per PTY pipe — stdout/stderr must not share Stream state.
+	if enc, err := termcharset.NewEncoder(charset); err == nil {
+		sc.inEncoder = enc
+	} else {
+		m.logger.Warn("terminal charset encoder", zap.String("charset", charset), zap.Error(err))
+	}
 	if m.zmodemPicker != nil {
 		sc.zmFilter = zmodem.NewFilter(sc.ID, zmodem.Deps{
 			Picker:   m.zmodemPicker,
@@ -554,11 +570,14 @@ func (sc *Session) Start(cols, rows int) error {
 }
 
 func (sc *Session) failStart(err error) error {
+	if sc.Stdin != nil {
+		_ = sc.Stdin.Close()
+		sc.Stdin = nil
+	}
 	if sc.session != nil {
 		_ = sc.session.Close()
 		sc.session = nil
 	}
-	sc.Stdin = nil
 	return err
 }
 
@@ -579,33 +598,53 @@ func (sc *Session) startOutput() error {
 func (sc *Session) readFromPipe(pipe io.Reader, pipeName string) func() {
 	return func() {
 		defer system.RecoverFromPanic()
+		decoder, err := termcharset.NewDecoder(sc.charset)
+		if err != nil {
+			sc.manager.logger.Warn("terminal charset decoder",
+				zap.String("id", sc.ID), zap.String("pipe", pipeName),
+				zap.String("charset", sc.charset), zap.Error(err))
+		}
 		buf := make([]byte, sc.outputBuffSize)
+		emit := func(data []byte) bool {
+			if len(data) == 0 {
+				return true
+			}
+			sc.teeOutput(data)
+			select {
+			case sc.OutputChan <- data:
+				return true
+			case <-sc.stopOutput:
+				return false
+			}
+		}
+		// Zmodem is a PTY/stdout protocol; do not feed stderr into the shared filter.
+		useZm := sc.zmFilter != nil && pipeName == "stdout"
 		for {
 			n, err := pipe.Read(buf)
+			if n > 0 {
+				sc.noteOutput()
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				if useZm {
+					data = sc.zmFilter.FeedOut(data)
+				}
+				if decoder != nil && len(data) > 0 {
+					data = decoder.Bytes(data)
+				}
+				if !emit(data) {
+					return
+				}
+			}
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
+					if decoder != nil {
+						_ = emit(decoder.Flush())
+					}
 					sc.manager.logger.Debug(fmt.Sprintf("%s EOF reached", pipeName), zap.String("id", sc.ID))
 					return
 				}
 				sc.manager.logger.Error(fmt.Sprintf("Error reading from %s:", pipeName), zap.Error(err), zap.String("id", sc.ID))
 				return
-			}
-			if n > 0 {
-				sc.noteOutput()
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				if sc.zmFilter != nil {
-					data = sc.zmFilter.FeedOut(data)
-					if len(data) == 0 {
-						continue
-					}
-				}
-				sc.teeOutput(data)
-				select {
-				case sc.OutputChan <- data:
-				case <-sc.stopOutput:
-					return
-				}
 			}
 		}
 	}
@@ -624,10 +663,11 @@ func (sc *Session) startInput() error {
 	}
 	if sc.zmFilter != nil {
 		sc.zmFilter.BindStdin(stdin)
-		sc.Stdin = sc.zmFilter.WrapStdin()
-	} else {
-		sc.Stdin = stdin
+		stdin = sc.zmFilter.WrapStdin()
 	}
+	// Encoder outside Zmodem wrap: user keystrokes / SendToSession encode;
+	// Zmodem protocol never enters WrapStdin from WS during transfer.
+	sc.Stdin = termcharset.WrapWriteCloser(stdin, sc.inEncoder)
 	return nil
 }
 
@@ -641,6 +681,11 @@ func (sc *Session) closePTY() error {
 	sc.isClosed = true
 	if sc.zmFilter != nil {
 		sc.zmFilter.Reset()
+	}
+	// Flush charset encoder (held incomplete UTF-8) before tearing down the PTY.
+	if sc.Stdin != nil {
+		_ = sc.Stdin.Close()
+		sc.Stdin = nil
 	}
 	// Close log under locks; emit after unlock so callbacks cannot deadlock on closeMu.
 	sc.logMu.Lock()

@@ -31,6 +31,7 @@ var migrations = []Migration{
 	{Version: 12, Name: "add bookmark tags and color", Up: migrateAddBookmarkTagsColor},
 	{Version: 13, Name: "add ai_messages status", Up: migrateAddAIMessageStatus},
 	{Version: 14, Name: "add sftp transfer overwrite", Up: migrateAddSftpTransferOverwrite},
+	{Version: 15, Name: "add bookmark charset", Up: migrateAddBookmarkCharset},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -384,6 +385,23 @@ func migrateAddSftpTransferOverwrite(db *sql.DB, logger *zap.Logger) error {
 	}
 	if err != nil {
 		return fmt.Errorf("check column sftp_transfers.overwrite failed: %w", err)
+	}
+	return nil
+}
+
+// migrateAddBookmarkCharset adds per-bookmark terminal charset (idempotent).
+func migrateAddBookmarkCharset(db *sql.DB, logger *zap.Logger) error {
+	var columnName string
+	err := db.QueryRow(`SELECT name FROM pragma_table_info('bookmarks') WHERE name = 'charset'`).Scan(&columnName)
+	if err == sql.ErrNoRows {
+		if _, err := db.Exec(`ALTER TABLE bookmarks ADD COLUMN charset TEXT NOT NULL DEFAULT 'utf-8'`); err != nil {
+			return fmt.Errorf("add column bookmarks.charset failed: %w", err)
+		}
+		logger.Debug("migration: added bookmarks.charset column")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check column bookmarks.charset failed: %w", err)
 	}
 	return nil
 }

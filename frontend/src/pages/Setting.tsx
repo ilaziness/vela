@@ -132,7 +132,14 @@ const Setting: React.FC = () => {
               )}
 
               {activeTab === "terminal" && (
-                <TerminalSettings config={config.Terminal} />
+                <TerminalSettings
+                  config={config.Terminal}
+                  onSaved={(terminal) =>
+                    setConfig((prev) =>
+                      prev ? { ...prev, Terminal: terminal } : prev,
+                    )
+                  }
+                />
               )}
 
               {activeTab === "ssh" && <SSHSettings config={config.SSH} />}

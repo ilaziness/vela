@@ -198,6 +198,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       startup_cmd: "",
       env_vars: "",
       term: "",
+      charset: "utf-8",
       tags: [],
       color: "",
     };

@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const bookmarkSelectCols = `id, bookmark_id, group_id, title, host, port, user, password, private_key, private_key_password, proxy_jump_id, COALESCE(icon, ''), COALESCE(use_agent, 0), COALESCE(ssh_key_id, ''), COALESCE(certificate, ''), COALESCE(forward_agent, 0), COALESCE(proxy_mode, 'inherit'), COALESCE(proxy_type, ''), COALESCE(proxy_host, ''), COALESCE(proxy_port, 0), COALESCE(proxy_user, ''), COALESCE(proxy_password, ''), COALESCE(startup_cmd, ''), COALESCE(env_vars, ''), COALESCE(term, ''), COALESCE(tags, ''), COALESCE(color, ''), created_at, updated_at`
+const bookmarkSelectCols = `id, bookmark_id, group_id, title, host, port, user, password, private_key, private_key_password, proxy_jump_id, COALESCE(icon, ''), COALESCE(use_agent, 0), COALESCE(ssh_key_id, ''), COALESCE(certificate, ''), COALESCE(forward_agent, 0), COALESCE(proxy_mode, 'inherit'), COALESCE(proxy_type, ''), COALESCE(proxy_host, ''), COALESCE(proxy_port, 0), COALESCE(proxy_user, ''), COALESCE(proxy_password, ''), COALESCE(startup_cmd, ''), COALESCE(env_vars, ''), COALESCE(term, ''), COALESCE(charset, 'utf-8'), COALESCE(tags, ''), COALESCE(color, ''), created_at, updated_at`
 
 // BookmarkGroupDB 书签分组数据库模型
 type BookmarkGroupDB struct {
@@ -45,6 +45,7 @@ type BookmarkDB struct {
 	StartupCmd         string    `json:"startup_cmd"`
 	EnvVars            string    `json:"env_vars"`
 	Term               string    `json:"term"`
+	Charset            string    `json:"charset"`
 	Tags               string    `json:"tags"`
 	Color              string    `json:"color"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -74,7 +75,7 @@ func scanBookmark(scanner interface{ Scan(dest ...any) error }) (*BookmarkDB, er
 		&b.User, &b.Password, &b.PrivateKey, &b.PrivateKeyPassword, &b.ProxyJumpID, &b.Icon,
 		&useAgent, &b.SshKeyID, &b.Certificate, &forwardAgent,
 		&b.ProxyMode, &b.ProxyType, &b.ProxyHost, &b.ProxyPort, &b.ProxyUser, &b.ProxyPassword,
-		&b.StartupCmd, &b.EnvVars, &b.Term, &b.Tags, &b.Color,
+		&b.StartupCmd, &b.EnvVars, &b.Term, &b.Charset, &b.Tags, &b.Color,
 		&b.CreatedAt, &b.UpdatedAt,
 	)
 	if err != nil {
@@ -84,6 +85,9 @@ func scanBookmark(scanner interface{ Scan(dest ...any) error }) (*BookmarkDB, er
 	b.ForwardAgent = forwardAgent != 0
 	if b.ProxyMode == "" {
 		b.ProxyMode = "inherit"
+	}
+	if b.Charset == "" {
+		b.Charset = "utf-8"
 	}
 	return &b, nil
 }
@@ -166,13 +170,13 @@ func (r *BookmarkRepository) GetBookmarkByTitleAndGroup(title string, groupID in
 
 // InsertBookmark 插入书签
 func (r *BookmarkRepository) InsertBookmark(bookmark *BookmarkDB) error {
-	query := `INSERT INTO bookmarks (bookmark_id, group_id, title, host, port, user, password, private_key, private_key_password, proxy_jump_id, icon, use_agent, ssh_key_id, certificate, forward_agent, proxy_mode, proxy_type, proxy_host, proxy_port, proxy_user, proxy_password, startup_cmd, env_vars, term, tags, color, created_at, updated_at) 
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO bookmarks (bookmark_id, group_id, title, host, port, user, password, private_key, private_key_password, proxy_jump_id, icon, use_agent, ssh_key_id, certificate, forward_agent, proxy_mode, proxy_type, proxy_host, proxy_port, proxy_user, proxy_password, startup_cmd, env_vars, term, charset, tags, color, created_at, updated_at) 
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err := r.db.Exec(query,
 		bookmark.ID, bookmark.GroupID, bookmark.Title, bookmark.Host, bookmark.Port,
 		bookmark.User, bookmark.Password, bookmark.PrivateKey, bookmark.PrivateKeyPassword, bookmark.ProxyJumpID, bookmark.Icon, boolInt(bookmark.UseAgent), bookmark.SshKeyID, bookmark.Certificate, boolInt(bookmark.ForwardAgent),
 		bookmark.ProxyMode, bookmark.ProxyType, bookmark.ProxyHost, bookmark.ProxyPort, bookmark.ProxyUser, bookmark.ProxyPassword,
-		bookmark.StartupCmd, bookmark.EnvVars, bookmark.Term, bookmark.Tags, bookmark.Color,
+		bookmark.StartupCmd, bookmark.EnvVars, bookmark.Term, bookmark.Charset, bookmark.Tags, bookmark.Color,
 		bookmark.CreatedAt, bookmark.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf(errInsertQuery, "bookmark", err)
@@ -188,13 +192,13 @@ func (r *BookmarkRepository) UpdateBookmark(bookmark *BookmarkDB) error {
 			  SET group_id = ?, title = ?, host = ?, port = ?, user = ?, password = ?, 
 			      private_key = ?, private_key_password = ?, proxy_jump_id = ?, icon = ?, use_agent = ?, ssh_key_id = ?, certificate = ?, forward_agent = ?,
 			      proxy_mode = ?, proxy_type = ?, proxy_host = ?, proxy_port = ?, proxy_user = ?, proxy_password = ?,
-			      startup_cmd = ?, env_vars = ?, term = ?, tags = ?, color = ?, updated_at = ? 
+			      startup_cmd = ?, env_vars = ?, term = ?, charset = ?, tags = ?, color = ?, updated_at = ? 
 			  WHERE bookmark_id = ?`
 	_, err := r.db.Exec(query,
 		bookmark.GroupID, bookmark.Title, bookmark.Host, bookmark.Port,
 		bookmark.User, bookmark.Password, bookmark.PrivateKey, bookmark.PrivateKeyPassword, bookmark.ProxyJumpID, bookmark.Icon, boolInt(bookmark.UseAgent), bookmark.SshKeyID, bookmark.Certificate, boolInt(bookmark.ForwardAgent),
 		bookmark.ProxyMode, bookmark.ProxyType, bookmark.ProxyHost, bookmark.ProxyPort, bookmark.ProxyUser, bookmark.ProxyPassword,
-		bookmark.StartupCmd, bookmark.EnvVars, bookmark.Term, bookmark.Tags, bookmark.Color,
+		bookmark.StartupCmd, bookmark.EnvVars, bookmark.Term, bookmark.Charset, bookmark.Tags, bookmark.Color,
 		bookmark.UpdatedAt, bookmark.ID)
 	if err != nil {
 		return fmt.Errorf(errInsertQuery, "update bookmark", err)

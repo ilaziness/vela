@@ -7,6 +7,9 @@ import type { Events } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import type * as config$0 from "../../../../ilaziness/vela/internal/config/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import type * as transfer$0 from "../../../../ilaziness/vela/internal/transfer/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -30,6 +33,7 @@ declare module "@wailsio/runtime" {
             "eventSSHSessionLogStopped": string;
             "eventSftpFilesDropped": services$0.SftpFilesDroppedData;
             "eventShortcut": services$0.ShortcutEvent;
+            "eventTerminal": services$0.TerminalConfig;
             "eventTransferQueued": services$0.TransferQueuedData;
         }
     }

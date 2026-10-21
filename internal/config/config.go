@@ -51,10 +51,20 @@ type GeneralConfig struct {
 }
 
 type TerminalConfig struct {
-	Font       string  `toml:"font" json:"fontFamily"`
-	FontSize   int     `toml:"font_size" json:"fontSize"`
-	LineHeight float64 `toml:"line_height" json:"lineHeight"`
+	Font            string  `toml:"font" json:"fontFamily"`
+	FontSize        int     `toml:"font_size" json:"fontSize"`
+	LineHeight      float64 `toml:"line_height" json:"lineHeight"`
+	Scrollback      int     `toml:"scrollback" json:"scrollback"`
+	Bell            bool    `toml:"bell" json:"bell"`
+	CopyOnSelect    bool    `toml:"copy_on_select" json:"copyOnSelect"`
+	RightClickPaste bool    `toml:"right_click_paste" json:"rightClickPaste"`
 }
+
+const (
+	defaultTerminalScrollback = 10000
+	minTerminalScrollback     = 100
+	maxTerminalScrollback     = 100000
+)
 
 // SSHConfig holds global SSH client options (ServerAliveInterval-style keepalive, dial timeout, auto-reconnect, dial proxy).
 type SSHConfig struct {
@@ -89,9 +99,13 @@ func Default() *Config {
 			FontSize:    14,
 		},
 		Terminal: TerminalConfig{
-			Font:       strings.Join(defaultFontFamily, ","),
-			FontSize:   14,
-			LineHeight: 1,
+			Font:            strings.Join(defaultFontFamily, ","),
+			FontSize:        14,
+			LineHeight:      1,
+			Scrollback:      defaultTerminalScrollback,
+			Bell:            true,
+			CopyOnSelect:    false,
+			RightClickPaste: false,
 		},
 		SSH: SSHConfig{
 			ServerAliveInterval: 30,
@@ -129,6 +143,29 @@ func sanitizeUIFont(font string) string {
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// Normalize clamps terminal display options. Does not force Bell/CopyOnSelect/
+// RightClickPaste defaults — absent TOML keys keep Default() values via merge.
+func (c *TerminalConfig) Normalize() {
+	def := Default().Terminal
+	if c.FontSize < 1 || c.FontSize > 72 {
+		c.FontSize = def.FontSize
+	}
+	if c.LineHeight <= 0 {
+		c.LineHeight = def.LineHeight
+	}
+	switch {
+	case c.Scrollback <= 0:
+		c.Scrollback = def.Scrollback
+	case c.Scrollback < minTerminalScrollback:
+		c.Scrollback = minTerminalScrollback
+	case c.Scrollback > maxTerminalScrollback:
+		c.Scrollback = maxTerminalScrollback
+	}
+	if strings.TrimSpace(c.Font) == "" {
+		c.Font = def.Font
+	}
 }
 
 // Normalize fills invalid/missing fields with defaults after loading from disk.
@@ -211,6 +248,7 @@ func Load(logger *zap.Logger) (*Store, error) {
 	}
 
 	finalConfig.General.Normalize()
+	finalConfig.Terminal.Normalize()
 
 	logger.Debug("config loaded", zap.String("appConfigPath", appConfigPath), zap.String("userConfigPath", userConfigPath))
 

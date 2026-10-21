@@ -8,6 +8,9 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as config$0 from "../../../../ilaziness/vela/internal/config/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as transfer$0 from "../../../../ilaziness/vela/internal/transfer/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -21,7 +24,8 @@ function configure() {
         "eventProgress": $$createType3,
         "eventSftpFilesDropped": $$createType4,
         "eventShortcut": $$createType5,
-        "eventTransferQueued": $$createType6,
+        "eventTerminal": $$createType6,
+        "eventTransferQueued": $$createType7,
     }));
 }
 
@@ -32,6 +36,7 @@ const $$createType2 = services$0.NewVersion.createFrom;
 const $$createType3 = transfer$0.ProgressData.createFrom;
 const $$createType4 = services$0.SftpFilesDroppedData.createFrom;
 const $$createType5 = services$0.ShortcutEvent.createFrom;
-const $$createType6 = services$0.TransferQueuedData.createFrom;
+const $$createType6 = config$0.TerminalConfig.createFrom;
+const $$createType7 = services$0.TransferQueuedData.createFrom;
 
 configure();

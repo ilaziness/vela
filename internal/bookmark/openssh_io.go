@@ -10,6 +10,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/sshconfig"
+	"github.com/ilaziness/vela/internal/termcharset"
 )
 
 const ImportedGroupName = "Imported"
@@ -211,6 +212,7 @@ func entryToBookmark(e sshconfig.HostEntry, title, groupName string) Bookmark {
 		User:       e.User,
 		ProxyMode:  "inherit",
 		StartupCmd: e.RemoteCommand,
+		Charset:    termcharset.UTF8,
 	}
 	if len(e.IdentityFiles) > 0 {
 		b.PrivateKey = e.IdentityFiles[0]

@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/termcharset"
 	"github.com/ilaziness/vela/internal/utils"
 )
 
@@ -47,6 +48,7 @@ type Bookmark struct {
 	StartupCmd         string   `json:"startup_cmd"`
 	EnvVars            string   `json:"env_vars"` // JSON object
 	Term               string   `json:"term"`
+	Charset            string   `json:"charset"` // utf-8 | gbk | gb18030
 	Tags               []string `json:"tags"`
 	Color              string   `json:"color"`
 }
@@ -58,6 +60,7 @@ func (b Bookmark) Endpoint() ssh.Endpoint {
 		Password: b.Password, Key: b.PrivateKey, KeyPassword: b.PrivateKeyPassword,
 		Certificate: b.Certificate, ForwardAgent: b.ForwardAgent,
 		StartupCmd: b.StartupCmd, Env: env, Term: b.Term,
+		Charset: normalizeStoredCharset(b.Charset),
 	}
 }
 
@@ -227,8 +230,17 @@ func fromDB(b *database.BookmarkDB, groupName string) *Bookmark {
 		ProxyMode: mode, ProxyType: b.ProxyType, ProxyHost: b.ProxyHost, ProxyPort: b.ProxyPort,
 		ProxyUser: b.ProxyUser, ProxyPassword: b.ProxyPassword,
 		StartupCmd: b.StartupCmd, EnvVars: b.EnvVars, Term: b.Term,
-		Tags: decodeTags(b.Tags), Color: normalizeColor(b.Color),
+		Charset: normalizeStoredCharset(b.Charset),
+		Tags:    decodeTags(b.Tags), Color: normalizeColor(b.Color),
 	}
+}
+
+func normalizeStoredCharset(v string) string {
+	n, err := termcharset.Normalize(v)
+	if err != nil {
+		return termcharset.UTF8
+	}
+	return n
 }
 
 func (s *Service) GetMasked(id string) (*Bookmark, error) {
@@ -274,6 +286,7 @@ func (s *Service) ResolveHops(target ssh.Endpoint, jumpID string) ([]ssh.Endpoin
 		ep.StartupCmd = ""
 		ep.Env = nil
 		ep.Term = ""
+		ep.Charset = ""
 		ep.ForwardAgent = false
 		if seen[ep.Addr()] {
 			return nil, fmt.Errorf("检测到跳板机循环引用: %s", ep.Addr())
@@ -424,7 +437,8 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 		ProxyHost: processed.ProxyHost, ProxyPort: processed.ProxyPort,
 		ProxyUser: processed.ProxyUser, ProxyPassword: processed.ProxyPassword,
 		StartupCmd: processed.StartupCmd, EnvVars: processed.EnvVars, Term: processed.Term,
-		Tags: encodeTags(processed.Tags), Color: processed.Color,
+		Charset: processed.Charset,
+		Tags:    encodeTags(processed.Tags), Color: processed.Color,
 		UpdatedAt: time.Now(),
 	}
 	if err := s.db.BookmarkRepo.UpdateBookmark(dbBookmark); err != nil {
@@ -492,7 +506,8 @@ func (s *Service) insert(b Bookmark) (string, error) {
 		ProxyHost: processed.ProxyHost, ProxyPort: processed.ProxyPort,
 		ProxyUser: processed.ProxyUser, ProxyPassword: processed.ProxyPassword,
 		StartupCmd: processed.StartupCmd, EnvVars: processed.EnvVars, Term: processed.Term,
-		Tags: encodeTags(processed.Tags), Color: processed.Color,
+		Charset: processed.Charset,
+		Tags:    encodeTags(processed.Tags), Color: processed.Color,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return "", err
@@ -516,6 +531,11 @@ func validateSessionOptions(b *Bookmark) error {
 		return fmt.Errorf("启动命令不能包含换行")
 	}
 	b.Term = strings.TrimSpace(b.Term)
+	charset, err := termcharset.Normalize(b.Charset)
+	if err != nil {
+		return err
+	}
+	b.Charset = charset
 	return nil
 }
 
@@ -578,7 +598,8 @@ func (s *Service) Copy(id string) (*Bookmark, error) {
 		ProxyHost: src.ProxyHost, ProxyPort: src.ProxyPort,
 		ProxyUser: src.ProxyUser, ProxyPassword: src.ProxyPassword,
 		StartupCmd: src.StartupCmd, EnvVars: src.EnvVars, Term: src.Term,
-		Tags: src.Tags, Color: src.Color,
+		Charset: normalizeStoredCharset(src.Charset),
+		Tags:    src.Tags, Color: src.Color,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return nil, err
@@ -711,6 +732,7 @@ func (s *Service) PrepareTest(b Bookmark) (PrepareTestResult, error) {
 	ep.ForwardAgent = b.ForwardAgent
 	ep.StartupCmd = b.StartupCmd
 	ep.Term = b.Term
+	ep.Charset = normalizeStoredCharset(b.Charset)
 	if env, err := ParseEnvVars(b.EnvVars); err == nil {
 		ep.Env = env
 	}

@@ -12,6 +12,7 @@ import useTerminalStore from "./stores/terminal";
 import type { AppTheme } from "./types/ssh";
 
 const EVENT_APPEARANCE = "eventAppearance";
+const EVENT_TERMINAL = "eventTerminal";
 
 interface Appearance {
   Font?: string;
@@ -20,30 +21,22 @@ interface Appearance {
 
 const VALID_THEMES: AppTheme[] = ["light", "dark", "eyeCare"];
 
-// 提取终端设置应用函数，降低认知复杂度
-function applyTerminalSettings(t: Config["Terminal"]): void {
-  const updates: Partial<{
-    fontFamily: string;
-    fontSize: number;
-    lineHeight: number;
-  }> = {};
-
-  if (t?.fontFamily) {
-    updates.fontFamily = t.fontFamily;
+/** Apply terminal prefs from config. Booleans must be assigned even when false. */
+function applyTerminalSettings(t: Config["Terminal"] | undefined | null): void {
+  if (!t) {
+    return;
   }
-  if (t?.fontSize && t.fontSize > 0) {
-    updates.fontSize = t.fontSize;
-  }
-  if (t?.lineHeight && t.lineHeight > 0) {
-    updates.lineHeight = t.lineHeight;
-  }
-
-  if (Object.keys(updates).length > 0) {
-    useTerminalStore.setState(updates as any);
-  }
+  useTerminalStore.getState().applyFromConfig({
+    fontFamily: t.fontFamily || undefined,
+    fontSize: t.fontSize > 0 ? t.fontSize : undefined,
+    lineHeight: t.lineHeight > 0 ? t.lineHeight : undefined,
+    scrollback: t.scrollback > 0 ? t.scrollback : undefined,
+    bell: t.bell,
+    copyOnSelect: t.copyOnSelect,
+    rightClickPaste: t.rightClickPaste,
+  });
 }
 
-// 验证主题值并回退到默认值
 function normalizeTheme(theme: string | undefined): AppTheme {
   if (theme && VALID_THEMES.includes(theme as AppTheme)) {
     return theme as AppTheme;
@@ -51,7 +44,6 @@ function normalizeTheme(theme: string | undefined): AppTheme {
   return "dark";
 }
 
-// 提取主题同步函数
 function syncTerminalTheme(globalTheme: string | undefined): void {
   const validTheme = normalizeTheme(globalTheme);
   useTerminalStore.getState().syncWithGlobalTheme(validTheme);
@@ -90,6 +82,18 @@ function Root() {
         if (data.FontSize && data.FontSize > 0) {
           setFontSize(data.FontSize);
         }
+      },
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = Events.On(
+      EVENT_TERMINAL,
+      (event: { data?: Config["Terminal"] }) => {
+        applyTerminalSettings(event?.data);
       },
     );
     return () => {
