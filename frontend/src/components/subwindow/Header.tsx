@@ -4,15 +4,18 @@ import BookmarkIcon from "@mui/icons-material/Bookmark";
 import { useSSHTabsStore } from "../../stores/ssh";
 import { genTabIndex } from "../../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../../func/aiSidebar";
-import { useState, useMemo, useCallback } from "react";
+import { useMemo, useCallback } from "react";
 import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
 import { railIconButtonSx } from "../railIconButtonSx";
 import BookmarkConnectPanel from "../BookmarkConnectPanel";
+import { useUIStore } from "../../stores/ui";
 
 export default function Header() {
   const { sshTabs, pushTab } = useSSHTabsStore();
   const frameless = useFrameless();
-  const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
+  const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
+  const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
+  const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
 
   const handleAddTab = useCallback(() => {
     const number = sshTabs.length + 1;
@@ -23,21 +26,17 @@ export default function Header() {
     });
   }, [sshTabs.length, pushTab]);
 
-  const handleToggleBookmarkPanel = useCallback(() => {
-    setBookmarkPanelOpen((prev) => !prev);
-  }, []);
-
   const menuItems = useMemo(
     () => [
       { title: "新建空白标签", icon: <AddBoxIcon />, onClick: handleAddTab },
       {
         title: "书签",
         icon: <BookmarkIcon />,
-        onClick: handleToggleBookmarkPanel,
-        active: bookmarkPanelOpen,
+        onClick: toggleBookmarkConnect,
+        active: bookmarkConnectOpen,
       },
     ],
-    [handleAddTab, handleToggleBookmarkPanel, bookmarkPanelOpen],
+    [handleAddTab, toggleBookmarkConnect, bookmarkConnectOpen],
   );
 
   return (
@@ -94,8 +93,8 @@ export default function Header() {
       </Box>
 
       <BookmarkConnectPanel
-        open={bookmarkPanelOpen}
-        onRequestClose={() => setBookmarkPanelOpen(false)}
+        open={bookmarkConnectOpen}
+        onRequestClose={() => setBookmarkConnectOpen(false)}
       />
     </Box>
   );

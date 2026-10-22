@@ -46,10 +46,12 @@ import { useAIAssistantStore } from "../stores/aiAssistant";
 import {
   EVENT_SHORTCUT,
   ShortcutAction,
+  eventMatchesLogical,
   isEditableFocus,
   parseShortcutAction,
   toShellCodeBlock,
 } from "../func/shortcuts";
+import { useKeybindingsStore } from "../stores/keybindings";
 import type { CommandHistory } from "../types/command";
 
 const EVENT_SESSION_LOG_STOPPED = "eventSSHSessionLogStopped";
@@ -871,12 +873,16 @@ function Terminal(props: {
   }, []);
 
   // Wails AcceleratorKeyPressed 在 PutHandled(true) 后仍会 PutHandled(false)，
-  // Ctrl+Shift+V 会同时走我们的粘贴与浏览器默认粘贴，导致重复并残留选区高亮。
+  // 粘贴快捷键会同时走我们的粘贴与浏览器默认粘贴，导致重复并残留选区高亮。
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isActiveRef.current || isEditableFocus()) return;
-      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
-      if (e.key.toLowerCase() !== "v") return;
+      const pasteLogical =
+        useKeybindingsStore
+          .getState()
+          .bindings.find((b) => b.action === ShortcutAction.TerminalPaste)
+          ?.logical ?? "CmdOrCtrl+Shift+V";
+      if (!eventMatchesLogical(e, pasteLogical)) return;
       e.preventDefault();
       e.stopPropagation();
     };

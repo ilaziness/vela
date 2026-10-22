@@ -35,11 +35,12 @@ var defaultFontFamily = []string{
 }
 
 type Config struct {
-	General  GeneralConfig   `toml:"general"`
-	Terminal TerminalConfig  `toml:"terminal"`
-	SSH      SSHConfig       `toml:"ssh"`
-	Sync     sync.SyncConfig `toml:"sync"`
-	AI       ai.Config       `toml:"ai"`
+	General     GeneralConfig     `toml:"general"`
+	Terminal    TerminalConfig    `toml:"terminal"`
+	SSH         SSHConfig         `toml:"ssh"`
+	Sync        sync.SyncConfig   `toml:"sync"`
+	AI          ai.Config         `toml:"ai"`
+	Keybindings map[string]string `toml:"keybindings"` // action -> logical; overrides only
 }
 
 type GeneralConfig struct {
@@ -266,6 +267,12 @@ func (s *Store) UserDataDir() string {
 }
 
 func (s *Store) Save() error {
+	if s.logger == nil {
+		s.logger = zap.NewNop()
+	}
+	if s.userConfigFile == "" {
+		return nil
+	}
 	s.logger.Debug("save config to file", zap.String("path", s.userConfigFile))
 	data, err := toml.Marshal(s.Config)
 	if err != nil {

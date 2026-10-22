@@ -45,12 +45,13 @@ type NewVersion struct {
 }
 
 type AppService struct {
-	app        *application.App
-	windows    *Windows
-	termWS     *termws.Server
-	mainWindow *application.WebviewWindow
-	logger     *zap.Logger
-	updateMu   sync.Mutex
+	app         *application.App
+	windows     *Windows
+	termWS      *termws.Server
+	mainWindow  *application.WebviewWindow
+	logger      *zap.Logger
+	keybindings *KeyBindingManager
+	updateMu    sync.Mutex
 }
 
 func NewAppService(app *application.App, windows *Windows, termWS *termws.Server, logger *zap.Logger) *AppService {
@@ -159,7 +160,36 @@ func (cs *AppService) GetAppInfo() AppInfo {
 }
 
 func (cs *AppService) ListKeyBindings() []KeyBindingInfo {
-	return ListKeyBindings()
+	if cs.keybindings == nil {
+		return nil
+	}
+	return cs.keybindings.List()
+}
+
+func (cs *AppService) SetKeyBinding(action, keys string) error {
+	if cs.keybindings == nil {
+		return fmt.Errorf("快捷键管理器未初始化")
+	}
+	return cs.keybindings.Set(action, keys)
+}
+
+func (cs *AppService) ResetAllKeyBindings() error {
+	if cs.keybindings == nil {
+		return fmt.Errorf("快捷键管理器未初始化")
+	}
+	return cs.keybindings.ResetAll()
+}
+
+func (cs *AppService) SuspendKeyBindings() {
+	if cs.keybindings != nil {
+		cs.keybindings.Suspend()
+	}
+}
+
+func (cs *AppService) ResumeKeyBindings() {
+	if cs.keybindings != nil {
+		cs.keybindings.Resume()
+	}
 }
 
 func (cs *AppService) CheckUpdate() (hasNew bool, newVersion NewVersion, err error) {

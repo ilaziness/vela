@@ -59,9 +59,11 @@ export default function Header() {
   const { toggleSidebarOpen } = useAIAssistantStore();
   const bookmarkManageOpen = useUIStore((s) => s.bookmarkManageOpen);
   const setBookmarkManageOpen = useUIStore((s) => s.setBookmarkManageOpen);
+  const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
+  const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
+  const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
   const frameless = useFrameless();
 
-  const [bookmarkPanelOpen, setBookmarkPanelOpen] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newVersion, setNewVersion] = useState<NewVersion | null>(null);
@@ -95,10 +97,6 @@ export default function Header() {
     AppService.NewMainWindow();
   }, []);
 
-  const handleToggleBookmarkPanel = useCallback(() => {
-    setBookmarkPanelOpen((prev) => !prev);
-  }, []);
-
   const handleBackupClick = useCallback(async () => {
     try {
       const config = await ReadConfig();
@@ -129,8 +127,8 @@ export default function Header() {
       {
         title: "书签",
         icon: <BookmarkIcon />,
-        onClick: handleToggleBookmarkPanel,
-        active: bookmarkPanelOpen,
+        onClick: toggleBookmarkConnect,
+        active: bookmarkConnectOpen,
       },
       {
         title: "书签管理",
@@ -161,8 +159,8 @@ export default function Header() {
     [
       handleAddTab,
       handleNewMainWindow,
-      handleToggleBookmarkPanel,
-      bookmarkPanelOpen,
+      toggleBookmarkConnect,
+      bookmarkConnectOpen,
       handleBackupClick,
       handleAIAssistant,
       setBookmarkManageOpen,
@@ -280,8 +278,8 @@ export default function Header() {
       </Box>
 
       <BookmarkConnectPanel
-        open={bookmarkPanelOpen}
-        onRequestClose={() => setBookmarkPanelOpen(false)}
+        open={bookmarkConnectOpen}
+        onRequestClose={() => setBookmarkConnectOpen(false)}
       />
 
       {updateDialogMounted && (

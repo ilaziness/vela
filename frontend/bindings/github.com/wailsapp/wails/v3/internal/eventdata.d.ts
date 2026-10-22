@@ -25,6 +25,7 @@ declare module "@wailsio/runtime" {
             "eventHostKeyPrompt": string;
             "eventInputPassword": string;
             "eventInputPasswordClose": string;
+            "eventKeybindings": {};
             "eventKeyboardInteractive": string;
             "eventKeyboardInteractiveClose": string;
             "eventNewVersion": services$0.NewVersion;

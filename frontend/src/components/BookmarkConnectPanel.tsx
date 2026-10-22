@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent,
 } from "react";
@@ -40,7 +39,6 @@ import { BookmarkIconView, GroupIconView } from "./icons/bookmarkIcons";
 
 const PANEL_WIDTH = 220;
 const PANEL_WIDTH_TRANSITION = "width 225ms ease";
-const PANEL_WIDTH_TRANSITION_MS = 225;
 
 interface BookmarkConnectPanelProps {
   open: boolean;
@@ -60,7 +58,6 @@ export default function BookmarkConnectPanel({
     {},
   );
   const [searchQuery, setSearchQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const loadBookmarks = useCallback(async () => {
     try {
@@ -79,19 +76,18 @@ export default function BookmarkConnectPanel({
     }
   }, [errorMessage]);
 
-  // 打开时加载并订阅更新；关闭时退订（下次打开会重新拉取）
+  // 打开时加载并订阅更新；关闭时退订并清空搜索
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setSearchQuery("");
+      return;
+    }
     void loadBookmarks();
     const unsubscribe = Events.On("eventBookmarkUpdate", () => {
       void loadBookmarks();
     });
-    const focusTimer = window.setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, PANEL_WIDTH_TRANSITION_MS);
     return () => {
       unsubscribe();
-      window.clearTimeout(focusTimer);
     };
   }, [open, loadBookmarks]);
 
@@ -201,7 +197,6 @@ export default function BookmarkConnectPanel({
           <TextField
             size="small"
             fullWidth
-            inputRef={searchInputRef}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索书签"

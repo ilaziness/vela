@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Paper,
@@ -10,26 +10,52 @@ import {
   TableHead,
   TableRow,
   CircularProgress,
+  Button,
+  Stack,
+  Chip,
 } from "@mui/material";
 import {
   AppService,
   KeyBindingInfo,
+  LogService,
 } from "../../../bindings/github.com/ilaziness/vela/services";
 import { parseCallServiceError } from "../../func/service";
+import { keyboardEventToLogical } from "../../func/shortcuts";
 import { useMessageStore } from "../../stores/message";
+import { useKeybindingsStore } from "../../stores/keybindings";
+import { CODE_FONT_FAMILY } from "../../theme/typography";
 
 const KeybindingsSettings: React.FC = () => {
-  const [bindings, setBindings] = useState<KeyBindingInfo[]>([]);
+  const bindings = useKeybindingsStore((s) => s.bindings);
+  const reload = useKeybindingsStore((s) => s.reload);
   const [loading, setLoading] = useState(true);
+  const [recordingAction, setRecordingAction] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const suspendedRef = useRef(false);
+  const submittingRef = useRef(false);
+  const startingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  const resumeIfNeeded = useCallback(async () => {
+    if (!suspendedRef.current) {
+      return;
+    }
+    try {
+      await AppService.ResumeKeyBindings();
+      suspendedRef.current = false;
+    } catch (err) {
+      void LogService.Error(
+        "ResumeKeyBindings failed: " + parseCallServiceError(err),
+      );
+    }
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     let cancelled = false;
     const load = async () => {
       try {
-        const list = await AppService.ListKeyBindings();
-        if (!cancelled) {
-          setBindings(Array.isArray(list) ? list.filter(Boolean) : []);
-        }
+        await reload();
       } catch (err) {
         if (!cancelled) {
           useMessageStore
@@ -45,8 +71,148 @@ const KeybindingsSettings: React.FC = () => {
     void load();
     return () => {
       cancelled = true;
+      mountedRef.current = false;
+      // 卸载时强制恢复，避免 Suspend 成功后竞态导致全局快捷键永久失效。
+      suspendedRef.current = false;
+      void AppService.ResumeKeyBindings().catch((err) => {
+        void LogService.Error(
+          "ResumeKeyBindings on unmount failed: " +
+            parseCallServiceError(err),
+        );
+      });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const stopRecording = useCallback(async () => {
+    setRecordingAction(null);
+    await resumeIfNeeded();
+  }, [resumeIfNeeded]);
+
+  const startRecording = useCallback(
+    async (action: string) => {
+      if (
+        busy ||
+        recordingAction ||
+        submittingRef.current ||
+        startingRef.current
+      ) {
+        return;
+      }
+      startingRef.current = true;
+      try {
+        await AppService.SuspendKeyBindings();
+        if (!mountedRef.current) {
+          await AppService.ResumeKeyBindings();
+          return;
+        }
+        suspendedRef.current = true;
+        setRecordingAction(action);
+      } catch (err) {
+        suspendedRef.current = false;
+        if (mountedRef.current) {
+          useMessageStore
+            .getState()
+            .errorMessage(parseCallServiceError(err) || "无法开始录制快捷键");
+        }
+      } finally {
+        startingRef.current = false;
+      }
+    },
+    [busy, recordingAction],
+  );
+
+  useEffect(() => {
+    if (!recordingAction) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (submittingRef.current || e.repeat) {
+        return;
+      }
+      if (e.key === "Escape") {
+        void stopRecording();
+        return;
+      }
+      const logical = keyboardEventToLogical(e);
+      if (!logical) {
+        return;
+      }
+      const action = recordingAction;
+      submittingRef.current = true;
+      void (async () => {
+        setBusy(true);
+        try {
+          await AppService.SetKeyBinding(action, logical);
+          if (!mountedRef.current) {
+            return;
+          }
+          await reload();
+          useMessageStore.getState().successMessage("快捷键已更新");
+        } catch (err) {
+          if (mountedRef.current) {
+            useMessageStore
+              .getState()
+              .errorMessage(parseCallServiceError(err) || "设置快捷键失败");
+          }
+        } finally {
+          submittingRef.current = false;
+          if (mountedRef.current) {
+            setBusy(false);
+            await stopRecording();
+          } else {
+            suspendedRef.current = false;
+            void AppService.ResumeKeyBindings().catch(() => {});
+          }
+        }
+      })();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [recordingAction, reload, stopRecording]);
+
+  const handleResetOne = useCallback(
+    async (action: string) => {
+      if (busy || recordingAction) {
+        return;
+      }
+      setBusy(true);
+      try {
+        await AppService.SetKeyBinding(action, "");
+        await reload();
+        useMessageStore.getState().successMessage("已恢复默认");
+      } catch (err) {
+        useMessageStore
+          .getState()
+          .errorMessage(parseCallServiceError(err) || "恢复默认失败");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, recordingAction, reload],
+  );
+
+  const handleResetAll = useCallback(async () => {
+    if (busy || recordingAction) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await AppService.ResetAllKeyBindings();
+      await reload();
+      useMessageStore.getState().successMessage("已全部恢复默认");
+    } catch (err) {
+      useMessageStore
+        .getState()
+        .errorMessage(parseCallServiceError(err) || "全部恢复失败");
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, recordingAction, reload]);
 
   const groups = useMemo(() => {
     const map = new Map<string, KeyBindingInfo[]>();
@@ -69,9 +235,24 @@ const KeybindingsSettings: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        应用内置快捷键。macOS 使用 ⌘，Windows / Linux 使用 Ctrl。
-      </Typography>
+      <Stack
+        direction="row"
+        spacing={2}
+        sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
+      >
+        <Typography variant="body2" color="text.secondary">
+          点击快捷键列进行录制，立即生效。Esc
+          取消录制。macOS 使用 ⌘，Windows / Linux 使用 Ctrl。
+        </Typography>
+        <Button
+          size="small"
+          variant="outlined"
+          disabled={busy || !!recordingAction}
+          onClick={() => void handleResetAll()}
+        >
+          全部恢复默认
+        </Button>
+      </Stack>
       {groups.map(([category, items]) => (
         <Paper key={category} sx={{ p: 2, mb: 2 }} elevation={1}>
           <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
@@ -83,15 +264,62 @@ const KeybindingsSettings: React.FC = () => {
                 <TableRow>
                   <TableCell>操作</TableCell>
                   <TableCell>快捷键</TableCell>
+                  <TableCell align="right" width={120}>
+                    重置
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.action}>
-                    <TableCell>{item.label}</TableCell>
-                    <TableCell>{item.keys}</TableCell>
-                  </TableRow>
-                ))}
+                {items.map((item) => {
+                  const recording = recordingAction === item.action;
+                  return (
+                    <TableRow key={item.action} hover>
+                      <TableCell>
+                        {item.label}
+                        {item.custom ? (
+                          <Chip
+                            label="已自定义"
+                            size="small"
+                            sx={{ ml: 1 }}
+                            color="primary"
+                            variant="outlined"
+                          />
+                        ) : null}
+                      </TableCell>
+                      <TableCell
+                        onClick={() => {
+                          if (!busy && !recordingAction) {
+                            void startRecording(item.action);
+                          }
+                        }}
+                        sx={{
+                          cursor:
+                            busy || recordingAction ? "default" : "pointer",
+                          fontFamily: recording
+                            ? "inherit"
+                            : CODE_FONT_FAMILY,
+                          fontSize: "0.875rem",
+                          letterSpacing: recording ? undefined : "0.02em",
+                          color: recording ? "primary.main" : "text.primary",
+                          userSelect: "none",
+                        }}
+                      >
+                        {recording ? "按下快捷键…" : item.keys || "—"}
+                      </TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          disabled={
+                            !item.custom || busy || !!recordingAction
+                          }
+                          onClick={() => void handleResetOne(item.action)}
+                        >
+                          恢复默认
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </TableContainer>
