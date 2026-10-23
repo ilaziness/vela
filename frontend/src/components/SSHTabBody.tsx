@@ -47,6 +47,10 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
   );
   const { infoMessage, successMessage, errorMessage } = useMessageStore();
   const clearTransferSession = useTransferStore((s) => s.clearSession);
+  // Local linkID = mounted Terminal/SFTP UI. Store sshInfo.linkID = Exec/AI session.
+  // On unexpected drop, WS marks the tab Disconnected but keeps store linkID until
+  // enterReconnectUI / connect failure (tab API). Local id stays so the closed
+  // terminal remains visible through auto-reconnect. Tab dot follows connectionStatus.
   const [linkID, setLinkID] = React.useState<string>("");
   const [connectionError, setConnectionError] = React.useState<string>("");
   const [connecting, setConnecting] = React.useState<boolean>(false);
@@ -59,7 +63,8 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
   const [lastSSHInfo, setLastSSHInfo] = React.useState<SSHLinkInfo | null>(
     null,
   );
-  const [reconnectFailed, setReconnectFailed] = React.useState(false);
+  // showReconnect: session ended / reconnect exhausted — not first-time connect form.
+  const [showReconnect, setShowReconnect] = React.useState(false);
   const reloadingRef = useRef(false);
   const skipAutoReconnectRef = useRef(false);
   const autoReconnectingRef = useRef(false);
@@ -75,7 +80,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
     return info ? sftpOwnerKey(info) : "";
   }, [lastSSHInfo, tabInfo?.sshInfo]);
 
-  const clearLinkID = () => {
+  const clearSessionUI = () => {
     setLinkID("");
     linkIDRef.current = "";
     setSessionLogging(false);
@@ -84,11 +89,19 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
     setTermReady(false);
   };
 
+  // End session UI + tab disconnected (store clears sshInfo.linkID).
+  const enterReconnectUI = (message: string) => {
+    setTabConnectionStatus(tabIndex, ConnectionStatus.Disconnected);
+    setConnectionError(message);
+    setShowReconnect(true);
+    clearSessionUI();
+  };
+
   // connect ssh server
   const connect = useCallback(
     async (li: SSHLinkInfo): Promise<string> => {
       setConnectionError("");
-      setReconnectFailed(false);
+      setShowReconnect(false);
       setConnecting(true);
       setLastSSHInfo({ ...li, linkID: undefined });
       try {
@@ -107,8 +120,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
         setTermReady(false);
         setName(tabIndex, `${li.user}@${li.host}:${li.port}`);
         setSSHInfo(tabIndex, { ...li, linkID: nextLinkID });
-        // Session is Exec-ready immediately; do not wait for terminal WebSocket.
-        setTabConnectionStatus(tabIndex, ConnectionStatus.Connected);
+        // Stay Connecting until Terminal WebSocket onopen → Connected.
         return nextLinkID;
       } catch (err: any) {
         const msg = formatSSHConnectError(err);
@@ -116,12 +128,12 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
           () => {},
         );
         // 旧会话已在刷新时关掉，失败后不能再挂到这个 linkID 上。
-        clearLinkID();
+        setTabConnectionStatus(tabIndex, ConnectionStatus.Disconnected);
+        clearSessionUI();
         setConnectionError(msg);
         if (reloadingRef.current && !autoReconnectingRef.current) {
-          setReconnectFailed(true);
+          setShowReconnect(true);
         }
-        setTabConnectionStatus(tabIndex, ConnectionStatus.Disconnected);
         return "";
       } finally {
         setConnecting(false);
@@ -147,7 +159,11 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
     }
     const info = lastSSHInfoRef.current;
     if (!info) {
-      clearLinkID();
+      // No credentials to retry — fall back to the connect form with an error.
+      setTabConnectionStatus(tabIndex, ConnectionStatus.Disconnected);
+      clearSessionUI();
+      setConnectionError("连接已断开");
+      setShowReconnect(false);
       return;
     }
 
@@ -161,7 +177,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
       );
     }
     if (!autoReconnect) {
-      clearLinkID();
+      enterReconnectUI("连接已断开");
       return;
     }
 
@@ -199,7 +215,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
         }
       }
       errorMessage("自动重连失败，请手动重试");
-      setReconnectFailed(true);
+      enterReconnectUI("自动重连失败，请手动重试");
     } finally {
       autoReconnectingRef.current = false;
       setIsReloading(false);
@@ -278,25 +294,29 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
     void onReloadTab();
   }, [reloadTab]);
 
+  const onSessionClosed = useEffectEvent((event: any) => {
+    try {
+      const raw =
+        typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      const closedID = raw?.id as string | undefined;
+      const reason = raw?.reason as string | undefined;
+      if (!closedID || closedID !== linkIDRef.current) {
+        return;
+      }
+      // Clean exit (e.g. remote `exit`): show reconnect UI, no auto-reconnect.
+      if (reason !== "unexpected") {
+        enterReconnectUI("连接已关闭");
+        return;
+      }
+      void runAutoReconnectRef.current();
+    } catch (e) {
+      console.error("Invalid SSH session closed payload", e);
+    }
+  });
+
   useEffect(() => {
     const unsubscribe = Events.On("eventSSHSessionClosed", (event: any) => {
-      try {
-        const raw =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        const closedID = raw?.id as string | undefined;
-        const reason = raw?.reason as string | undefined;
-        if (!closedID || closedID !== linkIDRef.current) {
-          return;
-        }
-        // Clean exit (e.g. remote `exit`): drop dead session UI, no auto-reconnect.
-        if (reason !== "unexpected") {
-          clearLinkID();
-          return;
-        }
-        void runAutoReconnectRef.current();
-      } catch (e) {
-        console.error("Invalid SSH session closed payload", e);
-      }
+      onSessionClosed(event);
     });
     return () => {
       unsubscribe();
@@ -339,7 +359,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
   }
 
   if (linkID === "") {
-    if (reconnectFailed && connectionError) {
+    if (showReconnect && connectionError) {
       return (
         <Box
           sx={{

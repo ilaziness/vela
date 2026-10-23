@@ -194,8 +194,8 @@ function Terminal(props: {
     mouseX: number;
     mouseY: number;
   } | null>(null);
-  const setConnectionStatus = useSSHTabsStore(
-    (state) => state.setConnectionStatus,
+  const setSessionConnectionStatus = useSSHTabsStore(
+    (state) => state.setSessionConnectionStatus,
   );
   const { errorMessage, successMessage } = useMessageStore();
   const onLoggingChangeRef = React.useRef(props.onLoggingChange);
@@ -760,7 +760,7 @@ function Terminal(props: {
           if (!mountedRef.current) return;
           LogService.Debug("WebSocket connected for terminal " + props.linkID);
           setIsInitializing(false);
-          setConnectionStatus(props.linkID, ConnectionStatus.Connected);
+          setSessionConnectionStatus(props.linkID, ConnectionStatus.Connected);
           onReadyRef.current?.();
 
           term.current?.focus();
@@ -789,9 +789,14 @@ function Terminal(props: {
         };
 
         ws.onclose = () => {
+          // Update even if unmounted first. No-op when tab no longer owns this
+          // id, or tab is Connecting (closing socket must not clobber reconnect).
+          setSessionConnectionStatus(
+            props.linkID,
+            ConnectionStatus.Disconnected,
+          );
           if (!mountedRef.current) return;
           LogService.Debug(`WebSocket closed for terminal ${props.linkID}`);
-          setConnectionStatus(props.linkID, ConnectionStatus.Disconnected);
           setIsInitializing(false);
           term.current?.write(`\r\n*** SSH connection closed ***\r\n`);
         };
@@ -807,7 +812,10 @@ function Terminal(props: {
           );
         }
         setIsInitializing(false);
-        setConnectionStatus(props.linkID, ConnectionStatus.Disconnected);
+        setSessionConnectionStatus(
+          props.linkID,
+          ConnectionStatus.Disconnected,
+        );
       }
     },
   );

@@ -31,7 +31,8 @@ function formatTargetLabel(user: string, host: string, port: number): string {
 
 /**
  * Resolve bind state for one SSH tab — never looks at other tabs.
- * Exec is ready once linkID exists; do not wait for terminal WebSocket.
+ * Exec is ready once store sshInfo.linkID exists (SSH handshake), not waiting
+ * for terminal WebSocket. Disconnected clears that linkID in the tabs store.
  */
 export function resolveSSHBindState(tab: SSHTab | undefined): CurrentSSHBindState {
   const sshInfo = tab?.sshInfo;

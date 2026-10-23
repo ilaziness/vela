@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { SSHLinkInfo, SSHTab, ConnectionStatus } from "../types/ssh";
 import { genTabIndex } from "../func/service";
+import {
+  tabWithConnectionStatus,
+  tabWithSessionConnectionStatus,
+} from "./connectionStatus";
+
+export {
+  tabWithConnectionStatus,
+  tabWithSessionConnectionStatus,
+} from "./connectionStatus";
 
 export interface SSHTabs {
   sshTabs: SSHTab[];
@@ -12,8 +21,21 @@ export interface SSHTabs {
   getByIndex: (index: string) => SSHTab | undefined;
   setSSHInfo: (index: string, sshInfo: SSHLinkInfo) => void;
   reorderTabs: (sourceIndex: number, destinationIndex: number) => void;
-  setConnectionStatus: (linkID: string, status: ConnectionStatus) => void;
-  setTabConnectionStatus: (tabIndex: string, status: ConnectionStatus) => void;
+  /**
+   * Terminal / WebSocket path. Matches by session id; does not clear linkID.
+   * No-op if no tab owns the id, or Disconnected while tab is Connecting.
+   */
+  setSessionConnectionStatus: (
+    linkID: string,
+    status: ConnectionStatus,
+  ) => void;
+  /**
+   * Tab lifecycle (connect / fail / clean exit). Disconnected clears linkID.
+   */
+  setTabConnectionStatus: (
+    tabIndex: string,
+    status: ConnectionStatus,
+  ) => void;
 }
 
 const initialTabIndex = genTabIndex();
@@ -92,21 +114,17 @@ export const useSSHTabsStore = create<SSHTabs>((set, get) => ({
       newTabs.splice(destinationIndex, 0, removed);
       return { sshTabs: newTabs };
     }),
-  setConnectionStatus: (linkID: string, status: ConnectionStatus) =>
+  setSessionConnectionStatus: (linkID: string, status: ConnectionStatus) =>
     set((state) => ({
       sshTabs: state.sshTabs.map((tab) => {
         if (tab.sshInfo?.linkID !== linkID) return tab;
-        const sshInfo =
-          status === ConnectionStatus.Disconnected && tab.sshInfo
-            ? { ...tab.sshInfo, linkID: undefined }
-            : tab.sshInfo;
-        return { ...tab, connectionStatus: status, sshInfo };
+        return tabWithSessionConnectionStatus(tab, status) ?? tab;
       }),
     })),
   setTabConnectionStatus: (tabIndex: string, status: ConnectionStatus) =>
     set((state) => ({
       sshTabs: state.sshTabs.map((tab) =>
-        tab.index === tabIndex ? { ...tab, connectionStatus: status } : tab,
+        tab.index === tabIndex ? tabWithConnectionStatus(tab, status) : tab,
       ),
     })),
 }));
@@ -126,7 +144,9 @@ export const useReloadSSHTabStore = create<ReloadSSHTabStoreType>(
       count: 0,
     },
     doTabReload: (index: string) => {
-      set({ reloadTab: { index: index, count: get().reloadTab.count } });
+      set({
+        reloadTab: { index, count: get().reloadTab.count + 1 },
+      });
     },
   }),
 );

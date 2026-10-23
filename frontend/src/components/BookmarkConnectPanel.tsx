@@ -283,9 +283,14 @@ export default function BookmarkConnectPanel({
                                 bookmarkColorHex(bookmark.color) ||
                                 "transparent",
                             }}
-                            onClick={() =>
+                            onDoubleClick={() =>
                               void handleBookmarkSelect(bookmark.id)
                             }
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              e.preventDefault();
+                              void handleBookmarkSelect(bookmark.id);
+                            }}
                           >
                             <ListItemIcon sx={{ minWidth: 24 }}>
                               <BookmarkIconView
