@@ -1,6 +1,30 @@
 package ssh
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestHostMetricsScriptEmbedded(t *testing.T) {
+	if strings.TrimSpace(hostMetricsScript) == "" {
+		t.Fatal("embedded hostmetrics.sh is empty")
+	}
+	if strings.Contains(hostMetricsScript, "\r") {
+		t.Fatal("embedded hostmetrics.sh still contains CR after normalize")
+	}
+	for _, needle := range []string{
+		"SAMPLE_MS=",
+		"CPU_PCT=",
+		"NET=",
+		"DISKIO=",
+		"/proc/diskstats",
+		"/proc/net/dev",
+	} {
+		if !strings.Contains(hostMetricsScript, needle) {
+			t.Fatalf("embedded script missing %q", needle)
+		}
+	}
+}
 
 func TestParseHostResources(t *testing.T) {
 	output := `HOSTNAME=box1
@@ -74,9 +98,88 @@ func TestParseHostResourcesMemWithoutAvailable(t *testing.T) {
 	}
 }
 
-func TestParseHostResourcesCPUSampleMs(t *testing.T) {
+func TestParseHostResourcesSampleMs(t *testing.T) {
+	res, sampleMs := parseHostResourcesOutput("SAMPLE_MS=240\nCPU_PCT=10\n")
+	if sampleMs != 240 || !res.HasCPU {
+		t.Fatalf("got res=%+v sampleMs=%d", res, sampleMs)
+	}
+}
+
+func TestParseHostResourcesCPUSampleMsAlias(t *testing.T) {
 	res, sampleMs := parseHostResourcesOutput("CPU_SAMPLE_MS=200\nCPU_PCT=10\n")
 	if sampleMs != 200 || !res.HasCPU {
 		t.Fatalf("got res=%+v sampleMs=%d", res, sampleMs)
+	}
+}
+
+func TestParseHostResourcesSampleMsPreferred(t *testing.T) {
+	_, sampleMs := parseHostResourcesOutput("CPU_SAMPLE_MS=200\nSAMPLE_MS=240\nCPU_PCT=10\n")
+	if sampleMs != 240 {
+		t.Fatalf("SAMPLE_MS should win, got %d", sampleMs)
+	}
+	_, sampleMs = parseHostResourcesOutput("SAMPLE_MS=240\nCPU_SAMPLE_MS=200\nCPU_PCT=10\n")
+	if sampleMs != 240 {
+		t.Fatalf("SAMPLE_MS should win when first, got %d", sampleMs)
+	}
+}
+
+func TestParseHostResourcesSampleMsFallback(t *testing.T) {
+	_, sampleMs := parseHostResourcesOutput("CPU_PCT=10\n")
+	if sampleMs != hostMetricsSampleFallbackMs {
+		t.Fatalf("want fallback %d, got %d", hostMetricsSampleFallbackMs, sampleMs)
+	}
+	_, sampleMs = parseHostResourcesOutput("")
+	if sampleMs != 0 {
+		t.Fatalf("empty output should not invent sample ms, got %d", sampleMs)
+	}
+}
+
+func TestParseHostResourcesNetIfaces(t *testing.T) {
+	res := ParseHostResources(`NET=eth0:1024:2048
+NET=wlan0:0:512
+NET=bad
+NET=:1:2
+`)
+	if !res.HasNet || !res.Supported {
+		t.Fatalf("expected has_net: %+v", res)
+	}
+	if len(res.NetIfaces) != 2 {
+		t.Fatalf("want 2 ifaces, got %+v", res.NetIfaces)
+	}
+	// Sorted by name.
+	if res.NetIfaces[0].Name != "eth0" || res.NetIfaces[0].RxBps != 1024 || res.NetIfaces[0].TxBps != 2048 {
+		t.Fatalf("eth0: %+v", res.NetIfaces[0])
+	}
+	if res.NetIfaces[1].Name != "wlan0" || res.NetIfaces[1].RxBps != 0 || res.NetIfaces[1].TxBps != 512 {
+		t.Fatalf("wlan0: %+v", res.NetIfaces[1])
+	}
+}
+
+func TestParseHostResourcesNetNegativeClamped(t *testing.T) {
+	res := ParseHostResources("NET=eth0:-10:-20\n")
+	if !res.HasNet || len(res.NetIfaces) != 1 {
+		t.Fatalf("got %+v", res)
+	}
+	if res.NetIfaces[0].RxBps != 0 || res.NetIfaces[0].TxBps != 0 {
+		t.Fatalf("expected clamp to 0: %+v", res.NetIfaces[0])
+	}
+}
+
+func TestParseHostResourcesDiskIO(t *testing.T) {
+	res := ParseHostResources(`DISKIO=nvme0n1:4096:8192
+DISKIO=sda:0:512
+DISKIO=bad
+`)
+	if !res.HasDiskIO || !res.Supported {
+		t.Fatalf("expected has_disk_io: %+v", res)
+	}
+	if len(res.DiskIO) != 2 {
+		t.Fatalf("want 2 disks, got %+v", res.DiskIO)
+	}
+	if res.DiskIO[0].Name != "nvme0n1" || res.DiskIO[0].ReadBps != 4096 || res.DiskIO[0].WriteBps != 8192 {
+		t.Fatalf("nvme0n1: %+v", res.DiskIO[0])
+	}
+	if res.DiskIO[1].Name != "sda" || res.DiskIO[1].ReadBps != 0 || res.DiskIO[1].WriteBps != 512 {
+		t.Fatalf("sda: %+v", res.DiskIO[1])
 	}
 }

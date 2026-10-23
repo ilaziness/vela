@@ -379,9 +379,11 @@ func (m *Manager) CloseAll() {
 		return true
 	})
 	m.clients.Range(func(key, value any) bool {
-		m.stopKeepAlive(key.(string))
+		ck := key.(string)
+		m.stopKeepAlive(ck)
 		value.(*hopClient).Close()
-		m.clients.Delete(key)
+		m.clients.Delete(ck)
+		m.clearHostMetrics(ck)
 		return true
 	})
 	m.sessions = new(sync.Map)
@@ -420,6 +422,7 @@ func (m *Manager) closeClientIfNoConnections(clientKey string) {
 	if client, ok := m.clients.LoadAndDelete(clientKey); ok {
 		client.(*hopClient).Close()
 	}
+	m.clearHostMetrics(clientKey)
 }
 
 func (m *Manager) SetHostKeyDecision(host string, accept bool) error {

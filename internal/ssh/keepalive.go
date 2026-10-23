@@ -82,4 +82,5 @@ func (m *Manager) dropClient(clientKey string) {
 	if client, ok := m.clients.LoadAndDelete(clientKey); ok {
 		client.(*hopClient).Close()
 	}
+	m.clearHostMetrics(clientKey)
 }

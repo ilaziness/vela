@@ -2,7 +2,9 @@ package ssh
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,50 +14,58 @@ import (
 )
 
 const (
-	hostMetricsTTL     = 3 * time.Second
-	hostMetricsTimeout = 5 * time.Second
+	hostMetricsTTL = 3 * time.Second
+	// Allow slow overseas RTT: remote probe ~0.2s+ plus one Exec round-trip.
+	hostMetricsTimeout = 10 * time.Second
+	// Fallback when /proc/uptime is unavailable or delta is nonsense.
+	hostMetricsSampleFallbackMs = 200
 )
 
-// hostMetricsScript probes Linux hosts via /proc and df. Missing fields are omitted.
-// CPU sampling sleeps 200ms and reports CPU_SAMPLE_MS for LatencyMs correction.
-const hostMetricsScript = `export LC_ALL=C
-printf 'HOSTNAME=%s\n' "$(hostname 2>/dev/null)"
-if [ -r /proc/stat ]; then
-  set -- $(awk '/^cpu /{print $2+$3+$4+$5+$6+$7+$8+$9, $5}' /proc/stat 2>/dev/null)
-  t1=$1; i1=$2
-  sleep 0.2
-  echo CPU_SAMPLE_MS=200
-  set -- $(awk '/^cpu /{print $2+$3+$4+$5+$6+$7+$8+$9, $5}' /proc/stat 2>/dev/null)
-  t2=$1; i2=$2
-  dt=$((t2-t1)); di=$((i2-i1))
-  if [ -n "$dt" ] && [ "$dt" -gt 0 ] 2>/dev/null; then
-    echo CPU_PCT=$(( (dt-di)*100/dt ))
-  fi
-fi
-if [ -r /proc/meminfo ]; then
-  awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{if(t>0){print "MEM_TOTAL_KB="t; print "MEM_AVAILABLE_KB="a}}' /proc/meminfo 2>/dev/null
-fi
-df -P -k / 2>/dev/null | awk 'NR==2 && $2+0>0 {print "DISK_TOTAL_KB="$2; print "DISK_USED_KB="$3}'
-if [ -r /proc/loadavg ]; then
-  awk '{print "LOAD1="$1}' /proc/loadavg 2>/dev/null
-fi
-exit 0`
+//go:embed hostmetrics.sh
+var hostMetricsScriptFile string
+
+// hostMetricsScript is the probe body sent via SSH Exec (LF-normalized).
+var hostMetricsScript string
+
+func init() {
+	// Windows checkouts may embed CRLF; remote /bin/sh rejects CR in scripts.
+	hostMetricsScript = strings.ReplaceAll(hostMetricsScriptFile, "\r\n", "\n")
+	hostMetricsScript = strings.ReplaceAll(hostMetricsScript, "\r", "\n")
+}
+
+// NetIfaceStats is per-NIC receive/transmit throughput in bytes per second.
+type NetIfaceStats struct {
+	Name  string `json:"name"`
+	RxBps int64  `json:"rx_bps"`
+	TxBps int64  `json:"tx_bps"`
+}
+
+// DiskIOStats is per-disk read/write throughput in bytes per second.
+type DiskIOStats struct {
+	Name     string `json:"name"`
+	ReadBps  int64  `json:"read_bps"`
+	WriteBps int64  `json:"write_bps"`
+}
 
 // HostResources is a point-in-time remote resource snapshot for the UI.
 type HostResources struct {
-	Hostname   string  `json:"hostname,omitempty"`
-	CPUPercent float64 `json:"cpu_percent,omitempty"`
-	MemUsed    int64   `json:"mem_used,omitempty"`
-	MemTotal   int64   `json:"mem_total,omitempty"`
-	DiskUsed   int64   `json:"disk_used,omitempty"`
-	DiskTotal  int64   `json:"disk_total,omitempty"`
-	Load1      float64 `json:"load1,omitempty"`
-	LatencyMs  int64   `json:"latency_ms,omitempty"`
-	Supported  bool    `json:"supported"`
-	HasCPU     bool    `json:"has_cpu"`
-	HasMem     bool    `json:"has_mem"`
-	HasDisk    bool    `json:"has_disk"`
-	HasLoad    bool    `json:"has_load"`
+	Hostname   string          `json:"hostname,omitempty"`
+	CPUPercent float64         `json:"cpu_percent,omitempty"`
+	MemUsed    int64           `json:"mem_used,omitempty"`
+	MemTotal   int64           `json:"mem_total,omitempty"`
+	DiskUsed   int64           `json:"disk_used,omitempty"`
+	DiskTotal  int64           `json:"disk_total,omitempty"`
+	Load1      float64         `json:"load1,omitempty"`
+	LatencyMs  int64           `json:"latency_ms,omitempty"`
+	NetIfaces  []NetIfaceStats `json:"net_ifaces,omitempty"`
+	DiskIO     []DiskIOStats   `json:"disk_io,omitempty"`
+	Supported  bool            `json:"supported"`
+	HasCPU     bool            `json:"has_cpu"`
+	HasMem     bool            `json:"has_mem"`
+	HasDisk    bool            `json:"has_disk"`
+	HasLoad    bool            `json:"has_load"`
+	HasNet     bool            `json:"has_net"`
+	HasDiskIO  bool            `json:"has_disk_io"`
 }
 
 type hostMetricsCacheEntry struct {
@@ -128,6 +138,14 @@ func (m *Manager) loadHostMetricsFresh(key string) (HostResources, bool) {
 	return entry.res, true
 }
 
+func (m *Manager) clearHostMetrics(clientKey string) {
+	if clientKey == "" {
+		return
+	}
+	m.hostMetricsCache.Delete(clientKey)
+	m.hostMetricsFetchLocks.Delete(clientKey)
+}
+
 // ParseHostResources parses KEY=value lines from hostMetricsScript output.
 func ParseHostResources(output string) HostResources {
 	res, _ := parseHostResourcesOutput(output)
@@ -144,6 +162,8 @@ func parseHostResourcesOutput(output string) (HostResources, int64) {
 		diskUsedKB     int64
 		hasMemTotal    bool
 		hasMemAvail    bool
+		netByName      = map[string]NetIfaceStats{}
+		diskIOByName   = map[string]DiskIOStats{}
 	)
 
 	for _, line := range strings.Split(output, "\n") {
@@ -159,7 +179,15 @@ func parseHostResourcesOutput(output string) (HostResources, int64) {
 		switch key {
 		case "HOSTNAME":
 			res.Hostname = val
+		case "SAMPLE_MS":
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+				sampleMs = n
+			}
 		case "CPU_SAMPLE_MS":
+			// Legacy alias; ignore when SAMPLE_MS already set (either order in output).
+			if sampleMs > 0 {
+				break
+			}
 			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
 				sampleMs = n
 			}
@@ -197,6 +225,14 @@ func parseHostResourcesOutput(output string) (HostResources, int64) {
 				res.Load1 = f
 				res.HasLoad = true
 			}
+		case "NET":
+			if name, a, b, ok := parseNameTwoRates(val); ok {
+				netByName[name] = NetIfaceStats{Name: name, RxBps: a, TxBps: b}
+			}
+		case "DISKIO":
+			if name, a, b, ok := parseNameTwoRates(val); ok {
+				diskIOByName[name] = DiskIOStats{Name: name, ReadBps: a, WriteBps: b}
+			}
 		}
 	}
 
@@ -217,7 +253,57 @@ func parseHostResourcesOutput(output string) (HostResources, int64) {
 		res.DiskUsed = diskUsedKB * 1024
 		res.HasDisk = true
 	}
+	if len(netByName) > 0 {
+		res.NetIfaces = valuesBySortedKeys(netByName)
+		res.HasNet = true
+	}
+	if len(diskIOByName) > 0 {
+		res.DiskIO = valuesBySortedKeys(diskIOByName)
+		res.HasDiskIO = true
+	}
 
-	res.Supported = res.HasCPU || res.HasMem || res.HasDisk || res.HasLoad
+	// Only fall back when a timed probe likely ran (CPU/net/disk-io rates).
+	if sampleMs <= 0 && (res.HasCPU || res.HasNet || res.HasDiskIO) {
+		sampleMs = hostMetricsSampleFallbackMs
+	}
+
+	res.Supported = res.HasCPU || res.HasMem || res.HasDisk || res.HasLoad || res.HasNet || res.HasDiskIO
 	return res, sampleMs
+}
+
+func valuesBySortedKeys[T any](m map[string]T) []T {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]T, 0, len(names))
+	for _, name := range names {
+		out = append(out, m[name])
+	}
+	return out
+}
+
+// parseNameTwoRates parses "name:a:b" into name and two non-negative int64 rates.
+func parseNameTwoRates(val string) (name string, a, b int64, ok bool) {
+	name, rest, ok := strings.Cut(val, ":")
+	if !ok || name == "" {
+		return "", 0, 0, false
+	}
+	aStr, bStr, ok := strings.Cut(rest, ":")
+	if !ok {
+		return "", 0, 0, false
+	}
+	a, err1 := strconv.ParseInt(aStr, 10, 64)
+	b, err2 := strconv.ParseInt(bStr, 10, 64)
+	if err1 != nil || err2 != nil {
+		return "", 0, 0, false
+	}
+	if a < 0 {
+		a = 0
+	}
+	if b < 0 {
+		b = 0
+	}
+	return name, a, b, true
 }

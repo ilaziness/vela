@@ -1,0 +1,2 @@
+# Keep shell probes LF so Windows checkouts do not break remote Exec.
+*.sh text eol=lf

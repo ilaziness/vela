@@ -79,7 +79,20 @@ const StatusBar: React.FC<StatusBarProps> = ({
   const [resourcesOpen, setResourcesOpen] = React.useState(false);
   const [resources, setResources] = React.useState<HostResources | null>(null);
   const [pollStopped, setPollStopped] = React.useState(false);
+  const [trackedSessionID, setTrackedSessionID] = React.useState(sessionID);
   const needsInitialDelayRef = React.useRef(true);
+  /** Latest session; in-flight polls compare against this after await (cleanup may not have run yet). */
+  const pollSessionRef = React.useRef(sessionID);
+  pollSessionRef.current = sessionID;
+
+  // Reset synchronously on session change so children never see (newSession, oldResources).
+  if (trackedSessionID !== sessionID) {
+    setTrackedSessionID(sessionID);
+    setResources(null);
+    setPollStopped(false);
+    setResourcesOpen(false);
+    needsInitialDelayRef.current = true;
+  }
 
   const toggleOpen = () => {
     setOpen((prev) => !prev);
@@ -103,13 +116,6 @@ const StatusBar: React.FC<StatusBarProps> = ({
   };
 
   React.useEffect(() => {
-    setResources(null);
-    setPollStopped(false);
-    setResourcesOpen(false);
-    needsInitialDelayRef.current = true;
-  }, [sessionID]);
-
-  React.useEffect(() => {
     if (!isActive || !sessionID || !termReady || pollStopped) {
       return;
     }
@@ -125,15 +131,20 @@ const StatusBar: React.FC<StatusBarProps> = ({
       }, delayMs);
     };
 
+    const forSession = sessionID;
+
     const fetchOnce = async () => {
       if (cancelled || stopped) return;
       needsInitialDelayRef.current = false;
       try {
-        const res = await SSHService.GetHostResources(sessionID);
+        const res = await SSHService.GetHostResources(forSession);
         if (cancelled || stopped) return;
+        // Guard: await may resolve before effect cleanup flips `cancelled` on session switch.
+        if (pollSessionRef.current !== forSession) return;
         setResources(res);
       } catch (err) {
         if (cancelled || stopped) return;
+        if (pollSessionRef.current !== forSession) return;
         if (isSessionGoneError(err)) {
           stopped = true;
           setPollStopped(true);
@@ -237,6 +248,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
       <HostResourcesPanel
         open={resourcesOpen}
         statusBarHeight={height}
+        sessionID={sessionID}
         resources={resources}
         pollStopped={pollStopped}
         onClose={handleResourcesClose}

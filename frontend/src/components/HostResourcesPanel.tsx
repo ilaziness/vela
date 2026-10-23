@@ -1,67 +1,36 @@
-import React from "react";
 import {
   Box,
   IconButton,
-  LinearProgress,
   Slide,
+  Stack,
   Tooltip,
   Typography,
 } from "@mui/material";
 import { Close } from "@mui/icons-material";
 import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal/ssh/models";
-import { formatFileSize } from "../func/service";
+import { useHostMetricHistory } from "../hooks/useHostMetricHistory";
+import CompactStat from "./hostResources/CompactStat";
+import HostResourcesContent from "./hostResources/HostResourcesContent";
 
 interface HostResourcesPanelProps {
   open: boolean;
   statusBarHeight: string;
+  sessionID: string;
   resources: HostResources | null;
   pollStopped: boolean;
   onClose: () => void;
 }
 
-const pct = (used: number, total: number): number => {
-  if (total <= 0) return 0;
-  return Math.min(100, Math.max(0, (used / total) * 100));
-};
-
-const MetricRow: React.FC<{
-  label: string;
-  value: string;
-  progress?: number;
-}> = ({ label, value, progress }) => (
-  <Box sx={{ mb: 1.5 }}>
-    <Box
-      sx={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "baseline",
-        mb: 0.5,
-      }}
-    >
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-        {value}
-      </Typography>
-    </Box>
-    {progress !== undefined && (
-      <LinearProgress
-        variant="determinate"
-        value={progress}
-        sx={{ height: 6, borderRadius: 1 }}
-      />
-    )}
-  </Box>
-);
-
 const HostResourcesPanel: React.FC<HostResourcesPanelProps> = ({
   open,
   statusBarHeight,
+  sessionID,
   resources,
   pollStopped,
   onClose,
 }) => {
+  const history = useHostMetricHistory(sessionID, resources);
+
   const title = resources?.hostname
     ? `主机资源 · ${resources.hostname}`
     : "主机资源";
@@ -69,50 +38,20 @@ const HostResourcesPanel: React.FC<HostResourcesPanelProps> = ({
   let body: React.ReactNode;
   if (resources?.supported) {
     body = (
-      <>
-        {resources.has_cpu && (
-          <MetricRow
-            label="CPU"
-            value={`${Math.round(resources.cpu_percent ?? 0)}%`}
-            progress={resources.cpu_percent ?? 0}
-          />
-        )}
-        {resources.has_mem && (
-          <MetricRow
-            label="内存"
-            value={`${formatFileSize(resources.mem_used ?? 0)} / ${formatFileSize(resources.mem_total ?? 0)}`}
-            progress={pct(resources.mem_used ?? 0, resources.mem_total ?? 0)}
-          />
-        )}
-        {resources.has_disk && (
-          <MetricRow
-            label="磁盘 (/)"
-            value={`${formatFileSize(resources.disk_used ?? 0)} / ${formatFileSize(resources.disk_total ?? 0)}`}
-            progress={pct(resources.disk_used ?? 0, resources.disk_total ?? 0)}
-          />
-        )}
-        {resources.has_load && (
-          <MetricRow
-            label="Load (1m)"
-            value={(resources.load1 ?? 0).toFixed(2)}
-          />
-        )}
-        <MetricRow
-          label="延迟 (SSH)"
-          value={`${resources.latency_ms ?? 0} ms`}
-        />
-      </>
+      <HostResourcesContent resources={resources} history={history} />
     );
   } else if (resources && !resources.supported) {
     body = (
       <>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          当前远程系统不支持 CPU/内存/磁盘采集（需 Linux /proc）
+        <Stack direction="row" spacing={3} sx={{ mb: 1.5 }}>
+          <CompactStat
+            label="延迟 (SSH)"
+            value={`${resources.latency_ms ?? 0} ms`}
+          />
+        </Stack>
+        <Typography variant="body2" color="text.secondary">
+          当前远程系统不支持资源采集（需 Linux /proc）
         </Typography>
-        <MetricRow
-          label="延迟 (SSH)"
-          value={`${resources.latency_ms ?? 0} ms`}
-        />
       </>
     );
   } else if (pollStopped) {
@@ -175,9 +114,7 @@ const HostResourcesPanel: React.FC<HostResourcesPanelProps> = ({
             </Tooltip>
           </Box>
 
-          <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>
-            {body}
-          </Box>
+          <Box sx={{ flex: 1, overflow: "auto", p: 2 }}>{body}</Box>
         </Box>
       </Slide>
     </Box>

@@ -1,6 +1,7 @@
 import { createColorScheme, createTheme } from "@mui/material/styles";
 import type { Theme } from "@mui/material/styles";
 import type {} from "@mui/x-chat/themeAugmentation";
+import type {} from "@mui/x-charts/themeAugmentation";
 import light from "./light";
 import dark from "./dark";
 import eyeCare from "./eyeCare";
