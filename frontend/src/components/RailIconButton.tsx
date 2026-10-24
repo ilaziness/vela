@@ -43,15 +43,16 @@ export default function RailIconButton({
           font: "inherit",
           cursor: "pointer",
           backgroundColor: active
-            ? alpha(theme.palette.primary.main, 0.28)
+            ? alpha(theme.palette.primary.main, 0.22)
             : "transparent",
+          // Idle: text color with a light primary tint; active stays full primary.
           color: active
             ? theme.palette.primary.main
-            : theme.palette.text.secondary,
+            : `color-mix(in srgb, ${theme.palette.text.primary} 62%, ${theme.palette.primary.main} 38%)`,
           "&:hover": {
             backgroundColor: alpha(
               theme.palette.primary.main,
-              active ? 0.36 : 0.22,
+              active ? 0.32 : 0.16,
             ),
             color: theme.palette.primary.main,
           },

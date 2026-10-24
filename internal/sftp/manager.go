@@ -735,11 +735,17 @@ func (sft *Manager) processDirectoryEntries(sessionID, localPath, remoteDir stri
 }
 
 func (sft *Manager) DownloadDirectory(sessionID, localPath, remotePath string) error {
+	dest := filepath.Join(localPath, path.Base(remotePath))
+	return sft.DownloadDirectoryTo(sessionID, dest, remotePath)
+}
+
+// DownloadDirectoryTo writes remotePath into destDir (destDir is the folder itself, not its parent).
+func (sft *Manager) DownloadDirectoryTo(sessionID, destDir, remotePath string) error {
 	total, err := sft.calcRemoteDirSize(sessionID, remotePath)
 	if err != nil {
 		return err
 	}
-	if err := sft.startDownloadDirectoryAsync(sessionID, localPath, remotePath, total, transfer.NewOpts{}); err != nil {
+	if err := sft.startDownloadDirectoryAsync(sessionID, destDir, remotePath, total, transfer.NewOpts{}); err != nil {
 		return err
 	}
 	sft.notifyQueued(sessionID, 1)
@@ -777,12 +783,11 @@ func (sft *Manager) downloadDirectory(sessionID string, localPath, remotePath st
 		return fmt.Errorf("path is not a directory")
 	}
 
-	localDir := filepath.Join(localPath, path.Base(remotePath))
-	if err := os.MkdirAll(localDir, 0755); err != nil {
+	if err := os.MkdirAll(localPath, 0755); err != nil {
 		return err
 	}
 
-	return sft.processRemoteDirectoryEntries(sessionID, localDir, remotePath, tracker)
+	return sft.processRemoteDirectoryEntries(sessionID, localPath, remotePath, tracker)
 }
 
 func (sft *Manager) processRemoteDirectoryEntries(sessionID, localDir, remotePath string, tracker *transfer.Tracker) error {
@@ -801,7 +806,7 @@ func (sft *Manager) processRemoteDirectoryEntries(sessionID, localDir, remotePat
 		localEntryPath := filepath.Join(localDir, entry.Name())
 
 		if entry.IsDir() {
-			err = sft.downloadDirectory(sessionID, localDir, remoteEntryPath, tracker)
+			err = sft.downloadDirectory(sessionID, localEntryPath, remoteEntryPath, tracker)
 			if err != nil {
 				return err
 			}
@@ -853,7 +858,8 @@ func (sft *Manager) DownloadPaths(sessionID, localDir string, remotePaths []stri
 	for _, job := range jobs {
 		var startErr error
 		if job.isDir {
-			startErr = sft.startDownloadDirectoryAsync(sessionID, localDir, job.remote, job.size, transfer.NewOpts{})
+			dest := filepath.Join(localDir, path.Base(job.remote))
+			startErr = sft.startDownloadDirectoryAsync(sessionID, dest, job.remote, job.size, transfer.NewOpts{})
 		} else {
 			localFile := filepath.Join(localDir, path.Base(job.remote))
 			_, startErr = sft.startDownloadFileAsync(sessionID, localFile, job.remote, job.size, transfer.NewOpts{})

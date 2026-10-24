@@ -337,11 +337,7 @@ func (s *SSHService) StartSessionLog(sessionID string) (path string, started boo
 		prefix = prefix[:8]
 	}
 	filename := fmt.Sprintf("vela-session-%s-%s.log", prefix, time.Now().Format("20060102-150405"))
-	path, err = s.app.Dialog.SaveFile().
-		SetMessage("保存会话日志").
-		SetFilename(filename).
-		CanCreateDirectories(true).
-		PromptForSingleSelection()
+	path, err = promptSaveFile(s.app, "保存会话日志", filename)
 	if dialogCancelled(err) || path == "" {
 		return "", false, nil
 	}

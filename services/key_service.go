@@ -76,11 +76,7 @@ func (s *KeyService) GenerateAndExport(algorithm, comment, passphrase string) (S
 }
 
 func (s *KeyService) pickPath(filename string) (string, bool, error) {
-	path, err := s.app.Dialog.SaveFile().
-		SetMessage("导出私钥").
-		SetFilename(filename).
-		CanCreateDirectories(true).
-		PromptForSingleSelection()
+	path, err := promptSaveFile(s.app, "导出私钥", filename)
 	if dialogCancelled(err) || path == "" {
 		return "", false, nil
 	}
@@ -88,12 +84,4 @@ func (s *KeyService) pickPath(filename string) (string, bool, error) {
 		return "", false, err
 	}
 	return path, true, nil
-}
-
-func dialogCancelled(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "cancel")
 }

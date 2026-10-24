@@ -186,11 +186,7 @@ func (bs *BookmarkService) ExportSSHConfig(groupName string) (SSHConfigExportRes
 		b.WriteString(content)
 		content = b.String()
 	}
-	path, err := bs.app.Dialog.SaveFile().
-		SetMessage("导出 OpenSSH 配置").
-		SetFilename("config").
-		CanCreateDirectories(true).
-		PromptForSingleSelection()
+	path, err := promptSaveFile(bs.app, "导出 OpenSSH 配置", "config")
 	if dialogCancelled(err) || path == "" {
 		return SSHConfigExportResult{Cancelled: true, Warnings: warnings}, nil
 	}

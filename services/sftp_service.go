@@ -1,8 +1,6 @@
 package services
 
 import (
-	"path/filepath"
-
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
@@ -65,9 +63,7 @@ func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	return s.mgr.UploadFile(sessionID, localPath, remotePath)
 }
 func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error {
-	localPathFile, err := s.app.Dialog.SaveFile().
-		SetMessage("保存文件").SetFilename(filepath.Base(remotePathFile)).
-		CanCreateDirectories(true).PromptForSingleSelection()
+	localPathFile, err := promptSaveFile(s.app, "保存文件", remotePathFile)
 	if dialogCancelled(err) || localPathFile == "" {
 		return nil
 	}
@@ -88,15 +84,14 @@ func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error 
 	return s.mgr.UploadDirectory(sessionID, localPath, remotePath)
 }
 func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) error {
-	localPath, err := s.app.Dialog.OpenFile().SetTitle("选择目录").
-		CanChooseDirectories(true).CanChooseFiles(false).PromptForSingleSelection()
-	if dialogCancelled(err) || localPath == "" {
+	dest, err := promptSaveFile(s.app, "保存目录", remotePath)
+	if dialogCancelled(err) || dest == "" {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return s.mgr.DownloadDirectory(sessionID, localPath, remotePath)
+	return s.mgr.DownloadDirectoryTo(sessionID, dest, remotePath)
 }
 func (s *SftpService) UploadPaths(sessionID, remotePath string, localPaths []string) error {
 	return s.mgr.UploadPaths(sessionID, remotePath, localPaths)
@@ -108,8 +103,7 @@ func (s *SftpService) DownloadPaths(sessionID, localDir string, remotePaths []st
 }
 
 func (s *SftpService) DownloadPathsDialog(sessionID string, remotePaths []string) error {
-	localDir, err := s.app.Dialog.OpenFile().SetTitle("选择保存目录").
-		CanChooseDirectories(true).CanChooseFiles(false).PromptForSingleSelection()
+	localDir, err := promptOpenDirectory(s.app, "选择保存目录")
 	if dialogCancelled(err) || localDir == "" {
 		return nil
 	}
