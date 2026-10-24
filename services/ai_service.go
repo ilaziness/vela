@@ -92,11 +92,15 @@ type approvalDecision struct {
 }
 
 type agentRun struct {
-	runID     string
-	cancel    context.CancelFunc
-	approvals map[string]chan approvalDecision
-	persister *turnPersister
-	mu        sync.Mutex
+	runID        string
+	cancel       context.CancelFunc
+	approvals    map[string]chan approvalDecision
+	sshApprovals map[string]struct{} // approvalIDs that will SSH-Exec after approve
+	persister    *turnPersister
+	execCancel   context.CancelFunc // cancels the in-flight run_ssh_command Exec only
+	execPending  bool               // approved, Exec not registered yet (approve→Exec race)
+	execAbort    bool               // CancelSSHExec while execPending
+	mu           sync.Mutex
 }
 
 type AIService struct {
@@ -213,7 +217,7 @@ func (s *AIService) ResetConfig() error {
 	return s.SaveConfig(AIConfig{
 		Enabled: false, Provider: ai.ProviderOllama, Model: "llama3.2",
 		Endpoint: "http://localhost:11434", Temperature: 0.7, MaxTokens: 2048,
-		EchoSSHCommands: false, MaxAgentTurns: ai.DefaultMaxAgentTurns, ExecTimeoutSec: ai.DefaultExecTimeoutSec,
+		EchoSSHCommands: false, MaxAgentTurns: ai.DefaultMaxAgentTurns,
 	})
 }
 
@@ -357,13 +361,14 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		_ = s.sessionRepo.UpdateSession(context.Background(), session)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
 	persister := newTurnPersister(s.sessionRepo, s.logger, sessionID, runID, userMsg.ID)
 	run := &agentRun{
-		runID:     runID,
-		cancel:    cancel,
-		approvals: make(map[string]chan approvalDecision),
-		persister: persister,
+		runID:        runID,
+		cancel:       cancel,
+		approvals:    make(map[string]chan approvalDecision),
+		sshApprovals: make(map[string]struct{}),
+		persister:    persister,
 	}
 	s.runsMu.Lock()
 	if _, ok := s.cancelled[runID]; ok {
@@ -394,12 +399,14 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		run.mu.Unlock()
 	}()
 
-	host := &aiHost{svc: s, run: run, cfg: cfg}
+	host := &aiHost{svc: s, run: run}
 	deps := ai.ToolDeps{
-		LinkID:       linkID,
-		SSH:          host,
-		Approval:     host,
-		OnCheckpoint: persister.Checkpoint,
+		LinkID:           linkID,
+		SSH:              host,
+		Approval:         host,
+		MarkSSHApproval:  host.MarkSSHApproval,
+		ArmSSHExecCancel: host.ArmSSHExecCancel,
+		OnCheckpoint:     persister.Checkpoint,
 	}
 
 	aiResp, err := s.engine.Run(ctx, aiReq, deps, func(ev ai.StreamEvent) error {
@@ -717,10 +724,17 @@ func (s *AIService) RespondToolApproval(req *ToolApprovalRequest) error {
 	}
 	run.mu.Lock()
 	ch := run.approvals[approvalID]
-	run.mu.Unlock()
 	if ch == nil {
+		run.mu.Unlock()
 		return fmt.Errorf("unknown or expired approval id")
 	}
+	_, isSSH := run.sshApprovals[approvalID]
+	delete(run.sshApprovals, approvalID)
+	// Arm CancelSSHExec as soon as SSH is approved so Stop works before Wait/Exec race.
+	if req.Approved && isSSH {
+		run.execPending = true
+	}
+	run.mu.Unlock()
 	select {
 	case ch <- approvalDecision{Approved: req.Approved, Reason: req.Reason}:
 		return nil
@@ -742,6 +756,35 @@ func (s *AIService) StopGeneration(sessionID string) error {
 		return nil
 	}
 	s.rejectApprovalsAndCancel(run)
+	return nil
+}
+
+// CancelSSHExec cancels only the in-flight run_ssh_command Exec for the session.
+// It does not stop the agent run or deny pending approvals.
+// Idle calls (no Exec and not between approve→Exec) are no-ops so a late Stop
+// click cannot poison the next command via a sticky abort flag.
+func (s *AIService) CancelSSHExec(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	s.runsMu.Lock()
+	run := s.runs[sessionID]
+	s.runsMu.Unlock()
+	if run == nil {
+		return nil
+	}
+	run.mu.Lock()
+	cancel := run.execCancel
+	if cancel != nil {
+		run.mu.Unlock()
+		cancel()
+		return nil
+	}
+	if run.execPending {
+		run.execAbort = true
+	}
+	run.mu.Unlock()
 	return nil
 }
 
@@ -810,7 +853,14 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 		default:
 		}
 	}
+	execCancel := run.execCancel
+	run.execPending = false
+	run.execAbort = false
+	clear(run.sshApprovals)
 	run.mu.Unlock()
+	if execCancel != nil {
+		execCancel()
+	}
 	run.cancel()
 }
 
@@ -818,12 +868,32 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 type aiHost struct {
 	svc *AIService
 	run *agentRun
-	cfg *AIConfig
 }
 
 func (h *aiHost) Exec(ctx context.Context, linkID, command string) (string, error) {
-	timeout := time.Duration(h.cfg.EffectiveExecTimeoutSec()) * time.Second
-	return h.svc.sshService.exec(ctx, linkID, command, timeout, ssh.DefaultExecMaxOut)
+	execCtx, cancel := context.WithCancel(ctx)
+	if h.run != nil {
+		h.run.mu.Lock()
+		h.run.execCancel = cancel
+		h.run.execPending = false
+		abort := h.run.execAbort
+		h.run.execAbort = false // single-shot: do not leak to the next command
+		h.run.mu.Unlock()
+		if abort {
+			cancel()
+		}
+		defer func() {
+			h.run.mu.Lock()
+			// Sequential run_ssh_command: this Exec owns the slot for its lifetime.
+			h.run.execCancel = nil
+			h.run.mu.Unlock()
+			cancel()
+		}()
+	} else {
+		defer cancel()
+	}
+	// timeout=0: no wall-clock limit; cancelled via execCtx (CancelSSHExec or run cancel).
+	return h.svc.sshService.exec(execCtx, linkID, command, 0, ssh.DefaultExecMaxOut)
 }
 
 func (h *aiHost) Annotate(ctx context.Context, linkID, notice string) error {
@@ -878,6 +948,30 @@ func (h *aiHost) Wait(ctx context.Context, approvalID string) (bool, string, err
 			return false, "stopped", ctx.Err()
 		}
 	}
+}
+
+// MarkSSHApproval records that approvalID will SSH-Exec after approve (not MCP).
+func (h *aiHost) MarkSSHApproval(approvalID string) {
+	approvalID = strings.TrimSpace(approvalID)
+	if h.run == nil || approvalID == "" {
+		return
+	}
+	h.run.mu.Lock()
+	if h.run.sshApprovals == nil {
+		h.run.sshApprovals = make(map[string]struct{})
+	}
+	h.run.sshApprovals[approvalID] = struct{}{}
+	h.run.mu.Unlock()
+}
+
+// ArmSSHExecCancel arms CancelSSHExec for the SSH approve→Exec race only.
+func (h *aiHost) ArmSSHExecCancel() {
+	if h.run == nil {
+		return
+	}
+	h.run.mu.Lock()
+	h.run.execPending = true
+	h.run.mu.Unlock()
 }
 
 func (s *AIService) resolveSSHContext(ctx *SSHContext) (linkID string, prompt *ai.SSHPromptContext, info *ssh.RemoteSystemInfo) {

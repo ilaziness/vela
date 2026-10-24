@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	DefaultExecTimeout = 30 * time.Second
-	DefaultExecMaxOut  = 64 * 1024 // 64KB
+	DefaultExecMaxOut = 64 * 1024 // 64KB
 )
 
 // Exec runs command on a new non-interactive session bound to the same SSH
@@ -28,14 +27,15 @@ func (m *Manager) Exec(ctx context.Context, linkID, command string, timeout time
 	if err != nil {
 		return "", err
 	}
-	if timeout <= 0 {
-		timeout = DefaultExecTimeout
-	}
 	if maxOut <= 0 {
 		maxOut = DefaultExecMaxOut
 	}
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	execCtx := ctx
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	return runRemoteCommandCtx(execCtx, client, command, maxOut)
 }
 

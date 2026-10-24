@@ -18,12 +18,21 @@ export interface CurrentSSHBindState {
   context?: SSHContext;
 }
 
-/** Merged into run_ssh_command tool input for approval UI (this Chat run's host). */
-export const SSH_TARGET_INPUT_KEY = '_sshTarget';
-
 export const RUN_SSH_COMMAND_TOOL = 'run_ssh_command';
 export const UPSERT_PLAN_TOOL = 'upsert_plan';
 export const USE_SKILL_TOOL = 'use_skill';
+
+/** Legacy UI-only field once merged into tool input; strip from display. */
+const LEGACY_SSH_TARGET_INPUT_KEY = '_sshTarget';
+
+/** Remove non-model fields from run_ssh_command tool input before showing in Chat. */
+export function sanitizeToolInputForDisplay(toolName: string, input: unknown): unknown {
+  if (toolName !== RUN_SSH_COMMAND_TOOL) return input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const { [LEGACY_SSH_TARGET_INPUT_KEY]: _removed, ...rest } = input as Record<string, unknown>;
+  void _removed;
+  return rest;
+}
 
 function formatTargetLabel(user: string, host: string, port: number): string {
   return `${user}@${host}:${port}`;

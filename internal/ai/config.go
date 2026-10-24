@@ -15,8 +15,6 @@ var (
 const (
 	// DefaultMaxAgentTurns 单次请求中模型↔工具交互的最大轮次，超出后终止生成。
 	DefaultMaxAgentTurns = 30
-	// DefaultExecTimeoutSec 单次 SSH 工具命令执行超时（秒）。
-	DefaultExecTimeoutSec = 30
 )
 
 // Config AI配置（配置文件与引擎共用）
@@ -31,7 +29,6 @@ type Config struct {
 	MaxTokens       int      `json:"max_tokens" toml:"max_tokens"`
 	EchoSSHCommands bool     `json:"echo_ssh_commands" toml:"echo_ssh_commands"`
 	MaxAgentTurns   int      `json:"max_agent_turns" toml:"max_agent_turns"`
-	ExecTimeoutSec  int      `json:"exec_timeout_sec" toml:"exec_timeout_sec"`
 }
 
 // EffectiveMaxAgentTurns returns configured turns or default.
@@ -40,14 +37,6 @@ func (c *Config) EffectiveMaxAgentTurns() int {
 		return DefaultMaxAgentTurns
 	}
 	return c.MaxAgentTurns
-}
-
-// EffectiveExecTimeoutSec returns configured timeout or default.
-func (c *Config) EffectiveExecTimeoutSec() int {
-	if c == nil || c.ExecTimeoutSec <= 0 {
-		return DefaultExecTimeoutSec
-	}
-	return c.ExecTimeoutSec
 }
 
 // buildGenConfig 构建各供应商的原生配置结构

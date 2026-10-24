@@ -12,9 +12,9 @@ import { parseCallServiceError } from '../../func/service';
 import {
   getCurrentSSHBindState,
   RUN_SSH_COMMAND_TOOL,
-  SSH_TARGET_INPUT_KEY,
   UPSERT_PLAN_TOOL,
   USE_SKILL_TOOL,
+  sanitizeToolInputForDisplay,
 } from '../../func/aiContext';
 import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
@@ -95,10 +95,8 @@ export class GenkitAdapter implements ChatAdapter {
     const capturedSessionId = sessionId;
     const runID = `run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
-    let pinnedSSHTarget = '';
     try {
       const bind = getCurrentSSHBindState();
-      pinnedSSHTarget = bind.context ? bind.targetLabel : '';
       const request = new ChatRequest({
         session_id: sessionId,
         run_id: runID,
@@ -122,12 +120,6 @@ export class GenkitAdapter implements ChatAdapter {
         let hasTextStarted = false;
         let hasStarted = false;
         let aborted = false;
-
-        const withPinnedSSHTarget = (toolName: string, input: unknown): unknown => {
-          if (!pinnedSSHTarget || toolName !== RUN_SSH_COMMAND_TOOL) return input;
-          if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
-          return { ...(input as Record<string, unknown>), [SSH_TARGET_INPUT_KEY]: pinnedSSHTarget };
-        };
 
         const endStreaming = () => {
           useAIAssistantStore.getState().setStreaming(false);
@@ -219,7 +211,7 @@ export class GenkitAdapter implements ChatAdapter {
                 type: 'tool-input-available',
                 toolCallId: data.toolCallId || '',
                 toolName,
-                input: withPinnedSSHTarget(toolName, parseJSONValue(data.input) ?? {}),
+                input: sanitizeToolInputForDisplay(toolName, parseJSONValue(data.input) ?? {}),
                 ...(isKnownChatTool(toolName) ? {} : { dynamic: true }),
               } as ChatMessageChunk);
               return;
@@ -231,7 +223,7 @@ export class GenkitAdapter implements ChatAdapter {
                 toolCallId: data.toolCallId || '',
                 toolName,
                 approvalId: data.approvalId || data.toolCallId,
-                input: withPinnedSSHTarget(toolName, parseJSONValue(data.input) ?? {}),
+                input: sanitizeToolInputForDisplay(toolName, parseJSONValue(data.input) ?? {}),
                 ...(isKnownChatTool(toolName) ? {} : { dynamic: true }),
               } as ChatMessageChunk);
               return;
@@ -479,7 +471,7 @@ function genkitPartsToMui(parts: any[], fallbackText: string, rowStatus?: string
           toolCallId: String(req.ref || req.name || ''),
           toolName,
           state: 'input-available',
-          input: req.input ?? {},
+          input: sanitizeToolInputForDisplay(toolName, req.input ?? {}),
         },
       });
       continue;

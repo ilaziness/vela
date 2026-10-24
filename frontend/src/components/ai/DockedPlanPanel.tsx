@@ -6,6 +6,7 @@ import { latestPlanFromMessages, PlanTaskPart } from './PlanTaskPart';
 const composerInnerSx: SxProps<Theme> = (theme) => ({
   display: 'flex',
   flexDirection: 'column',
+  alignItems: 'stretch',
   position: 'relative',
   gap: theme.spacing(0.5),
   padding: theme.spacing(1, 1.5),
@@ -14,6 +15,10 @@ const composerInnerSx: SxProps<Theme> = (theme) => ({
   borderRadius: (theme.vars || theme).shape.borderRadius,
   backgroundColor: (theme.vars || theme).palette.background.paper,
   boxSizing: 'border-box',
+  // Let the textarea size to its content; do not stretch it to fill leftover height.
+  '& .MuiChatComposer-textArea': {
+    flex: '0 0 auto',
+  },
   transition: theme.transitions.create(['border-color', 'box-shadow'], {
     duration: theme.transitions.duration.short,
   }),

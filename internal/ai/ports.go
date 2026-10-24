@@ -27,6 +27,12 @@ type ToolDeps struct {
 	SSH      SSHExecutor
 	Approval ApprovalGate
 	Emit     func(StreamEvent)
+	// MarkSSHApproval tags an approvalID so RespondToolApproval can arm CancelSSHExec
+	// as soon as the user approves (before Wait returns / Exec registers). MCP must not call.
+	MarkSSHApproval func(approvalID string)
+	// ArmSSHExecCancel arms CancelSSHExec for the approve→Exec race (SSH only).
+	// Optional; MCP tools must not call it. Kept as a backup after Wait returns.
+	ArmSSHExecCancel func()
 	// OnCheckpoint receives the Genkit turn slice (History after promptLen) after each WrapGenerate.
 	// Optional; used by services for durable mid-run persistence. Tools must not call it.
 	OnCheckpoint func(turn []ChatMessage)

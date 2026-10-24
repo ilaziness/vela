@@ -1,5 +1,17 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Box, Avatar, CircularProgress, Button, Typography } from "@mui/material";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import {
+  Box,
+  Avatar,
+  CircularProgress,
+  Button,
+  Typography,
+} from "@mui/material";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import { ChatBox, ChatMessageAvatar } from "@mui/x-chat";
 import type { ChatToolInvocationState } from "@mui/x-chat/headless";
@@ -9,6 +21,7 @@ import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
 import ComposerSendStopButton from "./ComposerSendStopButton";
 import { ComposerPlanDockRoot } from "./DockedPlanPanel";
 import SessionPanel from "./SessionPanel";
+import SSHToolState from "./SSHToolState";
 import { RUN_SSH_COMMAND_TOOL, UPSERT_PLAN_TOOL } from "../../func/aiContext";
 import {
   clampSidebarWidth,
@@ -34,7 +47,7 @@ const chatLocaleText = {
       case "approval-requested":
         return "待批准";
       case "approval-responded":
-        return "已批准";
+        return "执行中";
       case "output-available":
         return "已完成";
       case "output-error":
@@ -54,8 +67,26 @@ function HiddenToolRoot() {
 
 const toolPartProps = {
   toolSlots: {
-    [RUN_SSH_COMMAND_TOOL]: { icon: TerminalIcon },
+    [RUN_SSH_COMMAND_TOOL]: { icon: TerminalIcon, state: SSHToolState },
     [UPSERT_PLAN_TOOL]: { root: HiddenToolRoot },
+  },
+  // Built-in opens on approval-requested / input-streaming only; keep open through
+  // approval-responded so approve→exec does not collapse (scroll jump) and Stop stays in context.
+  defaultExpanded: {
+    [RUN_SSH_COMMAND_TOOL]: (ownerState: {
+      section?: string;
+      state?: string;
+    }) => {
+      if (ownerState.section) return undefined;
+      if (
+        ownerState.state === "approval-requested" ||
+        ownerState.state === "approval-responded" ||
+        ownerState.state === "input-streaming"
+      ) {
+        return true;
+      }
+      return undefined;
+    },
   },
 };
 
@@ -78,7 +109,7 @@ const LetterAvatar = React.forwardRef<HTMLDivElement, any>(
         {isUser ? "Y" : "AI"}
       </Avatar>
     );
-  }
+  },
 );
 
 const CustomMessageAvatar = React.forwardRef<HTMLDivElement, any>(
@@ -90,7 +121,7 @@ const CustomMessageAvatar = React.forwardRef<HTMLDivElement, any>(
         slots={{ ...props.slots, avatar: LetterAvatar }}
       />
     );
-  }
+  },
 );
 
 const AISideBar = () => {
@@ -100,13 +131,19 @@ const AISideBar = () => {
   const loadingSessions = useAIAssistantStore((state) => state.loadingSessions);
   const composerValue = useAIAssistantStore((state) => state.composerValue);
   const loadSessions = useAIAssistantStore((state) => state.loadSessions);
-  const refreshActiveSessionTitle = useAIAssistantStore((state) => state.refreshActiveSessionTitle);
+  const refreshActiveSessionTitle = useAIAssistantStore(
+    (state) => state.refreshActiveSessionTitle,
+  );
   const setSidebarWidth = useAIAssistantStore((state) => state.setSidebarWidth);
-  const setComposerValue = useAIAssistantStore((state) => state.setComposerValue);
+  const setComposerValue = useAIAssistantStore(
+    (state) => state.setComposerValue,
+  );
 
   const adapter = useMemo(() => new GenkitAdapter(), []);
 
-  const [chatContainer, setChatContainer] = useState<HTMLDivElement | null>(null);
+  const [chatContainer, setChatContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
 
   const setChatRef = useCallback((node: HTMLDivElement | null) => {
     setChatContainer(node);
@@ -229,7 +266,8 @@ const AISideBar = () => {
           sx={{
             width: SIDEBAR_RESIZE_HANDLE_WIDTH,
             cursor: "col-resize",
-            backgroundColor: isHovering || isResizing ? "primary.main" : "transparent",
+            backgroundColor:
+              isHovering || isResizing ? "primary.main" : "transparent",
             transition: isResizing ? "none" : "background-color 0.2s",
             "&:hover": {
               backgroundColor: "primary.main",
@@ -274,6 +312,7 @@ const AISideBar = () => {
                 features={{
                   attachments: false,
                   conversationHeader: false,
+                  autoScroll: { buffer: 2000 },
                 }}
                 onFinish={() => void refreshActiveSessionTitle()}
                 onError={(err: any) => {
@@ -286,7 +325,22 @@ const AISideBar = () => {
                   composerRoot: ComposerPlanDockRoot,
                 }}
                 slotProps={{
-                  composerInput: { placeholder: "输入消息..." },
+                  // maxRows enables MUI auto-grow (rows=1 + height sync). Default TextArea CSS
+                  // still has flex:1 + maxHeight:200 which stretches the field in a column
+                  // composer and shows a useless scrollbar — override those.
+                  composerInput: {
+                    placeholder: "输入消息...",
+                    maxRows: 8,
+                    sx: {
+                      flex: "0 0 auto",
+                      alignSelf: "stretch",
+                      width: "100%",
+                      minHeight: "unset",
+                      // ~8× body2 line box + padding; scroll only after the cap.
+                      maxHeight: "calc(1.25rem * 8 + 8px)",
+                      overflowY: "auto",
+                    },
+                  },
                   messageContent: {
                     partProps: {
                       tool: toolPartProps,
@@ -319,10 +373,18 @@ const AISideBar = () => {
                   px: 2,
                 }}
               >
-                <Typography variant="body2" color="text.secondary" align="center">
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  align="center"
+                >
                   无法加载或创建会话
                 </Typography>
-                <Button size="small" variant="outlined" onClick={() => void loadSessions()}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void loadSessions()}
+                >
                   重试
                 </Button>
               </Box>

@@ -16,6 +16,9 @@ import (
 const (
 	ToolRunSSHCommand = "run_ssh_command"
 	ToolUpsertPlan    = "upsert_plan"
+
+	msgUserStoppedCommand = "user stopped command execution"
+	msgGenerationStopped  = "generation stopped"
 )
 
 type sshCommandInput struct {
@@ -76,6 +79,9 @@ func registerTools(g *genkit.Genkit) agentTools {
 			emit(tc, StreamEvent{Type: EventToolInputAvailable, ToolCallID: callID, ToolName: ToolRunSSHCommand, Input: inJSON})
 
 			deps.Approval.Open(approvalID)
+			if deps.MarkSSHApproval != nil {
+				deps.MarkSSHApproval(approvalID)
+			}
 			emit(tc, StreamEvent{
 				Type: EventToolApprovalRequest, ToolCallID: callID, ToolName: ToolRunSSHCommand,
 				ApprovalID: approvalID, Input: inJSON,
@@ -100,11 +106,19 @@ func registerTools(g *genkit.Genkit) agentTools {
 					ApprovalID: approvalID, Reason: reason,
 				})
 				emit(tc, StreamEvent{Type: EventFinishStep})
+				// Keep "User denied command execution:" prefix for history denial detection.
 				return fmt.Sprintf("User denied command execution: %s", reason), nil
 			}
 
+			if deps.ArmSSHExecCancel != nil {
+				deps.ArmSSHExecCancel()
+			}
 			echoCommand(tc, deps, cmd)
 			out, execErr := deps.SSH.Exec(tc, deps.LinkID, cmd)
+			if errors.Is(execErr, context.Canceled) {
+				// Intentional: cancel is a tool result string for Genkit, not a tool error.
+				return emitSSHCanceled(tc, deps, callID, out), nil
+			}
 			echoResult(tc, deps, out, execErr)
 			return finishSSH(tc, callID, out, execErr), nil
 		})
@@ -113,6 +127,22 @@ func registerTools(g *genkit.Genkit) agentTools {
 }
 
 const echoMaxOut = 16 * 1024
+
+func emitSSHCanceled(tc *genkitAI.ToolContext, deps ToolDeps, callID, out string) string {
+	// Per-command Stop: keep agent alive so the model can continue (UI ≠ 失败).
+	// Generation Stop: tc is also cancelled — still return a clean string.
+	if tc.Err() != nil {
+		echoResult(tc, deps, out, errors.New(msgGenerationStopped))
+		emit(tc, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: ToolRunSSHCommand, ErrorText: msgGenerationStopped})
+		emit(tc, StreamEvent{Type: EventFinishStep})
+		return msgGenerationStopped
+	}
+	echoResult(tc, deps, out, errors.New(msgUserStoppedCommand))
+	outJSON, _ := json.Marshal(map[string]string{"output": msgUserStoppedCommand})
+	emit(tc, StreamEvent{Type: EventToolOutputAvailable, ToolCallID: callID, ToolName: ToolRunSSHCommand, Output: outJSON})
+	emit(tc, StreamEvent{Type: EventFinishStep})
+	return msgUserStoppedCommand
+}
 
 func finishSSH(tc *genkitAI.ToolContext, callID, out string, execErr error) string {
 	if execErr != nil {

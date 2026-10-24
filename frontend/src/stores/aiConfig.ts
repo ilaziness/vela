@@ -27,7 +27,6 @@ const defaultConfig: AIConfig = {
   max_tokens: 2048,
   echo_ssh_commands: false,
   max_agent_turns: 30,
-  exec_timeout_sec: 30,
 };
 
 export const useAIConfigStore = create<AIConfigState>((set) => ({

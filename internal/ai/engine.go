@@ -40,14 +40,13 @@ func NewAIEngine(logger *zap.Logger) *AIEngine {
 		logger: logger,
 		mcp:    newMCPRuntime(logger),
 		config: &Config{
-			Enabled:        false,
-			Provider:       ProviderOllama,
-			Model:          "llama3.2",
-			Endpoint:       "http://localhost:11434",
-			Temperature:    0.7,
-			MaxTokens:      2048,
-			MaxAgentTurns:  DefaultMaxAgentTurns,
-			ExecTimeoutSec: DefaultExecTimeoutSec,
+			Enabled:       false,
+			Provider:      ProviderOllama,
+			Model:         "llama3.2",
+			Endpoint:      "http://localhost:11434",
+			Temperature:   0.7,
+			MaxTokens:     2048,
+			MaxAgentTurns: DefaultMaxAgentTurns,
 		},
 	}
 }
