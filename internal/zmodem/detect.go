@@ -23,15 +23,13 @@ type detectResult struct {
 
 func findHexAutostart(data []byte) (detectResult, bool) {
 	for i := 0; i+autostartHeaderLen <= len(data); i++ {
-		var hdr [autostartHeaderLen]byte
-		copy(hdr[:], data[i:])
-		if hdr[0] != hexAutostartPrefix[0] ||
-			hdr[1] != hexAutostartPrefix[1] ||
-			hdr[2] != hexAutostartPrefix[2] ||
-			hdr[3] != hexAutostartPrefix[3] {
+		if data[i] != hexAutostartPrefix[0] ||
+			data[i+1] != hexAutostartPrefix[1] ||
+			data[i+2] != hexAutostartPrefix[2] ||
+			data[i+3] != hexAutostartPrefix[3] {
 			continue
 		}
-		ft, ok := parseHexType(hdr[4], hdr[5])
+		ft, ok := parseHexType(data[i+4], data[i+5])
 		if !ok {
 			continue
 		}

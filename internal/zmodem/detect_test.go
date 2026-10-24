@@ -142,23 +142,21 @@ func TestFeedOutSplitAfterNoise(t *testing.T) {
 	waitIdle(t, f)
 }
 
-func TestCooldownClearsLookbehind(t *testing.T) {
+func TestAbortClearsLookbehind(t *testing.T) {
 	f := NewFilter("s1", Deps{Picker: &stubPicker{err: ErrCancelled}})
 	f.BindStdin(nopWriteCloser{new(bytes.Buffer)})
-	f.mu.Lock()
-	f.ignoreUntil = time.Now().Add(time.Hour)
-	f.lookbehind = []byte{0x2a, 0x2a, 0x18, 0x42, '0'}
-	f.mu.Unlock()
-
-	out := f.FeedOut([]byte{'1'}) // would complete ZRINIT if lookbehind kept
+	_ = f.FeedOut([]byte{0x2a, 0x2a, 0x18, 0x42, '0'}) // partial → lookbehind
+	f.Reset()
+	out := f.FeedOut([]byte{'1'}) // must not complete a stale ZRINIT
 	if string(out) != "1" {
 		t.Fatalf("echo=%q", out)
 	}
 	f.mu.Lock()
 	lb := len(f.lookbehind)
+	st := f.state
 	f.mu.Unlock()
-	if lb != 0 {
-		t.Fatalf("lookbehind should be cleared during cooldown, len=%d", lb)
+	if lb != 0 || st != stateIdle {
+		t.Fatalf("after Reset: lookbehind=%d state=%v", lb, st)
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	zm "github.com/xx25/go-zmodem"
 	"go.uber.org/zap"
@@ -14,10 +13,7 @@ import (
 	"github.com/ilaziness/vela/internal/system"
 )
 
-const (
-	protoBufMax    = 4 << 20 // 4 MiB
-	postTransferCD = 2 * time.Second
-)
+const protoBufMax = 4 << 20 // 4 MiB
 
 // ErrCancelled is returned when the user dismisses a file/directory dialog.
 var ErrCancelled = errors.New("zmodem: cancelled")
@@ -63,8 +59,6 @@ type Filter struct {
 	stdin      io.WriteCloser
 	queue      *byteQueue
 	cancel     context.CancelFunc
-	// ignoreUntil suppresses autostart after a transfer (shell may echo ZRINIT).
-	ignoreUntil time.Time
 }
 
 // NewFilter creates a session-scoped filter.
@@ -129,13 +123,6 @@ func (f *Filter) FeedOut(data []byte) []byte {
 }
 
 func (f *Filter) feedIdleLocked(data []byte) []byte {
-	if time.Now().Before(f.ignoreUntil) {
-		// Do not keep lookbehind across cooldown — echoed ZRINIT residue
-		// would otherwise re-trigger upload after ignoreUntil.
-		f.lookbehind = nil
-		return data
-	}
-
 	combined := data
 	lbLen := len(f.lookbehind)
 	if lbLen > 0 {
@@ -290,9 +277,8 @@ func (f *Filter) Reset() {
 
 // abortLocked cancels transfer state. Caller must hold f.mu.
 func (f *Filter) abortLocked() (stdin io.WriteCloser) {
-	wasBusy := f.state != stateIdle || f.cancel != nil || f.queue != nil
-	if !wasBusy {
-		f.lookbehind = nil
+	f.lookbehind = nil
+	if f.state == stateIdle && f.cancel == nil && f.queue == nil {
 		return nil
 	}
 	if f.cancel != nil {
@@ -304,9 +290,7 @@ func (f *Filter) abortLocked() (stdin io.WriteCloser) {
 		f.queue = nil
 	}
 	w := f.stdin
-	f.lookbehind = nil
 	f.state = stateIdle
-	f.ignoreUntil = time.Now().Add(postTransferCD)
 	return w
 }
 
