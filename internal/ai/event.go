@@ -1,31 +1,20 @@
 package ai
 
-import "encoding/json"
+import "github.com/ilaziness/vela/internal/ai/event"
 
-// Stream event kinds aligned with MUI X Chat chunk types (live UI only).
+// Re-export stream events for services / Wails bindings stability.
 const (
-	EventTextDelta           = "text-delta"
-	EventReasoningDelta      = "reasoning-delta"
-	EventStartStep           = "start-step"
-	EventFinishStep          = "finish-step"
-	EventToolInputStart      = "tool-input-start"
-	EventToolInputAvailable  = "tool-input-available"
-	EventToolApprovalRequest = "tool-approval-request"
-	EventToolOutputAvailable = "tool-output-available"
-	EventToolOutputError     = "tool-output-error"
-	EventToolOutputDenied    = "tool-output-denied"
+	EventTextDelta           = event.EventTextDelta
+	EventReasoningDelta      = event.EventReasoningDelta
+	EventStartStep           = event.EventStartStep
+	EventFinishStep          = event.EventFinishStep
+	EventToolInputStart      = event.EventToolInputStart
+	EventToolInputAvailable  = event.EventToolInputAvailable
+	EventToolApprovalRequest = event.EventToolApprovalRequest
+	EventToolOutputAvailable = event.EventToolOutputAvailable
+	EventToolOutputError     = event.EventToolOutputError
+	EventToolOutputDenied    = event.EventToolOutputDenied
 )
 
 // StreamEvent is a structured agent stream payload for the frontend.
-type StreamEvent struct {
-	Type       string          `json:"type"`
-	ID         string          `json:"id,omitempty"`
-	Delta      string          `json:"delta,omitempty"`
-	ToolCallID string          `json:"toolCallId,omitempty"`
-	ToolName   string          `json:"toolName,omitempty"`
-	ApprovalID string          `json:"approvalId,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	Output     json.RawMessage `json:"output,omitempty"`
-	ErrorText  string          `json:"errorText,omitempty"`
-	Reason     string          `json:"reason,omitempty"`
-}
+type StreamEvent = event.StreamEvent

@@ -11,23 +11,13 @@ import { formatAIChatError } from '../../func/aiChatError';
 import { parseCallServiceError } from '../../func/service';
 import {
   getCurrentSSHBindState,
-  RUN_SSH_COMMAND_TOOL,
-  UPSERT_PLAN_TOOL,
-  USE_SKILL_TOOL,
+  isKnownChatTool,
   sanitizeToolInputForDisplay,
 } from '../../func/aiContext';
 import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
 
 const EVENT_AI_STREAM_CHUNK = 'eventAIStreamChunk';
-
-function isKnownChatTool(toolName: string): boolean {
-  return (
-    toolName === RUN_SSH_COMMAND_TOOL ||
-    toolName === UPSERT_PLAN_TOOL ||
-    toolName === USE_SKILL_TOOL
-  );
-}
 
 function toolPartType(toolName: string): 'tool' | 'dynamic-tool' {
   return isKnownChatTool(toolName) ? 'tool' : 'dynamic-tool';

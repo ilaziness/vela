@@ -15,6 +15,8 @@ import (
 	"github.com/firebase/genkit/go/plugins/googlegenai"
 	"github.com/firebase/genkit/go/plugins/ollama"
 	"go.uber.org/zap"
+
+	"github.com/ilaziness/vela/internal/ai/tool"
 )
 
 // AIEngine AI引擎
@@ -24,8 +26,7 @@ type AIEngine struct {
 	config      *Config
 	modelName   string
 	genConfig   any
-	planTool    genkitAI.ToolRef
-	sshTool     genkitAI.ToolRef
+	tools       tool.Set
 	userDataDir string
 	mcp         *mcpRuntime
 	mu          sync.RWMutex
@@ -112,15 +113,14 @@ func (e *AIEngine) Init(ctx context.Context, cfg *Config) error {
 		return err
 	}
 
-	tools := registerTools(g)
+	tools := tool.Register(g)
 
 	e.mu.Lock()
 	e.genkit = g
 	e.config = cfg
 	e.modelName = modelName
 	e.genConfig = cfg.buildGenConfig()
-	e.planTool = tools.plan
-	e.sshTool = tools.ssh
+	e.tools = tools
 	userDataDir := e.userDataDir
 	mcp := e.mcp
 	e.mu.Unlock()
@@ -135,14 +135,13 @@ func (e *AIEngine) Init(ctx context.Context, cfg *Config) error {
 }
 
 // Run executes one agent turn (text + optional tools). onEvent receives stream events.
-func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, onEvent func(StreamEvent) error) (*AgentResponse, error) {
+func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEvent func(StreamEvent) error) (*AgentResponse, error) {
 	e.mu.RLock()
 	modelName := e.modelName
 	genConfig := e.genConfig
 	g := e.genkit
 	cfg := e.config
-	planTool := e.planTool
-	sshTool := e.sshTool
+	tools := e.tools
 	userDataDir := e.userDataDir
 	mcp := e.mcp
 	e.mu.RUnlock()
@@ -156,10 +155,11 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 	if onEvent == nil {
 		onEvent = func(StreamEvent) error { return nil }
 	}
-	if planTool == nil {
+	if tools.Plan == nil {
 		return nil, fmt.Errorf("ai tools not registered")
 	}
 
+	deps := rd.Tools
 	deps.Emit = func(ev StreamEvent) { _ = onEvent(ev) }
 	deps.Echo = cfg.EchoSSHCommands
 	if !req.EnableSSH {
@@ -167,7 +167,7 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 	} else if deps.LinkID == "" {
 		deps.LinkID = req.LinkID
 	}
-	ctx = withToolDeps(ctx, deps)
+	ctx = tool.WithDeps(ctx, deps)
 
 	messages := buildGenkitMessages(req.Messages, req.NewMessage, req.SystemPrompt)
 	promptLen := len(messages)
@@ -175,9 +175,15 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 		return applyStreamedText(storedTurn(resp, promptLen), streamed), err
 	}
 
-	activeTools := []genkitAI.ToolRef{planTool}
-	if deps.EnableSSHTool() && sshTool != nil {
-		activeTools = append(activeTools, sshTool)
+	activeTools := []genkitAI.ToolRef{tools.Plan}
+	if deps.EnableSSH() {
+		activeTools = append(activeTools, tools.SSH)
+	}
+	if deps.EnableFS() {
+		activeTools = append(activeTools, tools.Read, tools.Write, tools.List)
+	}
+	if deps.EnableWebSearch() {
+		activeTools = append(activeTools, tools.Search)
 	}
 	if mcp != nil {
 		for _, t := range mcp.ActiveTools() {
@@ -192,10 +198,10 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 		e.logger.Warn("list enabled skills failed", zap.Error(err))
 	}
 	// Checkpoint last so WrapGenerate snapshots after skills/system injection and generate.
-	if deps.OnCheckpoint != nil {
+	if rd.OnCheckpoint != nil {
 		middleware = append(middleware, checkpointMiddleware{
 			promptLen:    promptLen,
-			onCheckpoint: deps.OnCheckpoint,
+			onCheckpoint: rd.OnCheckpoint,
 		})
 	}
 	opts := []genkitAI.GenerateOption{
@@ -328,8 +334,7 @@ func (e *AIEngine) SetConfig(cfg *Config) error {
 		e.genkit = nil
 		e.modelName = ""
 		e.genConfig = nil
-		e.planTool = nil
-		e.sshTool = nil
+		e.tools = tool.Set{}
 		mcp := e.mcp
 		e.mu.Unlock()
 		if mcp != nil {

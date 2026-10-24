@@ -22,7 +22,11 @@ import ComposerSendStopButton from "./ComposerSendStopButton";
 import { ComposerPlanDockRoot } from "./DockedPlanPanel";
 import SessionPanel from "./SessionPanel";
 import SSHToolState from "./SSHToolState";
-import { RUN_SSH_COMMAND_TOOL, UPSERT_PLAN_TOOL } from "../../func/aiContext";
+import {
+  RUN_SSH_COMMAND_TOOL,
+  UPSERT_PLAN_TOOL,
+  WRITE_LOCAL_FILE_TOOL,
+} from "../../func/aiContext";
 import {
   clampSidebarWidth,
   persistSidebarWidth,
@@ -65,6 +69,18 @@ function HiddenToolRoot() {
   return null;
 }
 
+const expandOnApproval = (ownerState: { section?: string; state?: string }) => {
+  if (ownerState.section) return undefined;
+  if (
+    ownerState.state === "approval-requested" ||
+    ownerState.state === "approval-responded" ||
+    ownerState.state === "input-streaming"
+  ) {
+    return true;
+  }
+  return undefined;
+};
+
 const toolPartProps = {
   toolSlots: {
     [RUN_SSH_COMMAND_TOOL]: { icon: TerminalIcon, state: SSHToolState },
@@ -72,21 +88,10 @@ const toolPartProps = {
   },
   // Built-in opens on approval-requested / input-streaming only; keep open through
   // approval-responded so approve→exec does not collapse (scroll jump) and Stop stays in context.
+  // write_local_file expands so full content in the approval JSON is visible before approve.
   defaultExpanded: {
-    [RUN_SSH_COMMAND_TOOL]: (ownerState: {
-      section?: string;
-      state?: string;
-    }) => {
-      if (ownerState.section) return undefined;
-      if (
-        ownerState.state === "approval-requested" ||
-        ownerState.state === "approval-responded" ||
-        ownerState.state === "input-streaming"
-      ) {
-        return true;
-      }
-      return undefined;
-    },
+    [RUN_SSH_COMMAND_TOOL]: expandOnApproval,
+    [WRITE_LOCAL_FILE_TOOL]: expandOnApproval,
   },
 };
 

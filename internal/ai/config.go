@@ -6,6 +6,8 @@ import (
 	"github.com/firebase/genkit/go/plugins/ollama"
 	"github.com/openai/openai-go"
 	"google.golang.org/genai"
+
+	"github.com/ilaziness/vela/internal/ai/tool"
 )
 
 var (
@@ -17,18 +19,32 @@ const (
 	DefaultMaxAgentTurns = 30
 )
 
+// FileSystemConfig gates local file tools via an allowlist.
+type FileSystemConfig struct {
+	AllowedDirs []string `json:"allowed_dirs" toml:"allowed_dirs"`
+}
+
+// WebSearchConfig stores the selected search provider and encrypted API key.
+type WebSearchConfig struct {
+	Provider        tool.SearchProvider `json:"provider" toml:"provider"`
+	APIKey          string              `json:"api_key,omitempty" toml:"api_key,omitempty"`
+	APIKeyEncrypted string              `json:"api_key_encrypted,omitempty" toml:"api_key_encrypted,omitempty"`
+}
+
 // Config AI配置（配置文件与引擎共用）
 type Config struct {
-	Enabled         bool     `json:"enabled" toml:"enabled"`
-	Provider        Provider `json:"provider" toml:"provider"`
-	Model           string   `json:"model" toml:"model"`
-	APIKey          string   `json:"api_key,omitempty" toml:"api_key,omitempty"`
-	APIKeyEncrypted string   `json:"api_key_encrypted,omitempty" toml:"api_key_encrypted,omitempty"`
-	Endpoint        string   `json:"endpoint" toml:"endpoint"`
-	Temperature     float64  `json:"temperature" toml:"temperature"`
-	MaxTokens       int      `json:"max_tokens" toml:"max_tokens"`
-	EchoSSHCommands bool     `json:"echo_ssh_commands" toml:"echo_ssh_commands"`
-	MaxAgentTurns   int      `json:"max_agent_turns" toml:"max_agent_turns"`
+	Enabled         bool             `json:"enabled" toml:"enabled"`
+	Provider        Provider         `json:"provider" toml:"provider"`
+	Model           string           `json:"model" toml:"model"`
+	APIKey          string           `json:"api_key,omitempty" toml:"api_key,omitempty"`
+	APIKeyEncrypted string           `json:"api_key_encrypted,omitempty" toml:"api_key_encrypted,omitempty"`
+	Endpoint        string           `json:"endpoint" toml:"endpoint"`
+	Temperature     float64          `json:"temperature" toml:"temperature"`
+	MaxTokens       int              `json:"max_tokens" toml:"max_tokens"`
+	EchoSSHCommands bool             `json:"echo_ssh_commands" toml:"echo_ssh_commands"`
+	MaxAgentTurns   int              `json:"max_agent_turns" toml:"max_agent_turns"`
+	Filesystem      FileSystemConfig `json:"filesystem" toml:"filesystem"`
+	WebSearch       WebSearchConfig  `json:"web_search" toml:"web_search"`
 }
 
 // EffectiveMaxAgentTurns returns configured turns or default.
@@ -37,6 +53,14 @@ func (c *Config) EffectiveMaxAgentTurns() int {
 		return DefaultMaxAgentTurns
 	}
 	return c.MaxAgentTurns
+}
+
+// EffectiveAllowedDirs returns existing absolute allowlist directories only.
+func (c *Config) EffectiveAllowedDirs() []string {
+	if c == nil {
+		return nil
+	}
+	return tool.SanitizeAllowedDirs(c.Filesystem.AllowedDirs)
 }
 
 // buildGenConfig 构建各供应商的原生配置结构

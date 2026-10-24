@@ -21,6 +21,24 @@ export interface CurrentSSHBindState {
 export const RUN_SSH_COMMAND_TOOL = 'run_ssh_command';
 export const UPSERT_PLAN_TOOL = 'upsert_plan';
 export const USE_SKILL_TOOL = 'use_skill';
+export const READ_LOCAL_FILE_TOOL = 'read_local_file';
+export const WRITE_LOCAL_FILE_TOOL = 'write_local_file';
+export const LIST_LOCAL_DIRECTORY_TOOL = 'list_local_directory';
+export const WEB_SEARCH_TOOL = 'web_search';
+
+const KNOWN_CHAT_TOOLS = new Set([
+  RUN_SSH_COMMAND_TOOL,
+  UPSERT_PLAN_TOOL,
+  USE_SKILL_TOOL,
+  READ_LOCAL_FILE_TOOL,
+  WRITE_LOCAL_FILE_TOOL,
+  LIST_LOCAL_DIRECTORY_TOOL,
+  WEB_SEARCH_TOOL,
+]);
+
+export function isKnownChatTool(toolName: string): boolean {
+  return KNOWN_CHAT_TOOLS.has(toolName);
+}
 
 /** Legacy UI-only field once merged into tool input; strip from display. */
 const LEGACY_SSH_TARGET_INPUT_KEY = '_sshTarget';

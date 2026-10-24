@@ -1,46 +1,12 @@
 package ai
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
 )
-
-func TestDepsFromCtxIsolatesRuns(t *testing.T) {
-	a := ToolDeps{LinkID: "sess-a"}
-	b := ToolDeps{LinkID: "sess-b"}
-	ctxA := withToolDeps(context.Background(), a)
-	ctxB := withToolDeps(context.Background(), b)
-	if got := depsFromCtx(ctxA).LinkID; got != "sess-a" {
-		t.Fatalf("ctxA LinkID=%q", got)
-	}
-	if got := depsFromCtx(ctxB).LinkID; got != "sess-b" {
-		t.Fatalf("ctxB LinkID=%q", got)
-	}
-	if got := depsFromCtx(context.Background()).LinkID; got != "" {
-		t.Fatalf("empty ctx LinkID=%q", got)
-	}
-}
-
-func TestNormalizePlan(t *testing.T) {
-	p := upsertPlanInput{Title: "  x  ", Tasks: []planTask{
-		{ID: "", Title: "a", Status: "RUNNING"},
-		{ID: "t2", Title: "b", Status: "nope"},
-	}}
-	normalizePlan(&p)
-	if p.Title != "x" {
-		t.Fatalf("title=%q", p.Title)
-	}
-	if p.Tasks[0].ID == "" || p.Tasks[0].Status != "running" {
-		t.Fatalf("task0=%+v", p.Tasks[0])
-	}
-	if p.Tasks[1].Status != "pending" {
-		t.Fatalf("task1 status=%q", p.Tasks[1].Status)
-	}
-}
 
 func TestBuildGenkitMessagesKeepsToolTranscript(t *testing.T) {
 	reqPart := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
@@ -269,22 +235,6 @@ func TestApplyStreamedTextOnCancel(t *testing.T) {
 	got = applyStreamedText(partial, "hello world")
 	if got.Content != "hello world" || got.Turn[0].Content != "hello world" {
 		t.Fatalf("should extend last text model by streamed prefix: %+v", got)
-	}
-}
-
-func TestTruncateEcho(t *testing.T) {
-	if got := truncateEcho("abc", 10); got != "abc" {
-		t.Fatalf("short=%q", got)
-	}
-	got := truncateEcho("你好世界", 4)
-	if !strings.HasSuffix(got, "…[truncated]") {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestToCRLF(t *testing.T) {
-	if got := toCRLF("a\nb\r\nc\rd"); got != "a\r\nb\r\nc\r\nd" {
-		t.Fatalf("got %q", got)
 	}
 }
 

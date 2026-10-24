@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/ai"
+	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/ssh"
 )
@@ -195,8 +196,15 @@ func (s *AIService) reloadEngine(cfg *AIConfig) error {
 }
 
 func (s *AIService) SaveConfig(cfg AIConfig) error {
+	return s.saveConfig(cfg, false)
+}
+
+func (s *AIService) saveConfig(cfg AIConfig, reset bool) error {
 	runtimeAPIKey := cfg.APIKey
-	if cfg.APIKey != "" && cfg.APIKeyEncrypted == "" {
+
+	// Always re-encrypt when plaintext is present so stale ciphertext cannot leave
+	// a new key persisted in cleartext beside the old encrypted value.
+	if cfg.APIKey != "" {
 		encrypted, err := s.configService.encryptAPIKey(cfg.APIKey)
 		if err != nil {
 			return fmt.Errorf("encrypt api key failed: %w", err)
@@ -204,24 +212,107 @@ func (s *AIService) SaveConfig(cfg AIConfig) error {
 		cfg.APIKeyEncrypted = encrypted
 		cfg.APIKey = ""
 	}
+	if cfg.WebSearch.APIKey != "" {
+		encrypted, err := s.configService.encryptAPIKey(cfg.WebSearch.APIKey)
+		if err != nil {
+			return fmt.Errorf("encrypt web search api key failed: %w", err)
+		}
+		cfg.WebSearch.APIKeyEncrypted = encrypted
+		cfg.WebSearch.APIKey = ""
+	}
+	if !reset {
+		prev, prevErr := s.GetConfig()
+		// Preserve existing ciphertext when the UI leaves the key blank.
+		if cfg.APIKey == "" && cfg.APIKeyEncrypted == "" && prevErr == nil && prev != nil {
+			cfg.APIKeyEncrypted = prev.APIKeyEncrypted
+		}
+		// Search keys are provider-scoped: never reuse another vendor's ciphertext.
+		if cfg.WebSearch.APIKey == "" && cfg.WebSearch.APIKeyEncrypted == "" &&
+			prevErr == nil && prev != nil &&
+			cfg.WebSearch.Provider == prev.WebSearch.Provider &&
+			tool.ValidSearchProvider(cfg.WebSearch.Provider) {
+			cfg.WebSearch.APIKeyEncrypted = prev.WebSearch.APIKeyEncrypted
+		}
+	}
+
+	// Unconfigured provider must not keep a usable encrypted key on disk.
+	if !tool.ValidSearchProvider(cfg.WebSearch.Provider) {
+		cfg.WebSearch.Provider = ""
+		cfg.WebSearch.APIKey = ""
+		cfg.WebSearch.APIKeyEncrypted = ""
+	}
+
+	cfg.Filesystem.AllowedDirs = tool.SanitizeAllowedDirs(cfg.Filesystem.AllowedDirs)
+
 	if err := s.configService.saveAI(cfg); err != nil {
 		return err
 	}
 	if runtimeAPIKey != "" {
 		cfg.APIKey = runtimeAPIKey
 	}
+	// Web search keys stay on the Chat RunDeps path only — not in Genkit engine config.
 	return s.reloadEngine(&cfg)
 }
 
 func (s *AIService) ResetConfig() error {
-	return s.SaveConfig(AIConfig{
+	return s.saveConfig(AIConfig{
 		Enabled: false, Provider: ai.ProviderOllama, Model: "llama3.2",
 		Endpoint: "http://localhost:11434", Temperature: 0.7, MaxTokens: 2048,
 		EchoSSHCommands: false, MaxAgentTurns: ai.DefaultMaxAgentTurns,
-	})
+		Filesystem: ai.FileSystemConfig{AllowedDirs: nil},
+		WebSearch:  ai.WebSearchConfig{},
+	}, true)
+}
+
+// ResetToolsConfig clears filesystem allowlist and web search settings only.
+func (s *AIService) ResetToolsConfig() error {
+	cfg, err := s.GetConfig()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return nil
+	}
+	out := *cfg
+	out.APIKey = ""
+	out.Filesystem = ai.FileSystemConfig{}
+	out.WebSearch = ai.WebSearchConfig{}
+	// reset=true skips key-preserve so cleared WebSearch stays empty; LLM ciphertext
+	// remains on out from GetConfig.
+	return s.saveConfig(out, true)
 }
 
 func (s *AIService) GetProviders() []ai.ProviderInfo { return ai.GetAllProviders() }
+
+func (s *AIService) GetWebSearchProviders() []tool.SearchProviderInfo {
+	return tool.GetAllSearchProviders()
+}
+
+// ValidateAllowedDir checks that path is an existing local directory and returns its absolute form.
+func (s *AIService) ValidateAllowedDir(path string) (string, error) {
+	return tool.ValidateAllowedDir(path)
+}
+
+func (s *AIService) resolveWebSearchRuntime(cfg *AIConfig) (tool.WebSearchRuntime, error) {
+	if cfg == nil || !tool.ValidSearchProvider(cfg.WebSearch.Provider) {
+		return tool.WebSearchRuntime{}, nil
+	}
+	key := strings.TrimSpace(cfg.WebSearch.APIKey)
+	if key == "" && cfg.WebSearch.APIKeyEncrypted != "" {
+		decrypted, err := s.configService.decryptAPIKey(cfg.WebSearch.APIKeyEncrypted)
+		if err != nil {
+			return tool.WebSearchRuntime{}, err
+		}
+		key = decrypted
+	}
+	if key == "" {
+		return tool.WebSearchRuntime{}, nil
+	}
+	return tool.WebSearchRuntime{
+		Provider: cfg.WebSearch.Provider,
+		APIKey:   key,
+	}, nil
+}
 
 func (s *AIService) CreateSession() (*AISession, error) {
 	session := &database.AISession{Title: "新会话"}
@@ -342,12 +433,26 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 
 	linkID, sshCtx, remoteInfo := s.resolveSSHContext(req.SSHContext)
 	enableSSH := linkID != ""
+	allowDirs := cfg.EffectiveAllowedDirs()
+	webSearch, err := s.resolveWebSearchRuntime(cfg)
+	if err != nil {
+		return nil, err
+	}
+	enableFS := len(allowDirs) > 0
+	enableWebSearch := webSearch.APIKey != "" && tool.ValidSearchProvider(webSearch.Provider)
 	aiReq := &ai.AgentRequest{
-		Messages:     messages,
-		NewMessage:   newMessage,
-		SystemPrompt: ai.BuildSystemPrompt(sshCtx, remoteInfo, enableSSH),
-		EnableSSH:    enableSSH,
-		LinkID:       linkID,
+		Messages:   messages,
+		NewMessage: newMessage,
+		SystemPrompt: ai.BuildSystemPromptOpts(ai.PromptOptions{
+			SSH:             sshCtx,
+			Remote:          remoteInfo,
+			EnableSSH:       enableSSH,
+			EnableFS:        enableFS,
+			AllowDirs:       allowDirs,
+			EnableWebSearch: enableWebSearch,
+		}),
+		EnableSSH: enableSSH,
+		LinkID:    linkID,
 	}
 	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil && len(messages) == 0 && (session.Title == "" || session.Title == "新会话") {
 		title := []rune(newMessage)
@@ -400,16 +505,20 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}()
 
 	host := &aiHost{svc: s, run: run}
-	deps := ai.ToolDeps{
-		LinkID:           linkID,
-		SSH:              host,
-		Approval:         host,
-		MarkSSHApproval:  host.MarkSSHApproval,
-		ArmSSHExecCancel: host.ArmSSHExecCancel,
-		OnCheckpoint:     persister.Checkpoint,
+	rd := ai.RunDeps{
+		Tools: tool.Deps{
+			LinkID:           linkID,
+			SSH:              host,
+			Approval:         host,
+			MarkSSHApproval:  host.MarkSSHApproval,
+			ArmSSHExecCancel: host.ArmSSHExecCancel,
+			AllowedDirs:      allowDirs,
+			WebSearch:        webSearch,
+		},
+		OnCheckpoint: persister.Checkpoint,
 	}
 
-	aiResp, err := s.engine.Run(ctx, aiReq, deps, func(ev ai.StreamEvent) error {
+	aiResp, err := s.engine.Run(ctx, aiReq, rd, func(ev ai.StreamEvent) error {
 		if ev.Type == ai.EventTextDelta && ev.Delta != "" {
 			persister.UpsertStreamingText(ev.Delta)
 		}

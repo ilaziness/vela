@@ -1,7 +1,45 @@
 import { create } from 'zustand';
 import { AIConfig, AIService } from '../../bindings/github.com/ilaziness/vela/services';
 import { Provider } from "../../bindings/github.com/ilaziness/vela/internal/ai/models";
+import { SearchProvider } from "../../bindings/github.com/ilaziness/vela/internal/ai/tool/models";
 import { parseCallServiceError } from '../func/service';
+
+export interface SearchProviderRow {
+  name: string;
+  label: string;
+}
+
+/** Mirrors internal/ai/tool.GetAllSearchProviders — always available even if RPC fails. */
+export const DEFAULT_WEB_SEARCH_PROVIDERS: SearchProviderRow[] = [
+  { name: SearchProvider.SearchTavily, label: "Tavily" },
+  { name: SearchProvider.SearchBrave, label: "Brave Search" },
+  { name: SearchProvider.SearchSerper, label: "Serper (Google)" },
+  { name: SearchProvider.SearchDeepseek, label: "DeepSeek" },
+  { name: SearchProvider.SearchYuanbao, label: "元宝搜索" },
+  { name: SearchProvider.SearchBocha, label: "博查" },
+  { name: SearchProvider.SearchMetaso, label: "秘塔" },
+];
+
+function knownSearchProvider(p: string | undefined): SearchProvider {
+  if (p && DEFAULT_WEB_SEARCH_PROVIDERS.some((row) => row.name === p)) {
+    return p as SearchProvider;
+  }
+  return SearchProvider.$zero;
+}
+
+function normalizeLoadedConfig(config: AIConfig | null | undefined): AIConfig {
+  return {
+    ...defaultConfig,
+    ...(config || {}),
+    api_key: '',
+    filesystem: { allowed_dirs: config?.filesystem?.allowed_dirs ?? [] },
+    web_search: {
+      provider: knownSearchProvider(config?.web_search?.provider),
+      api_key: '',
+      api_key_encrypted: config?.web_search?.api_key_encrypted,
+    },
+  };
+}
 
 interface AIConfigState {
   config: AIConfig | null;
@@ -9,11 +47,14 @@ interface AIConfigState {
   error: string | null;
   providers: { name: string; label: string; needs_api_key: boolean; needs_endpoint: boolean }[];
   isLoadingProviders: boolean;
+  webSearchProviders: SearchProviderRow[];
 
   loadConfig: () => Promise<void>;
   saveConfig: (config: AIConfig) => Promise<void>;
   resetConfig: () => Promise<void>;
+  resetToolsConfig: () => Promise<void>;
   loadProviders: () => Promise<void>;
+  loadWebSearchProviders: () => Promise<void>;
   updatePartialConfig: (partial: Partial<AIConfig>) => void;
   clearError: () => void;
 }
@@ -27,6 +68,8 @@ const defaultConfig: AIConfig = {
   max_tokens: 2048,
   echo_ssh_commands: false,
   max_agent_turns: 30,
+  filesystem: { allowed_dirs: [] },
+  web_search: { provider: SearchProvider.$zero },
 };
 
 export const useAIConfigStore = create<AIConfigState>((set) => ({
@@ -35,12 +78,13 @@ export const useAIConfigStore = create<AIConfigState>((set) => ({
   error: null,
   providers: [],
   isLoadingProviders: false,
+  webSearchProviders: DEFAULT_WEB_SEARCH_PROVIDERS,
 
   loadConfig: async () => {
     set({ isLoading: true, error: null });
     try {
       const config = await AIService.GetConfig();
-      set({ config: config || defaultConfig, isLoading: false });
+      set({ config: normalizeLoadedConfig(config), isLoading: false });
     } catch (err) {
       set({ error: parseCallServiceError(err), isLoading: false });
     }
@@ -56,15 +100,39 @@ export const useAIConfigStore = create<AIConfigState>((set) => ({
     }
   },
 
+  loadWebSearchProviders: async () => {
+    try {
+      const providers = await AIService.GetWebSearchProviders();
+      const mapped = (providers || [])
+        .map((p) => ({
+          name: String(p?.name ?? ""),
+          label: p?.label ?? "",
+        }))
+        .filter((p) => p.name !== "");
+      set({
+        webSearchProviders: mapped.length > 0 ? mapped : DEFAULT_WEB_SEARCH_PROVIDERS,
+      });
+    } catch (_err) {
+      set({ webSearchProviders: DEFAULT_WEB_SEARCH_PROVIDERS });
+    }
+  },
+
   saveConfig: async (config: AIConfig) => {
     await AIService.SaveConfig(config);
-    set({ config, error: null });
+    const saved = await AIService.GetConfig();
+    set({ config: normalizeLoadedConfig(saved), error: null });
   },
 
   resetConfig: async () => {
     await AIService.ResetConfig();
     const config = await AIService.GetConfig();
-    set({ config: config || defaultConfig, error: null });
+    set({ config: normalizeLoadedConfig(config), error: null });
+  },
+
+  resetToolsConfig: async () => {
+    await AIService.ResetToolsConfig();
+    const config = await AIService.GetConfig();
+    set({ config: normalizeLoadedConfig(config), error: null });
   },
 
   updatePartialConfig: (partial: Partial<AIConfig>) => {

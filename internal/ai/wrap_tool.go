@@ -8,10 +8,12 @@ import (
 	"uuid"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
+
+	"github.com/ilaziness/vela/internal/ai/tool"
 )
 
 // toolStreamMiddleware emits stream events and requires approval for MCP tools
-// (everything except SSH/plan/use_skill, which handle themselves or need no approval).
+// (everything except built-ins / use_skill, which handle themselves or need no approval).
 type toolStreamMiddleware struct{}
 
 func (t toolStreamMiddleware) Name() string { return "vela/tool-stream" }
@@ -32,12 +34,11 @@ func wrapToolCall(
 		return next(ctx, params)
 	}
 	name := params.Tool.Name()
-	// Built-in tools: SSH/plan emit their own stream events; use_skill needs no approval UI.
-	if name == ToolRunSSHCommand || name == ToolUpsertPlan || name == useSkillToolName {
+	if tool.IsBuiltin(name) || name == useSkillToolName {
 		return next(ctx, params)
 	}
 
-	deps := depsFromCtx(ctx)
+	deps := tool.FromCtx(ctx)
 	callID := uuid.New().String()
 	if params.Request != nil && params.Request.Ref != "" {
 		callID = params.Request.Ref
@@ -48,7 +49,6 @@ func wrapToolCall(
 	emitDeps(deps, StreamEvent{Type: EventToolInputStart, ToolCallID: callID, ToolName: name})
 	emitDeps(deps, StreamEvent{Type: EventToolInputAvailable, ToolCallID: callID, ToolName: name, Input: inJSON})
 
-	// MCP (and any other non-builtin) tools always require user approval.
 	if deps.Approval == nil {
 		msg := "MCP tool approval unavailable"
 		emitDeps(deps, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: name, ErrorText: msg})
@@ -116,7 +116,7 @@ func multipartOutput(resp *genkitAI.MultipartToolResponse) any {
 	return resp
 }
 
-func emitDeps(deps ToolDeps, ev StreamEvent) {
+func emitDeps(deps tool.Deps, ev StreamEvent) {
 	if deps.Emit != nil {
 		deps.Emit(ev)
 	}

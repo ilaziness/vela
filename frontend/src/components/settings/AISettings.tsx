@@ -27,9 +27,15 @@ import {
 import RefreshIcon from "@mui/icons-material/Refresh";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import AddIcon from "@mui/icons-material/Add";
+import ClearIcon from "@mui/icons-material/Clear";
 import { Provider } from "../../../bindings/github.com/ilaziness/vela/internal/ai/models";
+import { SearchProvider } from "../../../bindings/github.com/ilaziness/vela/internal/ai/tool/models";
 import { AIService } from "../../../bindings/github.com/ilaziness/vela/services";
-import type { MCPServerInfo, SkillInfo } from "../../../bindings/github.com/ilaziness/vela/internal/ai/models";
+import type {
+  MCPServerInfo,
+  SkillInfo,
+} from "../../../bindings/github.com/ilaziness/vela/internal/ai/models";
 import { useAIConfigStore } from "../../stores/aiConfig";
 import { useMessageStore } from "../../stores/message";
 import { parseCallServiceError } from "../../func/service";
@@ -37,9 +43,11 @@ import FormRow from "../FormRow";
 
 const MSG_TITLE = "AI 助手设置";
 const MSG_TAB_GENERAL = "常规";
+const MSG_TAB_TOOLS = "工具";
 const MSG_SAVE_OK = "AI 配置保存成功";
 const MSG_SAVE_FAIL = "AI 配置保存失败";
 const MSG_RESET_OK = "已重置为默认配置";
+const MSG_RESET_TOOLS_OK = "已重置工具配置";
 const MSG_RESET_FAIL = "重置配置失败";
 const MSG_ENABLE_AI = "启用 AI 助手";
 const MSG_ENABLED = "已启用";
@@ -49,10 +57,13 @@ const MSG_SELECT_PROVIDER = "选择提供商";
 const MSG_MODEL = "模型";
 const MSG_ENDPOINT = "API 端点";
 const MSG_MAX_TOKENS = "最大 Token 数";
-const MSG_MAX_TOKENS_HELP = "限制单次回复的最大生成长度；数值越大可输出越长，但响应更慢、占用更多资源。";
+const MSG_MAX_TOKENS_HELP =
+  "限制单次回复的最大生成长度；数值越大可输出越长，但响应更慢、占用更多资源。";
 const MSG_ECHO = "命令回显到终端";
-const MSG_ECHO_HELP = "将 AI 批准执行的命令注解显示到当前 SSH 终端（默认关闭；不会重复执行）";
+const MSG_ECHO_HELP =
+  "将 AI 批准执行的命令注解显示到当前 SSH 终端（默认关闭；不会重复执行）";
 const MSG_RESET = "重置为默认";
+const MSG_RESET_TOOLS = "重置工具配置";
 const MSG_SAVE = "保存";
 const MSG_AVAILABLE = "可用";
 const MSG_UNAVAILABLE = "不可用";
@@ -65,9 +76,63 @@ const MSG_OPEN_SKILLS = "打开 skills 目录";
 const MSG_SKILLS_EMPTY = "暂无 Skill，请在 skills 目录添加后刷新。";
 const MSG_SKILL_ON = "已启用 Skill";
 const MSG_SKILL_OFF = "已禁用 Skill";
+const MSG_FS_TITLE = "本地文件系统";
+const MSG_FS_HELP =
+  "配置允许访问的目录后，AI 才可使用读写/列表工具；每次操作都需要批准。";
+const MSG_FS_EMPTY = "未配置允许目录时，本地文件工具不可用。";
+const MSG_FS_ADD = "添加";
+const MSG_FS_DIR = "允许目录";
+const MSG_FS_DIR_REQUIRED = "请先输入绝对路径的目录";
+const MSG_SEARCH_TITLE = "网络搜索";
+const MSG_SEARCH_HELP =
+  "选择提供商并填写 API Key 后启用 web_search；未配置则工具不可用";
+const MSG_SEARCH_PROVIDER = "搜索提供商";
+const MSG_SEARCH_NONE = "未配置（禁用）";
+
+/** MUI Select 对空字符串 value 支持不佳，用哨兵表示「未配置」。 */
+const SEARCH_PROVIDER_NONE = "__none__";
+
+/** Shown in password fields when a key is already stored (plaintext is never returned). */
+const API_KEY_MASK = "••••••••";
+
+function SecretKeyField({
+  value,
+  encrypted,
+  onChange,
+}: {
+  value?: string;
+  encrypted?: string;
+  onChange: (next: string) => void;
+}) {
+  const hasSaved = Boolean(encrypted);
+  const display = value || (hasSaved ? API_KEY_MASK : "");
+  return (
+    <TextField
+      fullWidth
+      size="small"
+      type="password"
+      autoComplete="new-password"
+      value={display}
+      placeholder={hasSaved ? API_KEY_MASK : "API Key"}
+      onFocus={(e) => {
+        if (!value && hasSaved) {
+          e.target.select();
+        }
+      }}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (next === API_KEY_MASK) {
+          return;
+        }
+        onChange(next);
+      }}
+    />
+  );
+}
 
 enum AISettingsTab {
   General = "general",
+  Tools = "tools",
   MCP = "mcp",
   Skills = "skills",
 }
@@ -79,10 +144,13 @@ const AISettings: React.FC = () => {
     error,
     providers,
     isLoadingProviders,
+    webSearchProviders,
     loadConfig,
     saveConfig,
     resetConfig,
+    resetToolsConfig,
     loadProviders,
+    loadWebSearchProviders,
     updatePartialConfig,
     clearError,
   } = useAIConfigStore();
@@ -93,6 +161,7 @@ const AISettings: React.FC = () => {
   const [tab, setTab] = useState<AISettingsTab>(AISettingsTab.General);
   const [mcpVisited, setMcpVisited] = useState(false);
   const [skillsVisited, setSkillsVisited] = useState(false);
+  const [newAllowDir, setNewAllowDir] = useState("");
 
   useEffect(() => {
     if (tab === AISettingsTab.MCP) setMcpVisited(true);
@@ -102,7 +171,8 @@ const AISettings: React.FC = () => {
   useEffect(() => {
     loadConfig();
     loadProviders();
-  }, [loadConfig, loadProviders]);
+    loadWebSearchProviders();
+  }, [loadConfig, loadProviders, loadWebSearchProviders]);
 
   const handleSave = async () => {
     if (!config) return;
@@ -129,7 +199,61 @@ const AISettings: React.FC = () => {
     }
   };
 
+  const handleResetTools = async () => {
+    setResetting(true);
+    try {
+      await resetToolsConfig();
+      successMessage(MSG_RESET_TOOLS_OK);
+    } catch (err) {
+      errorMessage(parseCallServiceError(err) || MSG_RESET_FAIL);
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const currentProvider = providers.find((p) => p.name === config?.provider);
+  const currentSearchProvider = webSearchProviders.find(
+    (p) => p.name === config?.web_search?.provider,
+  );
+  const allowedDirs = config?.filesystem?.allowed_dirs ?? [];
+
+  const setAllowedDirs = (dirs: string[]) => {
+    updatePartialConfig({
+      filesystem: { allowed_dirs: dirs },
+    });
+  };
+
+  const addAllowedDir = async () => {
+    const dir = newAllowDir.trim();
+    if (!dir) {
+      errorMessage(MSG_FS_DIR_REQUIRED);
+      return;
+    }
+    try {
+      const abs = await AIService.ValidateAllowedDir(dir);
+      const normalized = (abs || "").trim();
+      if (!normalized) {
+        errorMessage(MSG_FS_DIR_REQUIRED);
+        return;
+      }
+      const win = navigator.userAgent.includes("Windows");
+      const already = allowedDirs.some((d) =>
+        win ? d.toLowerCase() === normalized.toLowerCase() : d === normalized,
+      );
+      if (already) {
+        setNewAllowDir("");
+        return;
+      }
+      setAllowedDirs([...allowedDirs, normalized]);
+      setNewAllowDir("");
+    } catch (err) {
+      errorMessage(parseCallServiceError(err));
+    }
+  };
+
+  const removeAllowedDir = (dir: string) => {
+    setAllowedDirs(allowedDirs.filter((d) => d !== dir));
+  };
 
   if (isLoading || !config) {
     return (
@@ -152,6 +276,7 @@ const AISettings: React.FC = () => {
           sx={{ px: 1, borderBottom: 1, borderColor: "divider" }}
         >
           <Tab label={MSG_TAB_GENERAL} value={AISettingsTab.General} />
+          <Tab label={MSG_TAB_TOOLS} value={AISettingsTab.Tools} />
           <Tab label="MCP" value={AISettingsTab.MCP} />
           <Tab label="Skills" value={AISettingsTab.Skills} />
         </Tabs>
@@ -171,7 +296,9 @@ const AISettings: React.FC = () => {
                     control={
                       <Switch
                         checked={config.enabled}
-                        onChange={(e) => updatePartialConfig({ enabled: e.target.checked })}
+                        onChange={(e) =>
+                          updatePartialConfig({ enabled: e.target.checked })
+                        }
                       />
                     }
                     label={config.enabled ? MSG_ENABLED : MSG_DISABLED}
@@ -187,7 +314,9 @@ const AISettings: React.FC = () => {
                       value={config.provider}
                       label={MSG_SELECT_PROVIDER}
                       onChange={(e) =>
-                        updatePartialConfig({ provider: e.target.value as Provider })
+                        updatePartialConfig({
+                          provider: e.target.value as Provider,
+                        })
                       }
                       disabled={isLoadingProviders}
                     >
@@ -205,7 +334,9 @@ const AISettings: React.FC = () => {
                     fullWidth
                     size="small"
                     value={config.model}
-                    onChange={(e) => updatePartialConfig({ model: e.target.value })}
+                    onChange={(e) =>
+                      updatePartialConfig({ model: e.target.value })
+                    }
                     placeholder="llama3.2, gpt-4"
                   />
                 </FormRow>
@@ -216,7 +347,9 @@ const AISettings: React.FC = () => {
                       fullWidth
                       size="small"
                       value={config.endpoint}
-                      onChange={(e) => updatePartialConfig({ endpoint: e.target.value })}
+                      onChange={(e) =>
+                        updatePartialConfig({ endpoint: e.target.value })
+                      }
                       placeholder="http://localhost:11434"
                     />
                   </FormRow>
@@ -224,13 +357,10 @@ const AISettings: React.FC = () => {
 
                 {currentProvider?.needs_api_key && (
                   <FormRow label="API Key">
-                    <TextField
-                      fullWidth
-                      size="small"
-                      type="password"
+                    <SecretKeyField
                       value={config.api_key}
-                      onChange={(e) => updatePartialConfig({ api_key: e.target.value })}
-                      placeholder="API Key"
+                      encrypted={config.api_key_encrypted}
+                      onChange={(api_key) => updatePartialConfig({ api_key })}
                     />
                   </FormRow>
                 )}
@@ -263,7 +393,9 @@ const AISettings: React.FC = () => {
                     value={config.max_tokens}
                     onChange={(e) => {
                       const value = parseInt(e.target.value, 10);
-                      updatePartialConfig({ max_tokens: isNaN(value) ? 0 : value });
+                      updatePartialConfig({
+                        max_tokens: isNaN(value) ? 0 : value,
+                      });
                     }}
                     slotProps={{ htmlInput: { min: 100, max: 8192 } }}
                     helperText={MSG_MAX_TOKENS_HELP}
@@ -278,7 +410,9 @@ const AISettings: React.FC = () => {
                       <Switch
                         checked={Boolean(config.echo_ssh_commands)}
                         onChange={(e) =>
-                          updatePartialConfig({ echo_ssh_commands: e.target.checked })
+                          updatePartialConfig({
+                            echo_ssh_commands: e.target.checked,
+                          })
                         }
                       />
                     }
@@ -286,16 +420,193 @@ const AISettings: React.FC = () => {
                   />
                 </FormRow>
 
-                <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2, mt: 3 }}>
-                  <Button variant="outlined" onClick={handleReset} loading={resetting}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 2,
+                    mt: 3,
+                  }}
+                >
+                  <Button
+                    variant="outlined"
+                    onClick={handleReset}
+                    loading={resetting}
+                  >
                     {MSG_RESET}
                   </Button>
-                  <Button variant="contained" onClick={handleSave} loading={saving} disabled={!config}>
+                  <Button
+                    variant="contained"
+                    onClick={handleSave}
+                    loading={saving}
+                    disabled={!config}
+                  >
                     {MSG_SAVE}
                   </Button>
                 </Box>
               </Stack>
             </>
+          )}
+
+          {tab === AISettingsTab.Tools && (
+            <Stack spacing={2}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                {MSG_FS_TITLE}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {MSG_FS_HELP}
+              </Typography>
+              {allowedDirs.length === 0 && (
+                <Alert severity="info">{MSG_FS_EMPTY}</Alert>
+              )}
+              {allowedDirs.length > 0 && (
+                <List dense disablePadding>
+                  {allowedDirs.map((dir) => (
+                    <ListItem
+                      key={dir}
+                      secondaryAction={
+                        <IconButton
+                          edge="end"
+                          aria-label="delete"
+                          onClick={() => removeAllowedDir(dir)}
+                        >
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      }
+                    >
+                      <ListItemText
+                        primary={dir}
+                        slotProps={{
+                          primary: { sx: { wordBreak: "break-all" } },
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+              <Box sx={{ display: "flex", gap: 1, width: "100%" }}>
+                <TextField
+                  size="small"
+                  label={MSG_FS_DIR}
+                  value={newAllowDir}
+                  onChange={(e) => setNewAllowDir(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addAllowedDir();
+                    }
+                  }}
+                  placeholder="绝对路径，如 D:\\work 或 /home/user/projects"
+                  sx={{ flex: 1, minWidth: 0 }}
+                />
+                <Button
+                  type="button"
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={addAllowedDir}
+                  sx={{
+                    flexShrink: 0,
+                    whiteSpace: "nowrap",
+                    alignSelf: "center",
+                  }}
+                >
+                  {MSG_FS_ADD}
+                </Button>
+              </Box>
+
+              <Divider sx={{ my: 1 }} />
+
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                {MSG_SEARCH_TITLE}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {MSG_SEARCH_HELP}
+              </Typography>
+
+              <FormRow label={MSG_SEARCH_PROVIDER}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>{MSG_SELECT_PROVIDER}</InputLabel>
+                  <Select
+                    value={
+                      config.web_search?.provider
+                        ? String(config.web_search.provider)
+                        : SEARCH_PROVIDER_NONE
+                    }
+                    label={MSG_SELECT_PROVIDER}
+                    onChange={(e) => {
+                      const raw = String(e.target.value);
+                      const provider =
+                        raw === SEARCH_PROVIDER_NONE
+                          ? SearchProvider.$zero
+                          : (raw as SearchProvider);
+                      // Provider-scoped keys: never keep another vendor's ciphertext.
+                      updatePartialConfig({
+                        web_search: {
+                          provider,
+                          api_key: "",
+                          api_key_encrypted: undefined,
+                        },
+                      });
+                    }}
+                  >
+                    <MenuItem value={SEARCH_PROVIDER_NONE}>
+                      {MSG_SEARCH_NONE}
+                    </MenuItem>
+                    {webSearchProviders.map((provider) => (
+                      <MenuItem key={provider.name} value={provider.name}>
+                        {provider.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </FormRow>
+
+              {currentSearchProvider && (
+                <FormRow label="API Key">
+                  <SecretKeyField
+                    value={config.web_search?.api_key}
+                    encrypted={config.web_search?.api_key_encrypted}
+                    onChange={(api_key) =>
+                      updatePartialConfig({
+                        web_search: {
+                          ...config.web_search,
+                          provider:
+                            config.web_search?.provider ?? SearchProvider.$zero,
+                          api_key,
+                          api_key_encrypted:
+                            config.web_search?.api_key_encrypted,
+                        },
+                      })
+                    }
+                  />
+                </FormRow>
+              )}
+
+              <Box
+                sx={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 2,
+                  mt: 3,
+                }}
+              >
+                <Button
+                  variant="outlined"
+                  onClick={handleResetTools}
+                  loading={resetting}
+                >
+                  {MSG_RESET_TOOLS}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleSave}
+                  loading={saving}
+                  disabled={!config}
+                >
+                  {MSG_SAVE}
+                </Button>
+              </Box>
+            </Stack>
           )}
 
           {mcpVisited && (
@@ -304,7 +615,9 @@ const AISettings: React.FC = () => {
             </Box>
           )}
           {skillsVisited && (
-            <Box sx={{ display: tab === AISettingsTab.Skills ? "block" : "none" }}>
+            <Box
+              sx={{ display: tab === AISettingsTab.Skills ? "block" : "none" }}
+            >
               <SkillsSettingsPanel />
             </Box>
           )}
@@ -413,11 +726,21 @@ function MCPSettingsPanel() {
   return (
     <>
       <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
-        <Button startIcon={<OpenInNewIcon />} variant="outlined" onClick={() => void onOpen()}>
+        <Button
+          startIcon={<OpenInNewIcon />}
+          variant="outlined"
+          onClick={() => void onOpen()}
+        >
           {MSG_OPEN_MCP}
         </Button>
         <Button
-          startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
+          startIcon={
+            loading ? (
+              <CircularProgress size={16} color="inherit" />
+            ) : (
+              <RefreshIcon />
+            )
+          }
           variant="outlined"
           onClick={() => void onRefresh()}
           disabled={loading || toggling}
@@ -443,7 +766,11 @@ function MCPSettingsPanel() {
                 />
               }
             >
-              <AvailabilityDot enabled={s.enabled} available={s.available} error={s.error} />
+              <AvailabilityDot
+                enabled={s.enabled}
+                available={s.available}
+                error={s.error}
+              />
               <ListItemText
                 primary={s.name}
                 secondary={[s.transport, s.summary].filter(Boolean).join(" · ")}
@@ -511,11 +838,21 @@ function SkillsSettingsPanel() {
   return (
     <>
       <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
-        <Button startIcon={<FolderOpenIcon />} variant="outlined" onClick={() => void onOpenDir()}>
+        <Button
+          startIcon={<FolderOpenIcon />}
+          variant="outlined"
+          onClick={() => void onOpenDir()}
+        >
           {MSG_OPEN_SKILLS}
         </Button>
         <Button
-          startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
+          startIcon={
+            loading ? (
+              <CircularProgress size={16} color="inherit" />
+            ) : (
+              <RefreshIcon />
+            )
+          }
           variant="outlined"
           onClick={() => void load()}
           disabled={loading || busyName !== ""}
@@ -538,7 +875,11 @@ function SkillsSettingsPanel() {
               sx={{ px: 0, pr: 12 }}
               secondaryAction={
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                  <IconButton edge="end" aria-label="open" onClick={() => void onOpenSkill(s.name)}>
+                  <IconButton
+                    edge="end"
+                    aria-label="open"
+                    onClick={() => void onOpenSkill(s.name)}
+                  >
                     <FolderOpenIcon fontSize="small" />
                   </IconButton>
                   <Switch
@@ -550,7 +891,10 @@ function SkillsSettingsPanel() {
                 </Box>
               }
             >
-              <ListItemText primary={s.name} secondary={s.description || undefined} />
+              <ListItemText
+                primary={s.name}
+                secondary={s.description || undefined}
+              />
             </ListItem>
           ))}
         </List>
