@@ -261,6 +261,15 @@ func TestApplyStreamedTextOnCancel(t *testing.T) {
 	if got.Content != "phase2" || len(got.Turn) != 2 || got.Turn[0].Content != "phase1" {
 		t.Fatalf("must not overwrite multi-turn model text with full stream: %+v", got)
 	}
+
+	partial := &AgentResponse{
+		Content: "hello",
+		Turn:    []ChatMessage{{Role: RoleModel, Content: "hello", Parts: UserTextPartsJSON("hello")}},
+	}
+	got = applyStreamedText(partial, "hello world")
+	if got.Content != "hello world" || got.Turn[0].Content != "hello world" {
+		t.Fatalf("should extend last text model by streamed prefix: %+v", got)
+	}
 }
 
 func TestTruncateEcho(t *testing.T) {

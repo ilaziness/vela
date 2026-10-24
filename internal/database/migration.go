@@ -32,6 +32,7 @@ var migrations = []Migration{
 	{Version: 13, Name: "add ai_messages status", Up: migrateAddAIMessageStatus},
 	{Version: 14, Name: "add sftp transfer overwrite", Up: migrateAddSftpTransferOverwrite},
 	{Version: 15, Name: "add bookmark charset", Up: migrateAddBookmarkCharset},
+	{Version: 16, Name: "add ai_messages run_id", Up: migrateAddAIMessageRunID},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -419,6 +420,24 @@ func migrateAddAIMessageStatus(db *sql.DB, logger *zap.Logger) error {
 	}
 	if err != nil {
 		return fmt.Errorf("check column ai_messages.status failed: %w", err)
+	}
+	return nil
+}
+
+// migrateAddAIMessageRunID scopes in-flight model/tool rows to a Chat run (idempotent).
+func migrateAddAIMessageRunID(db *sql.DB, logger *zap.Logger) error {
+	var columnName string
+	err := db.QueryRow(`SELECT name FROM pragma_table_info('ai_messages') WHERE name = 'run_id'`).Scan(&columnName)
+	if err == sql.ErrNoRows {
+		if _, err := db.Exec(`ALTER TABLE ai_messages ADD COLUMN run_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add column ai_messages.run_id failed: %w", err)
+		}
+		logger.Debug("migration: added ai_messages.run_id column")
+	} else if err != nil {
+		return fmt.Errorf("check column ai_messages.run_id failed: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_messages_session_run ON ai_messages(session_id, run_id)`); err != nil {
+		return fmt.Errorf("create idx_ai_messages_session_run failed: %w", err)
 	}
 	return nil
 }

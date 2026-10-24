@@ -27,6 +27,9 @@ type ToolDeps struct {
 	SSH      SSHExecutor
 	Approval ApprovalGate
 	Emit     func(StreamEvent)
+	// OnCheckpoint receives the Genkit turn slice (History after promptLen) after each WrapGenerate.
+	// Optional; used by services for durable mid-run persistence. Tools must not call it.
+	OnCheckpoint func(turn []ChatMessage)
 }
 
 func withToolDeps(ctx context.Context, d ToolDeps) context.Context {

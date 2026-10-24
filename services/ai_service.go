@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"uuid"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
@@ -48,6 +50,7 @@ type AIMessage struct {
 	Content   string `json:"content"`
 	Parts     string `json:"parts"`
 	Status    string `json:"status"` // "" | cancelled | denied
+	RunID     string `json:"run_id,omitempty"`
 	Timestamp int64  `json:"timestamp"`
 }
 
@@ -92,6 +95,7 @@ type agentRun struct {
 	runID     string
 	cancel    context.CancelFunc
 	approvals map[string]chan approvalDecision
+	persister *turnPersister
 	mu        sync.Mutex
 }
 
@@ -272,10 +276,11 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	if sessionID == "" || newMessage == "" {
 		return nil, fmt.Errorf("session id and message are required")
 	}
-	// Clear pre-register cancel marks even when Chat fails before run registration.
-	if runID != "" {
-		defer s.clearCancelledRun(runID)
+	if runID == "" {
+		runID = uuid.New().String()
 	}
+	// Clear pre-register cancel marks even when Chat fails before run registration.
+	defer s.clearCancelledRun(runID)
 	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
 		return nil, err
 	}
@@ -298,21 +303,33 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 
 	_ = s.StopGeneration(sessionID)
+	// Let the previous run Finalize/seal before we build the next prompt, so history
+	// does not include an in-flight incomplete tool round from the superseded Chat.
+	// If it hangs past the wait, steal it: ForceFinalize + drop from map so orphan
+	// recovery cannot race a still-running Finalize on the same run_id.
+	s.waitSessionRunIdle(sessionID, 2*time.Second)
+	s.forceFinalizeSessionRun(sessionID)
+	s.sealOrphanRuns(sessionID)
 
 	history, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]ai.ChatMessage, len(history))
-	for i, msg := range history {
+	messages := make([]ai.ChatMessage, 0, len(history))
+	for _, msg := range history {
+		// Skip still-unsealed rows (defensive if a prior run hung past the wait).
+		if msg.RunID != "" {
+			continue
+		}
 		// Status is UI-only; Genkit replay uses role/content/parts.
-		messages[i] = ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts}
+		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
 	}
 	userMsg := &database.AIMessage{
 		SessionID: sessionID,
 		Role:      ai.RoleUser,
 		Content:   newMessage,
 		Parts:     ai.UserTextPartsJSON(newMessage),
+		RunID:     runID,
 		Timestamp: time.Now(),
 	}
 	if err := s.sessionRepo.CreateMessage(context.Background(), userMsg); err != nil {
@@ -328,7 +345,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		EnableSSH:    enableSSH,
 		LinkID:       linkID,
 	}
-	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil && len(history) == 0 && (session.Title == "" || session.Title == "新会话") {
+	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil && len(messages) == 0 && (session.Title == "" || session.Title == "新会话") {
 		title := []rune(newMessage)
 		if len(title) > 20 {
 			title = title[:20]
@@ -341,19 +358,24 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	run := &agentRun{runID: runID, cancel: cancel, approvals: make(map[string]chan approvalDecision)}
+	persister := newTurnPersister(s.sessionRepo, s.logger, sessionID, runID, userMsg.ID)
+	run := &agentRun{
+		runID:     runID,
+		cancel:    cancel,
+		approvals: make(map[string]chan approvalDecision),
+		persister: persister,
+	}
 	s.runsMu.Lock()
-	if runID != "" {
-		if _, ok := s.cancelled[runID]; ok {
-			s.runsMu.Unlock()
-			cancel()
-			s.logger.Info("AI generation stopped before start",
-				zap.String("sessionId", sessionID),
-				zap.String("runId", runID),
-			)
-			s.markMessageCancelled(sessionID, userMsg.ID)
-			return nil, ErrGenerationStopped
-		}
+	if _, ok := s.cancelled[runID]; ok {
+		s.runsMu.Unlock()
+		cancel()
+		s.logger.Info("AI generation stopped before start",
+			zap.String("sessionId", sessionID),
+			zap.String("runId", runID),
+		)
+		s.markMessageCancelled(sessionID, userMsg.ID)
+		_ = s.sessionRepo.SealRunMessages(context.Background(), sessionID, runID)
+		return nil, ErrGenerationStopped
 	}
 	s.runs[sessionID] = run
 	s.runsMu.Unlock()
@@ -374,12 +396,19 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 
 	host := &aiHost{svc: s, run: run, cfg: cfg}
 	deps := ai.ToolDeps{
-		LinkID:   linkID,
-		SSH:      host,
-		Approval: host,
+		LinkID:       linkID,
+		SSH:          host,
+		Approval:     host,
+		OnCheckpoint: persister.Checkpoint,
 	}
 
 	aiResp, err := s.engine.Run(ctx, aiReq, deps, func(ev ai.StreamEvent) error {
+		if ev.Type == ai.EventTextDelta && ev.Delta != "" {
+			persister.UpsertStreamingText(ev.Delta)
+		}
+		if !s.isCurrentRun(sessionID, run) {
+			return nil
+		}
 		if ev.Type != ai.EventTextDelta && ev.Type != ai.EventReasoningDelta {
 			s.logger.Info("ai stream",
 				zap.String("sessionId", sessionID),
@@ -388,7 +417,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 				zap.String("approvalId", ev.ApprovalID),
 			)
 		}
-		s.app.Event.Emit(EventAIStreamChunk, AIStreamChunkData{
+		s.emitAIStream(AIStreamChunkData{
 			SessionID:  sessionID,
 			Type:       ev.Type,
 			ID:         ev.ID,
@@ -404,19 +433,16 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			s.logger.Info("AI generation stopped", zap.String("sessionId", sessionID))
-			if s.isCurrentRun(sessionID, run) {
-				if _, perr := s.persistCancelledTurn(sessionID, userMsg.ID, aiResp); perr != nil {
-					s.logger.Error("persist stopped AI turn failed",
-						zap.String("sessionId", sessionID),
-						zap.Error(perr),
-					)
-				}
-			} else {
-				// Newer run replaced this one; skip turn persist to avoid interleaving,
-				// but still mark the user message so history matches live cancel UI.
-				s.markMessageCancelled(sessionID, userMsg.ID)
+		if isChatStopped(err, ctx) {
+			s.logger.Info("AI generation stopped",
+				zap.String("sessionId", sessionID),
+				zap.String("runId", runID),
+			)
+			if _, perr := persister.Finalize(aiResp, true); perr != nil {
+				s.logger.Error("persist stopped AI turn failed",
+					zap.String("sessionId", sessionID),
+					zap.Error(perr),
+				)
 			}
 			return nil, ErrGenerationStopped
 		}
@@ -426,32 +452,36 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			zap.String("error", msg),
 			zap.String("detail", err.Error()),
 		)
-		s.app.Event.Emit(EventAIStreamChunk, AIStreamChunkData{
-			SessionID: sessionID,
-			Type:      ai.EventTextDelta,
-			Delta:     msg,
-		})
 		if s.isCurrentRun(sessionID, run) {
-			if _, perr := s.persistTurn(sessionID, aiResp); perr != nil {
-				s.logger.Error("persist failed AI turn failed",
-					zap.String("sessionId", sessionID),
-					zap.Error(perr),
-				)
-			}
-			last := &database.AIMessage{
+			s.emitAIStream(AIStreamChunkData{
+				SessionID: sessionID,
+				Type:      ai.EventTextDelta,
+				Delta:     msg,
+			})
+		}
+		errResp := mergeErrorIntoResponse(aiResp, msg)
+		last, perr := persister.Finalize(errResp, false)
+		if perr != nil {
+			s.logger.Error("persist failed AI turn failed",
+				zap.String("sessionId", sessionID),
+				zap.Error(perr),
+			)
+			return nil, perr
+		}
+		if last == nil {
+			// Finalize sealed an empty turn; still return the public error for the UI.
+			last = &database.AIMessage{
 				SessionID: sessionID,
 				Role:      ai.RoleModel,
 				Content:   msg,
 				Parts:     ai.UserTextPartsJSON(msg),
 				Timestamp: time.Now(),
 			}
-			_ = s.sessionRepo.CreateMessage(context.Background(), last)
-			return &ChatResponse{Message: *toAIMessage(last)}, nil
 		}
-		return &ChatResponse{Message: AIMessage{SessionID: sessionID, Role: ai.RoleModel, Content: msg, Parts: "[]"}}, nil
+		return &ChatResponse{Message: *toAIMessage(last)}, nil
 	}
 
-	last, persistErr := s.persistIfCurrent(sessionID, run, aiResp)
+	last, persistErr := persister.Finalize(aiResp, false)
 	if persistErr != nil {
 		return nil, persistErr
 	}
@@ -465,27 +495,86 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	return &ChatResponse{Message: *toAIMessage(last)}, nil
 }
 
+func mergeErrorIntoResponse(resp *ai.AgentResponse, msg string) *ai.AgentResponse {
+	out := &ai.AgentResponse{}
+	if resp != nil {
+		out.Turn = append([]ai.ChatMessage(nil), resp.Turn...)
+		out.Content = resp.Content
+	}
+	if n := len(out.Turn); n > 0 && out.Turn[n-1].Role == ai.RoleModel && out.Turn[n-1].Content == msg {
+		out.Content = msg
+		return out
+	}
+	out.Turn = append(out.Turn, ai.ChatMessage{
+		Role:    ai.RoleModel,
+		Content: msg,
+		Parts:   ai.UserTextPartsJSON(msg),
+	})
+	out.Content = msg
+	return out
+}
+
+func isChatStopped(err error, ctx context.Context) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if ctx == nil {
+		return false
+	}
+	return errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
 func (s *AIService) isCurrentRun(sessionID string, run *agentRun) bool {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
 	return run != nil && s.runs[sessionID] == run
 }
 
-func (s *AIService) persistIfCurrent(sessionID string, run *agentRun, resp *ai.AgentResponse) (*database.AIMessage, error) {
-	if !s.isCurrentRun(sessionID, run) {
-		return nil, nil
+func (s *AIService) emitAIStream(data AIStreamChunkData) {
+	if s == nil || s.app == nil {
+		return
 	}
-	return s.persistTurn(sessionID, resp)
+	s.app.Event.Emit(EventAIStreamChunk, data)
 }
 
-func (s *AIService) persistTurn(sessionID string, resp *ai.AgentResponse) (*database.AIMessage, error) {
-	return s.persistPreparedTurn(sessionID, ai.PrepareTurn(resp, false), false)
+// waitSessionRunIdle waits until no agentRun is registered for sessionID, or timeout.
+func (s *AIService) waitSessionRunIdle(sessionID string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s.runsMu.Lock()
+		_, busy := s.runs[sessionID]
+		s.runsMu.Unlock()
+		if !busy {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
-func (s *AIService) persistCancelledTurn(sessionID, userMsgID string, resp *ai.AgentResponse) (*database.AIMessage, error) {
-	last, err := s.persistPreparedTurn(sessionID, ai.PrepareTurn(resp, true), true)
-	s.markMessageCancelled(sessionID, userMsgID)
-	return last, err
+// forceFinalizeSessionRun steals a still-registered run after wait timed out: persists
+// whatever was checkpointed/streamed, marks the persister sealed, and removes the run
+// so a later Chat cannot orphan-seal the same run_id while Finalize is in flight.
+func (s *AIService) forceFinalizeSessionRun(sessionID string) {
+	s.runsMu.Lock()
+	run := s.runs[sessionID]
+	if run == nil {
+		s.runsMu.Unlock()
+		return
+	}
+	delete(s.runs, sessionID)
+	s.runsMu.Unlock()
+
+	s.rejectApprovalsAndCancel(run)
+	if run.persister == nil {
+		return
+	}
+	if _, err := run.persister.ForceFinalize(); err != nil {
+		s.logger.Error("force finalize superseded AI turn failed",
+			zap.String("sessionId", sessionID),
+			zap.String("runId", run.runID),
+			zap.Error(err),
+		)
+	}
 }
 
 func (s *AIService) markMessageCancelled(sessionID, msgID string) {
@@ -500,35 +589,114 @@ func (s *AIService) markMessageCancelled(sessionID, msgID string) {
 	}
 }
 
-func (s *AIService) persistPreparedTurn(sessionID string, resp *ai.AgentResponse, cancelled bool) (*database.AIMessage, error) {
-	if resp == nil || len(resp.Turn) == 0 {
-		return nil, nil
-	}
-	ts := time.Now()
-	msgs := make([]*database.AIMessage, 0, len(resp.Turn))
-	for _, m := range resp.Turn {
-		status := m.Status
-		if cancelled && m.Role != ai.RoleTool {
-			// user/model bubbles: cancelled; tool rows keep denied (or empty if completed).
-			status = database.MessageStatusCancelled
+// liveRunIDs returns run IDs currently registered in memory.
+func (s *AIService) liveRunIDs() map[string]struct{} {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	out := make(map[string]struct{}, len(s.runs))
+	for _, run := range s.runs {
+		if run != nil && run.runID != "" {
+			out[run.runID] = struct{}{}
 		}
-		msgs = append(msgs, &database.AIMessage{
-			SessionID: sessionID,
-			Role:      m.Role,
-			Content:   m.Content,
-			Parts:     m.Parts,
-			Status:    status,
-			Timestamp: ts,
-		})
 	}
-	if err := s.sessionRepo.CreateMessages(context.Background(), msgs); err != nil {
-		return nil, err
+	return out
+}
+
+// RecoverOrphanTurns seals any unsealed run_id rows left by a crash (no live run).
+func (s *AIService) RecoverOrphanTurns() {
+	s.sealOrphanRuns("")
+}
+
+// sealOrphanRuns finalizes DB rows with non-empty run_id that have no live agentRun.
+// If sessionID is non-empty, only that session is scanned.
+func (s *AIService) sealOrphanRuns(sessionID string) {
+	refs, err := s.sessionRepo.ListUnsealedRuns(context.Background(), sessionID)
+	if err != nil {
+		s.logger.Error("list unsealed AI runs failed", zap.Error(err))
+		return
 	}
-	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
-		session.UpdatedAt = time.Now()
-		_ = s.sessionRepo.UpdateSession(context.Background(), session)
+	live := s.liveRunIDs()
+	for _, ref := range refs {
+		if _, ok := live[ref.RunID]; ok {
+			continue
+		}
+		if err := s.sealOrphanRun(ref.SessionID, ref.RunID); err != nil {
+			s.logger.Error("seal orphan AI run failed",
+				zap.String("sessionId", ref.SessionID),
+				zap.String("runId", ref.RunID),
+				zap.Error(err),
+			)
+		}
 	}
-	return msgs[len(msgs)-1], nil
+}
+
+func (s *AIService) sealOrphanRun(sessionID, runID string) error {
+	msgs, err := s.sessionRepo.ListMessagesByRunID(context.Background(), sessionID, runID)
+	if err != nil {
+		return err
+	}
+	var turn []ai.ChatMessage
+	var userIDs []string
+	var modelToolIDs []string
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		switch m.Role {
+		case ai.RoleUser:
+			userIDs = append(userIDs, m.ID)
+		case ai.RoleModel, ai.RoleTool:
+			turn = append(turn, ai.ChatMessage{Role: m.Role, Content: m.Content, Parts: m.Parts, Status: m.Status})
+			modelToolIDs = append(modelToolIDs, m.ID)
+		}
+	}
+	return persistCancelledRunTurn(s.sessionRepo, s.logger, sessionID, runID, turn, modelToolIDs, userIDs)
+}
+
+// FlushAndStop cancels active runs, force-finalizes stragglers, and seals orphans before DB close.
+func (s *AIService) FlushAndStop() {
+	s.runsMu.Lock()
+	runs := make([]*agentRun, 0, len(s.runs))
+	for _, run := range s.runs {
+		if run != nil {
+			runs = append(runs, run)
+		}
+	}
+	s.runsMu.Unlock()
+	for _, run := range runs {
+		s.rejectApprovalsAndCancel(run)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.runsMu.Lock()
+		n := len(s.runs)
+		s.runsMu.Unlock()
+		if n == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.runsMu.Lock()
+	leftover := make([]*agentRun, 0, len(s.runs))
+	for sid, run := range s.runs {
+		if run != nil {
+			leftover = append(leftover, run)
+		}
+		delete(s.runs, sid)
+	}
+	s.runsMu.Unlock()
+	for _, run := range leftover {
+		if run.persister == nil {
+			continue
+		}
+		if _, err := run.persister.ForceFinalize(); err != nil {
+			s.logger.Error("force finalize AI turn failed",
+				zap.String("runId", run.runID),
+				zap.Error(err),
+			)
+		}
+	}
+	s.RecoverOrphanTurns()
 }
 
 // RespondToolApproval unblocks a pending tool approval for the session.
@@ -734,7 +902,7 @@ func toAISession(s *database.AISession) *AISession {
 func toAIMessage(m *database.AIMessage) *AIMessage {
 	return &AIMessage{
 		ID: m.ID, SessionID: m.SessionID, Role: m.Role, Content: m.Content,
-		Parts: m.Parts, Status: m.Status, Timestamp: m.Timestamp.Unix(),
+		Parts: m.Parts, Status: m.Status, RunID: m.RunID, Timestamp: m.Timestamp.Unix(),
 	}
 }
 

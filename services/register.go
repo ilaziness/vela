@@ -89,6 +89,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	syncService := NewSyncService(configService, db, log)
 	toolService := NewToolService(windows)
 	aiService := NewAIService(a, log, configService, sshService, db)
+	aiService.RecoverOrphanTurns()
 	appService := NewAppService(a, windows, termWS, log)
 	tunnelService := NewSSHTunnelService(tunnelMgr)
 
@@ -115,6 +116,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 
 	a.OnShutdown(func() {
 		log.Debug("run app OnShutdown...")
+		aiService.FlushAndStop()
 		aiService.ShutdownMCP()
 		termWS.Stop()
 		sshService.Close()

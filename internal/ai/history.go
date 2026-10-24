@@ -144,10 +144,10 @@ func hasToolRequest(m *genkitAI.Message) bool {
 	return false
 }
 
-func storedTurn(resp *genkitAI.ModelResponse, promptLen int) *AgentResponse {
-	out := &AgentResponse{}
+// TurnFromHistory returns Genkit messages after promptLen as ChatMessage (raw turn, no PrepareTurn).
+func TurnFromHistory(resp *genkitAI.ModelResponse, promptLen int) []ChatMessage {
 	if resp == nil {
-		return out
+		return nil
 	}
 	hist := resp.History()
 	if promptLen < 0 {
@@ -161,14 +161,29 @@ func storedTurn(resp *genkitAI.ModelResponse, promptLen int) *AgentResponse {
 		if m == nil {
 			continue
 		}
+		role := string(m.Role)
+		// Prompt / injected system must never land in the persisted turn.
+		// If promptLen is off (e.g. skills prepended a system message), skip
+		// leaked user/system rows so ReplaceRunMessages is not given invalid roles.
+		if role == RoleSystem || role == RoleUser {
+			continue
+		}
 		turn = append(turn, ChatMessage{
-			Role:    string(m.Role),
+			Role:    role,
 			Content: messageContent(m),
 			Parts:   MarshalParts(m.Content),
 		})
 	}
+	return turn
+}
+
+func storedTurn(resp *genkitAI.ModelResponse, promptLen int) *AgentResponse {
+	out := &AgentResponse{}
+	if resp == nil {
+		return out
+	}
 	// Leave turn raw; PrepareTurn finalizes for persist (drop vs synthesize denials).
-	out.Turn = turn
+	out.Turn = TurnFromHistory(resp, promptLen)
 	for i := len(out.Turn) - 1; i >= 0; i-- {
 		if out.Turn[i].Role == RoleModel && out.Turn[i].Content != "" {
 			out.Content = out.Turn[i].Content
@@ -204,6 +219,17 @@ func PrepareTurn(resp *AgentResponse, cancelled bool) *AgentResponse {
 func applyStreamedText(out *AgentResponse, streamed string) *AgentResponse {
 	if out == nil {
 		out = &AgentResponse{}
+	}
+	if streamed != "" {
+		if n := len(out.Turn); n > 0 && out.Turn[n-1].Role == RoleModel {
+			parts := UnmarshalParts(out.Turn[n-1].Parts)
+			if !hasToolRequestPart(parts) && strings.HasPrefix(streamed, out.Turn[n-1].Content) && streamed != out.Turn[n-1].Content {
+				out.Turn[n-1].Content = streamed
+				out.Turn[n-1].Parts = UserTextPartsJSON(streamed)
+				out.Content = streamed
+				return out
+			}
+		}
 	}
 	if hasModelText(out) {
 		return out

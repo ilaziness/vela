@@ -192,6 +192,13 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 	} else if err != nil {
 		e.logger.Warn("list enabled skills failed", zap.Error(err))
 	}
+	// Checkpoint last so WrapGenerate snapshots after skills/system injection and generate.
+	if deps.OnCheckpoint != nil {
+		middleware = append(middleware, checkpointMiddleware{
+			promptLen:    promptLen,
+			onCheckpoint: deps.OnCheckpoint,
+		})
+	}
 	opts := []genkitAI.GenerateOption{
 		genkitAI.WithModelName(modelName),
 		genkitAI.WithMessages(messages...),
@@ -215,6 +222,7 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, deps ToolDeps, on
 			genkitAI.WithModelName(modelName),
 			genkitAI.WithMessages(messages...),
 			genkitAI.WithMaxTurns(cfg.EffectiveMaxAgentTurns()),
+			genkitAI.WithUse(middleware...),
 		}
 		if genConfig != nil {
 			optsNoTools = append(optsNoTools, genkitAI.WithConfig(genConfig))
