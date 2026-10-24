@@ -1,11 +1,11 @@
 import React, { useState } from "react";
-import { IconButton, Menu, ToggleButton, ToggleButtonGroup, Tooltip } from "@mui/material";
+import { Menu, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import { useColorScheme } from "@mui/material/styles";
 import PaletteIcon from "@mui/icons-material/Palette";
 import useTerminalStore from "../stores/terminal";
 import { AppTheme } from "../types/ssh";
 import { ThemeOptions } from "../theme";
-import { railIconButtonSx } from "./railIconButtonSx";
+import { RailMenuButton } from "./RailIconButton";
 import { SetTheme } from "../../bindings/github.com/ilaziness/vela/services/configservice";
 import { LogService } from "../../bindings/github.com/ilaziness/vela/services";
 
@@ -74,11 +74,9 @@ export default function ThemeSwitcher() {
 
   return (
     <>
-      <Tooltip title="主题切换">
-        <IconButton sx={railIconButtonSx} onClick={handleMenuOpen}>
-          <PaletteIcon />
-        </IconButton>
-      </Tooltip>
+      <RailMenuButton title="主题切换" onClick={handleMenuOpen}>
+        <PaletteIcon />
+      </RailMenuButton>
       <Menu
         anchorEl={anchorEl}
         open={open}
@@ -134,4 +132,3 @@ export default function ThemeSwitcher() {
     </>
   );
 }
-

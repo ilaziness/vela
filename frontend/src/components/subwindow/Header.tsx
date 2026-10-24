@@ -1,12 +1,13 @@
-import { Box, IconButton, Stack, Tooltip } from "@mui/material";
+import { Box, Stack } from "@mui/material";
 import AddBoxIcon from "@mui/icons-material/AddBox";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import { useSSHTabsStore } from "../../stores/ssh";
 import { genTabIndex } from "../../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../../func/aiSidebar";
+import { ShortcutAction } from "../../func/shortcuts";
 import { useMemo, useCallback } from "react";
 import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
-import { railIconButtonSx } from "../railIconButtonSx";
+import { RailMenuButton } from "../RailIconButton";
 import BookmarkConnectPanel from "../BookmarkConnectPanel";
 import { useUIStore } from "../../stores/ui";
 
@@ -19,9 +20,8 @@ export default function Header() {
 
   const handleAddTab = useCallback(() => {
     const number = sshTabs.length + 1;
-    const newIndex = `${genTabIndex()}`;
     pushTab({
-      index: newIndex,
+      index: `${genTabIndex()}`,
       name: `新建连接 ${number}`,
     });
   }, [sshTabs.length, pushTab]);
@@ -34,6 +34,7 @@ export default function Header() {
         icon: <BookmarkIcon />,
         onClick: toggleBookmarkConnect,
         active: bookmarkConnectOpen,
+        shortcutAction: ShortcutAction.PanelBookmarkConnect,
       },
     ],
     [handleAddTab, toggleBookmarkConnect, bookmarkConnectOpen],
@@ -61,8 +62,8 @@ export default function Header() {
       >
         <Stack
           direction="column"
-          spacing={1}
-          sx={{ alignItems: "center", padding: 0.5, height: "100%" }}
+          spacing={0.25}
+          sx={{ alignItems: "center", padding: 0.25, height: "100%" }}
         >
           <Box
             sx={{
@@ -73,21 +74,20 @@ export default function Header() {
             <img
               src="/appicon.png"
               alt="Logo"
-              style={{ width: "32px", height: "32px" }}
+              style={{ width: "24px", height: "24px" }}
             />
           </Box>
 
-          {menuItems.map((item, index) => (
-            <Tooltip key={index} title={item.title}>
-              <IconButton
-                sx={railIconButtonSx}
-                onClick={item.onClick}
-                color={item.active ? "primary" : "default"}
-                aria-pressed={item.active ? true : undefined}
-              >
-                {item.icon}
-              </IconButton>
-            </Tooltip>
+          {menuItems.map((item) => (
+            <RailMenuButton
+              key={item.title}
+              title={item.title}
+              shortcutAction={item.shortcutAction}
+              active={item.active}
+              onClick={item.onClick}
+            >
+              {item.icon}
+            </RailMenuButton>
           ))}
         </Stack>
       </Box>

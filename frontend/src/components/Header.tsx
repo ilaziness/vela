@@ -1,8 +1,6 @@
 import {
   Box,
-  IconButton,
   Stack,
-  Tooltip,
   Dialog,
   AppBar,
   Toolbar,
@@ -12,6 +10,7 @@ import {
   DialogActions,
   Button,
   Backdrop,
+  IconButton,
 } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
 import AddBoxIcon from "@mui/icons-material/AddBox";
@@ -39,10 +38,11 @@ import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useUIStore } from "../stores/ui";
 import { genTabIndex, parseCallServiceError } from "../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
+import { ShortcutAction } from "../func/shortcuts";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useMessageStore } from "../stores/message";
 import ThemeSwitcher from "./ThemeSwitcher";
-import { railIconButtonSx } from "./railIconButtonSx";
+import { RailMenuButton } from "./RailIconButton";
 import { Events } from "@wailsio/runtime";
 import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import BookmarkManager from "./Bookmark";
@@ -76,26 +76,13 @@ export default function Header() {
     }
   }, [updateDialogOpen]);
 
-  const showSettingWindow = useCallback(() => {
-    ConfigService.ShowWindow();
-  }, []);
-
-  const handleAIAssistant = useCallback(() => {
-    toggleSidebarOpen();
-  }, [toggleSidebarOpen]);
-
   const handleAddTab = useCallback(() => {
     const number = sshTabs.length + 1;
-    const newIndex = `${genTabIndex()}`;
     pushTab({
-      index: newIndex,
+      index: `${genTabIndex()}`,
       name: `新建连接 ${number}`,
     });
   }, [sshTabs.length, pushTab]);
-
-  const handleNewMainWindow = useCallback(() => {
-    AppService.NewMainWindow();
-  }, []);
 
   const handleBackupClick = useCallback(async () => {
     try {
@@ -122,47 +109,51 @@ export default function Header() {
       {
         title: "新建窗口",
         icon: <AddToQueueIcon />,
-        onClick: handleNewMainWindow,
+        onClick: () => AppService.NewMainWindow(),
       },
       {
         title: "书签",
         icon: <BookmarkIcon />,
         onClick: toggleBookmarkConnect,
         active: bookmarkConnectOpen,
+        shortcutAction: ShortcutAction.PanelBookmarkConnect,
       },
       {
         title: "书签管理",
         icon: <BookmarksIcon />,
         onClick: () => setBookmarkManageOpen(true),
+        shortcutAction: ShortcutAction.PanelBookmarks,
       },
       {
         title: "命令面板",
         icon: <TerminalIcon />,
         onClick: () => CommandService.ShowWindow(),
+        shortcutAction: ShortcutAction.PanelCommand,
       },
       {
         title: "AI助手",
         icon: <AutoAwesomeIcon />,
-        onClick: handleAIAssistant,
+        onClick: () => toggleSidebarOpen(),
+        shortcutAction: ShortcutAction.PanelAI,
       },
       {
         title: "上传备份",
         icon: <CloudUploadIcon />,
-        onClick: handleBackupClick,
+        onClick: () => void handleBackupClick(),
       },
       {
         title: "工具",
         icon: <HandymanIcon />,
         onClick: () => ToolService.ShowWindow(),
+        shortcutAction: ShortcutAction.PanelTools,
       },
     ],
     [
       handleAddTab,
-      handleNewMainWindow,
       toggleBookmarkConnect,
       bookmarkConnectOpen,
       handleBackupClick,
-      handleAIAssistant,
+      toggleSidebarOpen,
       setBookmarkManageOpen,
     ],
   );
@@ -179,15 +170,6 @@ export default function Header() {
       unsubscribeUpdate();
     };
   }, []);
-
-  const handleCancelBackup = () => {
-    setConfirmDialogOpen(false);
-  };
-
-  const handleConfirmBackup = () => {
-    setConfirmDialogOpen(false);
-    handleUpload();
-  };
 
   const handleUpload = async () => {
     setUploading(true);
@@ -224,8 +206,8 @@ export default function Header() {
       >
         <Stack
           direction="column"
-          spacing={1}
-          sx={{ alignItems: "center", padding: 0.5, height: "100%" }}
+          spacing={0.25}
+          sx={{ alignItems: "center", padding: 0.25, height: "100%" }}
         >
           <Box
             sx={{
@@ -236,21 +218,20 @@ export default function Header() {
             <img
               src="/appicon.png"
               alt="Logo"
-              style={{ width: "32px", height: "32px" }}
+              style={{ width: "24px", height: "24px" }}
             />
           </Box>
 
-          {menuItems.map((item, index) => (
-            <Tooltip key={index} title={item.title}>
-              <IconButton
-                sx={railIconButtonSx}
-                onClick={item.onClick}
-                color={item.active ? "primary" : "default"}
-                aria-pressed={item.active ? true : undefined}
-              >
-                {item.icon}
-              </IconButton>
-            </Tooltip>
+          {menuItems.map((item) => (
+            <RailMenuButton
+              key={item.title}
+              title={item.title}
+              shortcutAction={item.shortcutAction}
+              active={item.active}
+              onClick={item.onClick}
+            >
+              {item.icon}
+            </RailMenuButton>
           ))}
 
           <Box sx={{ flex: 1 }} />
@@ -258,22 +239,22 @@ export default function Header() {
           <ThemeSwitcher />
 
           {newVersion ? (
-            <Tooltip title="发现新版本">
-              <IconButton
-                sx={railIconButtonSx}
-                color="primary"
-                onClick={() => setUpdateDialogOpen(true)}
-              >
-                <UpgradeIcon />
-              </IconButton>
-            </Tooltip>
+            <RailMenuButton
+              title="发现新版本"
+              active
+              onClick={() => setUpdateDialogOpen(true)}
+            >
+              <UpgradeIcon />
+            </RailMenuButton>
           ) : null}
 
-          <Tooltip title="设置">
-            <IconButton sx={railIconButtonSx} onClick={showSettingWindow}>
-              <SettingsIcon />
-            </IconButton>
-          </Tooltip>
+          <RailMenuButton
+            title="设置"
+            shortcutAction={ShortcutAction.PanelSettings}
+            onClick={() => ConfigService.ShowWindow()}
+          >
+            <SettingsIcon />
+          </RailMenuButton>
         </Stack>
       </Box>
 
@@ -325,7 +306,7 @@ export default function Header() {
 
       <Dialog
         open={confirmDialogOpen}
-        onClose={handleCancelBackup}
+        onClose={() => setConfirmDialogOpen(false)}
         maxWidth="xs"
         fullWidth
       >
@@ -334,8 +315,14 @@ export default function Header() {
           <Typography>确定要上传备份吗？</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCancelBackup}>取消</Button>
-          <Button variant="contained" onClick={handleConfirmBackup}>
+          <Button onClick={() => setConfirmDialogOpen(false)}>取消</Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setConfirmDialogOpen(false);
+              void handleUpload();
+            }}
+          >
             确定
           </Button>
         </DialogActions>

@@ -10,6 +10,9 @@ export enum ShortcutAction {
   PanelAI = "panel.ai",
   PanelBookmarks = "panel.bookmarks",
   PanelBookmarkConnect = "panel.bookmarkConnect",
+  PanelCommand = "panel.command",
+  PanelTools = "panel.tools",
+  PanelSettings = "panel.settings",
 }
 
 export function parseShortcutAction(data: unknown): string | null {
