@@ -440,6 +440,21 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 	enableFS := len(allowDirs) > 0
 	enableWebSearch := webSearch.APIKey != "" && tool.ValidSearchProvider(webSearch.Provider)
+	planJSON := ""
+	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
+		planJSON = session.PlanJSON
+		if len(messages) == 0 && (session.Title == "" || session.Title == "新会话") {
+			title := []rune(newMessage)
+			if len(title) > 20 {
+				title = title[:20]
+			}
+			session.Title = string(title)
+			if session.Title == "" {
+				session.Title = "新会话"
+			}
+			_ = s.sessionRepo.UpdateSession(context.Background(), session)
+		}
+	}
 	aiReq := &ai.AgentRequest{
 		Messages:   messages,
 		NewMessage: newMessage,
@@ -450,20 +465,10 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			EnableFS:        enableFS,
 			AllowDirs:       allowDirs,
 			EnableWebSearch: enableWebSearch,
+			PlanJSON:        planJSON,
 		}),
 		EnableSSH: enableSSH,
 		LinkID:    linkID,
-	}
-	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil && len(messages) == 0 && (session.Title == "" || session.Title == "新会话") {
-		title := []rune(newMessage)
-		if len(title) > 20 {
-			title = title[:20]
-		}
-		session.Title = string(title)
-		if session.Title == "" {
-			session.Title = "新会话"
-		}
-		_ = s.sessionRepo.UpdateSession(context.Background(), session)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -514,6 +519,9 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			ArmSSHExecCancel: host.ArmSSHExecCancel,
 			AllowedDirs:      allowDirs,
 			WebSearch:        webSearch,
+			OnPlanUpsert: func(planJSON string) error {
+				return s.sessionRepo.UpdateSessionPlan(context.Background(), sessionID, planJSON)
+			},
 		},
 		OnCheckpoint: persister.Checkpoint,
 	}

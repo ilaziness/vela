@@ -21,7 +21,7 @@ export interface PlanSnapshot {
 function asPlan(value: unknown): PlanSnapshot | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
-  if (!Array.isArray(v.tasks)) return null;
+  if (!Array.isArray(v.tasks) || v.tasks.length === 0) return null;
   const tasks: PlanTask[] = v.tasks.map((t: any, i: number) => ({
     id: String(t?.id ?? i),
     title: String(t?.title ?? `任务 ${i + 1}`),
@@ -44,7 +44,7 @@ function isTerminal(status: PlanTaskStatus): boolean {
 }
 
 function allTerminal(tasks: PlanTask[]): boolean {
-  return tasks.length > 0 && tasks.every((t) => isTerminal(t.status));
+  return tasks.every((t) => isTerminal(t.status));
 }
 
 function anyRunning(tasks: PlanTask[]): boolean {
@@ -84,18 +84,11 @@ function StatusIcon({ status }: { status: PlanTaskStatus }) {
 }
 
 export interface PlanTaskPartProps {
-  plan: PlanSnapshot | null;
+  plan: PlanSnapshot;
 }
 
 /** Renders upsert_plan tool output as a collapsible task list. */
 export function PlanTaskPart({ plan }: PlanTaskPartProps) {
-  if (!plan || plan.tasks.length === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary">
-        （空计划）
-      </Typography>
-    );
-  }
   return <PlanTaskList plan={plan} />;
 }
 
@@ -202,25 +195,19 @@ function PlanTaskList({ plan }: { plan: PlanSnapshot }) {
   );
 }
 
-export function planFromToolPart(part: {
-  toolInvocation?: { input?: unknown; output?: unknown; toolName?: string };
-}): PlanSnapshot | null {
-  const inv = part.toolInvocation;
-  if (!inv || inv.toolName !== UPSERT_PLAN_TOOL) return null;
-  return asPlan(inv.output) || asPlan(inv.input);
-}
-
-/** Last upsert_plan in message order (newest wins). */
+/** Last upsert_plan in message order (newest wins; empty tasks clears). */
 export function latestPlanFromMessages(
   messages: ReadonlyArray<{ parts?: ReadonlyArray<unknown> }>,
 ): PlanSnapshot | null {
   let latest: PlanSnapshot | null = null;
   for (const message of messages) {
     for (const part of message.parts ?? []) {
-      const plan = planFromToolPart(part as Parameters<typeof planFromToolPart>[0]);
-      if (plan) {
-        latest = plan;
+      const inv = (part as { toolInvocation?: { toolName?: string; input?: unknown; output?: unknown } })
+        ?.toolInvocation;
+      if (!inv || inv.toolName !== UPSERT_PLAN_TOOL) {
+        continue;
       }
+      latest = asPlan(inv.output) || asPlan(inv.input);
     }
   }
   return latest;

@@ -281,6 +281,46 @@ func TestSanitizeDropsOrphanToolMessage(t *testing.T) {
 	}
 }
 
+func TestBuildGenkitMessagesStripsUpsertPlanKeepsSSH(t *testing.T) {
+	planReq := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
+		Name: ToolUpsertPlan, Ref: "p1",
+		Input: map[string]any{"title": "t", "tasks": []any{}},
+	})
+	planResp := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+		Name: ToolUpsertPlan, Ref: "p1", Output: map[string]any{"title": "t", "tasks": []any{}},
+	})
+	sshReq := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
+		Name: ToolRunSSHCommand, Ref: "s1", Input: map[string]any{"command": "uname"},
+	})
+	sshResp := genkitAI.NewToolResponsePart(&genkitAI.ToolResponse{
+		Name: ToolRunSSHCommand, Ref: "s1", Output: "Linux",
+	})
+	history := []ChatMessage{
+		{Role: RoleUser, Content: "fix", Parts: UserTextPartsJSON("fix")},
+		{Role: RoleModel, Content: "planning", Parts: MarshalParts([]*genkitAI.Part{
+			genkitAI.NewTextPart("ok"), planReq,
+		})},
+		{Role: RoleTool, Content: "[" + ToolUpsertPlan + "]", Parts: MarshalParts([]*genkitAI.Part{planResp})},
+		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{sshReq})},
+		{Role: RoleTool, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{sshResp})},
+	}
+	msgs := buildGenkitMessages(history, "again", "sys")
+	// system + user + model(text only) + model(ssh req) + tool(ssh) + new user
+	if len(msgs) != 6 {
+		t.Fatalf("len=%d want 6", len(msgs))
+	}
+	if msgs[2].Role != genkitAI.RoleModel || len(msgs[2].Content) != 1 || !msgs[2].Content[0].IsText() {
+		t.Fatalf("model after strip should keep text only: %+v", msgs[2])
+	}
+	if msgs[3].Role != genkitAI.RoleModel || !msgs[3].Content[0].IsToolRequest() ||
+		msgs[3].Content[0].ToolRequest.Name != ToolRunSSHCommand {
+		t.Fatalf("ssh request missing: %+v", msgs[3])
+	}
+	if msgs[4].Role != genkitAI.RoleTool || msgs[4].Content[0].ToolResponse.Name != ToolRunSSHCommand {
+		t.Fatalf("ssh response missing: %+v", msgs[4])
+	}
+}
+
 func TestUnmarshalPartsRoundTrip(t *testing.T) {
 	p := genkitAI.NewTextPart("hi")
 	raw := MarshalParts([]*genkitAI.Part{p})

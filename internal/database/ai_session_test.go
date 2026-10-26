@@ -131,3 +131,50 @@ func TestUpdateMessageContent(t *testing.T) {
 		t.Fatalf("got %+v", all)
 	}
 }
+
+func TestUpdateSessionPlanPreservedAcrossTitleUpdate(t *testing.T) {
+	db := openTestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+
+	sess := &AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	plan := `{"title":"p","tasks":[{"id":"1","title":"a","status":"pending"}]}`
+	if err := repo.UpdateSessionPlan(ctx, sess.ID, plan); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PlanJSON != plan {
+		t.Fatalf("plan=%q", got.PlanJSON)
+	}
+	got.Title = "renamed"
+	if err := repo.UpdateSession(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := repo.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.Title != "renamed" || got2.PlanJSON != plan {
+		t.Fatalf("after title update: %+v", got2)
+	}
+	if err := repo.UpdateSessionPlan(ctx, sess.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	got3, err := repo.GetSession(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got3.PlanJSON != "" {
+		t.Fatalf("clear failed: %q", got3.PlanJSON)
+	}
+	// Idempotent rewrite must not fail (SQLite RowsAffected may be 0).
+	if err := repo.UpdateSessionPlan(ctx, sess.ID, ""); err != nil {
+		t.Fatalf("idempotent clear: %v", err)
+	}
+}

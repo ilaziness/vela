@@ -13,6 +13,7 @@ import (
 type AISession struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
+	PlanJSON  string    `json:"plan_json"` // authoritative upsert_plan snapshot; "" = none
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -47,6 +48,7 @@ type AISessionRepository interface {
 	GetSession(ctx context.Context, id string) (*AISession, error)
 	ListSessions(ctx context.Context, limit int) ([]*AISession, error)
 	UpdateSession(ctx context.Context, session *AISession) error
+	UpdateSessionPlan(ctx context.Context, id, planJSON string) error
 	DeleteSession(ctx context.Context, id string) error
 	CreateMessage(ctx context.Context, msg *AIMessage) error
 	CreateMessages(ctx context.Context, msgs []*AIMessage) error
@@ -92,8 +94,8 @@ func (r *SQLiteAISessionRepository) GetSession(ctx context.Context, id string) (
 	var createdAt, updatedAt int64
 
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, title, created_at, updated_at FROM ai_sessions WHERE id = ?`,
-		id).Scan(&session.ID, &session.Title, &createdAt, &updatedAt)
+		`SELECT id, title, plan_json, created_at, updated_at FROM ai_sessions WHERE id = ?`,
+		id).Scan(&session.ID, &session.Title, &session.PlanJSON, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("session not found")
 	}
@@ -157,6 +159,18 @@ func (r *SQLiteAISessionRepository) UpdateSession(ctx context.Context, session *
 		return fmt.Errorf("session not found")
 	}
 
+	return nil
+}
+
+// UpdateSessionPlan stores the authoritative plan snapshot (empty clears it).
+// Does not treat RowsAffected==0 as missing: SQLite reports 0 when values are unchanged.
+func (r *SQLiteAISessionRepository) UpdateSessionPlan(ctx context.Context, id, planJSON string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE ai_sessions SET plan_json = ?, updated_at = ? WHERE id = ?`,
+		planJSON, time.Now().Unix(), id)
+	if err != nil {
+		return fmt.Errorf("update session plan failed: %w", err)
+	}
 	return nil
 }
 

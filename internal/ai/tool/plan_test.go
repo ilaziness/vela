@@ -3,7 +3,7 @@ package tool
 import "testing"
 
 func TestNormalizePlan(t *testing.T) {
-	p := upsertPlanInput{Title: "  x  ", Tasks: []planTask{
+	p := PlanSnapshot{Title: "  x  ", Tasks: []PlanTask{
 		{ID: "", Title: "a", Status: "RUNNING"},
 		{ID: "t2", Title: "b", Status: "nope"},
 	}}

@@ -17,4 +17,5 @@ type (
 
 const (
 	ToolRunSSHCommand = tool.RunSSHCommand
+	ToolUpsertPlan    = tool.UpsertPlan
 )

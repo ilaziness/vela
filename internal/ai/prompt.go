@@ -1,10 +1,12 @@
 package ai
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/ssh"
 )
 
@@ -23,13 +25,14 @@ type PromptOptions struct {
 	EnableFS        bool
 	AllowDirs       []string
 	EnableWebSearch bool
+	PlanJSON        string // authoritative session plan snapshot; empty skips ## 当前计划
 }
 
 const promptIntro = `你是 Vela 内置 AI 助手（Agent）。Vela 是一款 SSH 桌面客户端；用户在侧边栏与你对话，在另一个标签页的终端中操作远程机器。
 
 ## 能力
 - 解释命令、分析报错、编写脚本/配置、给出 Linux/Unix 运维建议
-- 可通过工具 upsert_plan 维护多步骤计划任务列表（每次提交完整快照）`
+- 可通过工具 upsert_plan 维护多步骤计划（每次提交完整快照；空 tasks 可清空计划）`
 
 const promptSSHCapability = `
 - 可通过工具 run_ssh_command 在当前已连接主机上执行命令（独立 Exec 通道，输出会回传给你）；执行前必须经用户在聊天中批准
@@ -44,7 +47,9 @@ const promptWebSearchCapability = `
 const promptToolRulesBase = `
 
 ## 工具使用规范
-- 多步骤任务先 upsert_plan，再逐步执行并更新计划状态（pending/running/done/failed）`
+- 计划：≥2 步或「探测→决策→执行」类任务必须先 upsert_plan；单轮纯问答可不建
+- 建计划：步骤可执行、粒度合适；初始多为 pending
+- 更新计划：开始某步前将该步标为 running 并 upsert_plan；该步工具/动作结束后立刻标 done 或 failed 并 upsert_plan；禁止多步做完再一次批量改状态`
 
 const promptToolRulesSSH = `
 - 需要探测/验证远程状态时，优先用 run_ssh_command；命令应尽量只读、可预期
@@ -116,32 +121,50 @@ func BuildSystemPromptOpts(opts PromptOptions) string {
 
 	if !isValidSSHContext(opts.SSH) || !opts.EnableSSH {
 		b.WriteString(promptNoSSH)
-		return b.String()
+	} else {
+		b.WriteString(promptWithSSHTools)
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "- 连接：%s@%s:%d\n", opts.SSH.User, opts.SSH.Host, opts.SSH.Port)
+
+		remote := opts.Remote
+		if remote != nil && remote.Ready && remote.HasContent() {
+			b.WriteString("\n## 远程系统信息\n")
+			if remote.Hostname != "" {
+				fmt.Fprintf(&b, "- 主机名：%s\n", remote.Hostname)
+			}
+			if remote.OSPretty != "" || remote.OSID != "" || remote.OSVersion != "" {
+				fmt.Fprintf(&b, "- 操作系统：%s（%s %s）\n", remote.OSPretty, remote.OSID, remote.OSVersion)
+			}
+			if remote.Kernel != "" {
+				fmt.Fprintf(&b, "- 内核：%s\n", remote.Kernel)
+			}
+			if remote.Arch != "" {
+				fmt.Fprintf(&b, "- 架构：%s\n", remote.Arch)
+			}
+			fmt.Fprintf(&b, "\n以上信息来自对该主机（%s）的一次性探测；未列出的细节仍需向用户确认。", opts.SSH.Host)
+		}
 	}
 
-	b.WriteString(promptWithSSHTools)
-	b.WriteString("\n")
-	fmt.Fprintf(&b, "- 连接：%s@%s:%d\n", opts.SSH.User, opts.SSH.Host, opts.SSH.Port)
-
-	remote := opts.Remote
-	if remote != nil && remote.Ready && remote.HasContent() {
-		b.WriteString("\n## 远程系统信息\n")
-		if remote.Hostname != "" {
-			fmt.Fprintf(&b, "- 主机名：%s\n", remote.Hostname)
-		}
-		if remote.OSPretty != "" || remote.OSID != "" || remote.OSVersion != "" {
-			fmt.Fprintf(&b, "- 操作系统：%s（%s %s）\n", remote.OSPretty, remote.OSID, remote.OSVersion)
-		}
-		if remote.Kernel != "" {
-			fmt.Fprintf(&b, "- 内核：%s\n", remote.Kernel)
-		}
-		if remote.Arch != "" {
-			fmt.Fprintf(&b, "- 架构：%s\n", remote.Arch)
-		}
-		fmt.Fprintf(&b, "\n以上信息来自对该主机（%s）的一次性探测；未列出的细节仍需向用户确认。", opts.SSH.Host)
-	}
-
+	appendCurrentPlanSection(&b, opts.PlanJSON)
 	return b.String()
+}
+
+func appendCurrentPlanSection(b *strings.Builder, planJSON string) {
+	planJSON = strings.TrimSpace(planJSON)
+	if planJSON == "" {
+		return
+	}
+	var snap tool.PlanSnapshot
+	if err := json.Unmarshal([]byte(planJSON), &snap); err != nil || len(snap.Tasks) == 0 {
+		return
+	}
+	b.WriteString("\n\n## 当前计划\n")
+	b.WriteString("以下为权威计划快照（以本节为准）。变更必须再调用 upsert_plan。\n")
+	fmt.Fprintf(b, "- 标题：%s\n", snap.Title)
+	b.WriteString("- 任务：\n")
+	for _, t := range snap.Tasks {
+		fmt.Fprintf(b, "  - [%s] %s（id=%s）\n", t.Status, t.Title, t.ID)
+	}
 }
 
 func isValidSSHContext(ctx *SSHPromptContext) bool {

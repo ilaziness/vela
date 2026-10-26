@@ -40,6 +40,9 @@ type Deps struct {
 
 	AllowedDirs []string
 	WebSearch   WebSearchRuntime
+
+	// OnPlanUpsert persists the authoritative plan snapshot ("" clears). Nil skips persist.
+	OnPlanUpsert func(planJSON string) error
 }
 
 // WithDeps stores Deps on ctx for tool handlers and MCP wrap middleware.

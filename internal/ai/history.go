@@ -44,6 +44,7 @@ type AgentResponse struct {
 
 // buildGenkitMessages rebuilds a native Genkit transcript plus the new user turn.
 // System prompt is always injected fresh (not taken from stored history).
+// upsert_plan tool parts are stripped from sealed history (authoritative plan is in system).
 func buildGenkitMessages(history []ChatMessage, newMsg, systemPrompt string) []*genkitAI.Message {
 	var msgs []*genkitAI.Message
 	if systemPrompt != "" {
@@ -58,6 +59,7 @@ func buildGenkitMessages(history []ChatMessage, newMsg, systemPrompt string) []*
 		if len(parts) == 0 && m.Content != "" {
 			parts = []*genkitAI.Part{genkitAI.NewTextPart(m.Content)}
 		}
+		parts = stripUpsertPlanParts(parts)
 		if len(parts) == 0 {
 			continue
 		}
@@ -66,6 +68,31 @@ func buildGenkitMessages(history []ChatMessage, newMsg, systemPrompt string) []*
 	msgs = sanitizeTranscript(msgs)
 	msgs = append(msgs, genkitAI.NewUserTextMessage(newMsg))
 	return msgs
+}
+
+// stripUpsertPlanParts drops upsert_plan tool request/response parts from prompt history.
+func stripUpsertPlanParts(parts []*genkitAI.Part) []*genkitAI.Part {
+	out := make([]*genkitAI.Part, 0, len(parts))
+	for _, p := range parts {
+		if p == nil {
+			continue
+		}
+		if toolPartName(p) == ToolUpsertPlan {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func toolPartName(p *genkitAI.Part) string {
+	if p.IsToolRequest() && p.ToolRequest != nil {
+		return p.ToolRequest.Name
+	}
+	if p.IsToolResponse() && p.ToolResponse != nil {
+		return p.ToolResponse.Name
+	}
+	return ""
 }
 
 func genkitRole(s string) (genkitAI.Role, bool) {
