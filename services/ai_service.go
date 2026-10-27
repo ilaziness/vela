@@ -69,11 +69,21 @@ type SSHContext struct {
 	User   string `json:"user"`
 }
 
+// ChatAttachment is one file from the composer.
+// Picker/drop files send Path only; pasted images send DataURL and are copied locally.
+type ChatAttachment struct {
+	DataURL  string `json:"data_url,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	MIME     string `json:"mime,omitempty"`
+}
+
 type ChatRequest struct {
-	SessionID  string      `json:"session_id"`
-	RunID      string      `json:"run_id,omitempty"`
-	NewMessage string      `json:"new_message"`
-	SSHContext *SSHContext `json:"ssh_context,omitempty"`
+	SessionID   string           `json:"session_id"`
+	RunID       string           `json:"run_id,omitempty"`
+	NewMessage  string           `json:"new_message"`
+	Attachments []ChatAttachment `json:"attachments,omitempty"`
+	SSHContext  *SSHContext      `json:"ssh_context,omitempty"`
 }
 
 type ChatResponse struct {
@@ -341,7 +351,18 @@ func (s *AIService) ListSessions(limit int) ([]*AISession, error) {
 }
 func (s *AIService) DeleteSession(id string) error {
 	_ = s.StopGeneration(id)
-	return s.sessionRepo.DeleteSession(context.Background(), id)
+	if err := s.sessionRepo.DeleteSession(context.Background(), id); err != nil {
+		return err
+	}
+	if dir := s.userDataDir(); dir != "" {
+		if rmErr := ai.RemoveSessionAttachments(dir, id); rmErr != nil {
+			s.logger.Warn("remove session attachments",
+				zap.String("sessionId", id),
+				zap.Error(rmErr),
+			)
+		}
+	}
+	return nil
 }
 func (s *AIService) ListMessages(sessionID string) ([]*AIMessage, error) {
 	messages, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
@@ -419,11 +440,32 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		// Status is UI-only; Genkit replay uses role/content/parts.
 		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
 	}
+
+	dataDir, err := s.requireUserDataDir()
+	if err != nil {
+		return nil, err
+	}
+	attInputs := make([]ai.ChatAttachmentInput, len(req.Attachments))
+	for i, a := range req.Attachments {
+		attInputs[i] = ai.ChatAttachmentInput{
+			DataURL:  a.DataURL,
+			Path:     a.Path,
+			Filename: a.Filename,
+			MIME:     a.MIME,
+		}
+	}
+	userParts, err := ai.PersistUserAttachments(dataDir, sessionID, newMessage, attInputs, func() string {
+		return uuid.New().String()
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	userMsg := &database.AIMessage{
 		SessionID: sessionID,
 		Role:      ai.RoleUser,
 		Content:   newMessage,
-		Parts:     ai.UserTextPartsJSON(newMessage),
+		Parts:     ai.MarshalParts(userParts),
 		RunID:     runID,
 		Timestamp: time.Now(),
 	}
@@ -456,8 +498,8 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		}
 	}
 	aiReq := &ai.AgentRequest{
-		Messages:   messages,
-		NewMessage: newMessage,
+		Messages: messages,
+		NewParts: userParts,
 		SystemPrompt: ai.BuildSystemPromptOpts(ai.PromptOptions{
 			SSH:             sshCtx,
 			Remote:          remoteInfo,

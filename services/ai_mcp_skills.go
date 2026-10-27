@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/ilaziness/vela/internal/ai"
 )
 
@@ -146,6 +148,57 @@ func (s *AIService) OpenSkillDir(name string) error {
 		return fmt.Errorf("skill %q not found", name)
 	}
 	return ai.OpenPath(path)
+}
+
+// PickChatAttachments opens a native multi-file dialog and returns absolute paths.
+func (s *AIService) PickChatAttachments() ([]string, error) {
+	dlg := s.app.Dialog.OpenFile().
+		SetTitle("选择附件").
+		CanChooseFiles(true).
+		CanChooseDirectories(false)
+	dlg.AddFilter("附件", "*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.txt;*.md;*.csv")
+	paths, err := dlg.PromptForMultipleSelection()
+	if dialogCancelled(err) {
+		return nil, nil
+	}
+	return paths, err
+}
+
+// ReadLocalAttachment returns a data URL for composer preview of a local file (not copied).
+func (s *AIService) ReadLocalAttachment(path string) (string, error) {
+	dataURL, err := ai.LocalFileDataURL(path)
+	if err != nil {
+		s.logger.Error("read local attachment", zap.Error(err))
+		return "", err
+	}
+	return dataURL, nil
+}
+
+// ReadChatAttachment returns a data URL for in-app image preview.
+func (s *AIService) ReadChatAttachment(uri, mime string) (string, error) {
+	dir, err := s.requireUserDataDir()
+	if err != nil {
+		return "", err
+	}
+	dataURL, err := ai.AttachmentDataURL(dir, uri, mime)
+	if err != nil {
+		s.logger.Error("read chat attachment", zap.Error(err))
+		return "", err
+	}
+	return dataURL, nil
+}
+
+// OpenChatAttachment opens a chat attachment with the OS default application.
+func (s *AIService) OpenChatAttachment(uri, filename string) error {
+	dir, err := s.requireUserDataDir()
+	if err != nil {
+		return err
+	}
+	if err := ai.OpenChatAttachment(dir, uri, filename); err != nil {
+		s.logger.Error("open chat attachment", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // ShutdownMCP closes MCP child processes / connections.

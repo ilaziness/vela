@@ -30,7 +30,7 @@ type ChatMessage struct {
 // AgentRequest is the input for a single agent Run.
 type AgentRequest struct {
 	Messages     []ChatMessage
-	NewMessage   string
+	NewParts     []*genkitAI.Part // user turn (text + attachment refs); resolved via engine userDataDir
 	SystemPrompt string
 	EnableSSH    bool
 	LinkID       string
@@ -45,7 +45,8 @@ type AgentResponse struct {
 // buildGenkitMessages rebuilds a native Genkit transcript plus the new user turn.
 // System prompt is always injected fresh (not taken from stored history).
 // upsert_plan tool parts are stripped from sealed history (authoritative plan is in system).
-func buildGenkitMessages(history []ChatMessage, newMsg, systemPrompt string) []*genkitAI.Message {
+// Attachment refs (vela-att:// and vela-path:) are resolved using userDataDir.
+func buildGenkitMessages(history []ChatMessage, newParts []*genkitAI.Part, systemPrompt, userDataDir string) ([]*genkitAI.Message, error) {
 	var msgs []*genkitAI.Message
 	if systemPrompt != "" {
 		msgs = append(msgs, genkitAI.NewSystemTextMessage(systemPrompt))
@@ -63,11 +64,22 @@ func buildGenkitMessages(history []ChatMessage, newMsg, systemPrompt string) []*
 		if len(parts) == 0 {
 			continue
 		}
-		msgs = append(msgs, genkitAI.NewMessage(role, nil, parts...))
+		resolved, err := ResolvePartsForModel(userDataDir, parts)
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, genkitAI.NewMessage(role, nil, resolved...))
 	}
 	msgs = sanitizeTranscript(msgs)
-	msgs = append(msgs, genkitAI.NewUserTextMessage(newMsg))
-	return msgs
+	if len(newParts) == 0 {
+		return msgs, fmt.Errorf("new user parts are required")
+	}
+	resolvedNew, err := ResolvePartsForModel(userDataDir, newParts)
+	if err != nil {
+		return nil, err
+	}
+	msgs = append(msgs, genkitAI.NewUserMessage(resolvedNew...))
+	return msgs, nil
 }
 
 // stripUpsertPlanParts drops upsert_plan tool request/response parts from prompt history.

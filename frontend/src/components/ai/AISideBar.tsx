@@ -18,7 +18,9 @@ import type { ChatToolInvocationState } from "@mui/x-chat/headless";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
 import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
+import { AIChatFilePart } from "./AIChatFilePart";
 import ComposerSendStopButton from "./ComposerSendStopButton";
+import { ComposerAttachPathButton } from "./ComposerAttachPathButton";
 import { ComposerPlanDockRoot } from "./DockedPlanPanel";
 import SessionPanel from "./SessionPanel";
 import SSHToolState from "./SSHToolState";
@@ -33,6 +35,13 @@ import {
   SIDEBAR_RESIZE_HANDLE_WIDTH,
   SIDEBAR_WIDTH,
 } from "../../func/aiSidebar";
+import {
+  AI_ATTACH_MAX_BYTES,
+  AI_ATTACH_MAX_COUNT,
+  AI_ATTACH_MIME_TYPES,
+  formatAttachmentRejectMessage,
+} from "../../func/aiAttachments";
+import { useMessageStore } from "../../stores/message";
 
 const SIDEBAR_WIDTH_TRANSITION = "width 225ms ease";
 const SIDEBAR_WIDTH_TRANSITION_MS = 225;
@@ -315,7 +324,15 @@ const AISideBar = () => {
                 onComposerValueChange={setComposerValue}
                 localeText={chatLocaleText}
                 features={{
-                  attachments: false,
+                  attachments: {
+                    acceptedMimeTypes: [...AI_ATTACH_MIME_TYPES],
+                    maxFileCount: AI_ATTACH_MAX_COUNT,
+                    maxFileSize: AI_ATTACH_MAX_BYTES,
+                    onAttachmentReject: (rejections) => {
+                      const msg = formatAttachmentRejectMessage(rejections);
+                      if (msg) useMessageStore.getState().errorMessage(msg);
+                    },
+                  },
                   conversationHeader: false,
                   autoScroll: { buffer: 2000 },
                 }}
@@ -324,10 +341,14 @@ const AISideBar = () => {
                   useAIAssistantStore.getState().setStreaming(false);
                   LogService.Error(`[AI Chat] ${err.source}: ${err.message}`);
                 }}
+                partRenderers={{
+                  file: AIChatFilePart,
+                }}
                 slots={{
                   messageAvatar: CustomMessageAvatar,
                   composerSendButton: ComposerSendStopButton,
                   composerRoot: ComposerPlanDockRoot,
+                  composerAttachButton: ComposerAttachPathButton,
                 }}
                 slotProps={{
                   // maxRows enables MUI auto-grow (rows=1 + height sync). Default TextArea CSS

@@ -169,7 +169,10 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEve
 	}
 	ctx = tool.WithDeps(ctx, deps)
 
-	messages := buildGenkitMessages(req.Messages, req.NewMessage, req.SystemPrompt)
+	messages, err := buildGenkitMessages(req.Messages, req.NewParts, req.SystemPrompt, userDataDir)
+	if err != nil {
+		return nil, err
+	}
 	promptLen := len(messages)
 	finish := func(resp *genkitAI.ModelResponse, streamed string, err error) (*AgentResponse, error) {
 		return applyStreamedText(storedTurn(resp, promptLen), streamed), err

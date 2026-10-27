@@ -6,6 +6,7 @@ import {
   ChatRequest,
   AIMessage,
   ToolApprovalRequest,
+  ChatAttachment,
 } from '../../../bindings/github.com/ilaziness/vela/services/models';
 import { formatAIChatError } from '../../func/aiChatError';
 import { parseCallServiceError } from '../../func/service';
@@ -14,6 +15,7 @@ import {
   isKnownChatTool,
   sanitizeToolInputForDisplay,
 } from '../../func/aiContext';
+import { fileToDataURL, localFilePath } from '../../func/aiAttachments';
 import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
 
@@ -86,11 +88,36 @@ export class GenkitAdapter implements ChatAdapter {
     const runID = `run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 
     try {
+      const draftAtts = input.attachments ?? [];
+      const attachments: ChatAttachment[] = [];
+      for (const att of draftAtts) {
+        const path = localFilePath(att.file);
+        if (path) {
+          attachments.push(
+            new ChatAttachment({
+              path,
+              filename: att.file.name || undefined,
+              mime: att.file.type || undefined,
+            }),
+          );
+          continue;
+        }
+        const dataURL = await fileToDataURL(att.file);
+        attachments.push(
+          new ChatAttachment({
+            data_url: dataURL,
+            filename: att.file.name || undefined,
+            mime: att.file.type || undefined,
+          }),
+        );
+      }
+
       const bind = getCurrentSSHBindState();
       const request = new ChatRequest({
         session_id: sessionId,
         run_id: runID,
         new_message: newMessage,
+        ...(attachments.length > 0 ? { attachments } : {}),
         ...(bind.context ? { ssh_context: bind.context } : {}),
       });
 
@@ -490,6 +517,22 @@ function genkitPartsToMui(parts: any[], fallbackText: string, rowStatus?: string
               output: res.output ?? {},
             },
       });
+      continue;
+    }
+    if (p.media && typeof p.media === 'object') {
+      const media = p.media as { contentType?: string; url?: string };
+      const filename =
+        p.metadata && typeof p.metadata === 'object' && 'filename' in p.metadata
+          ? String((p.metadata as { filename?: unknown }).filename || '')
+          : '';
+      if (media.url) {
+        out.push({
+          type: 'file',
+          mediaType: String(media.contentType || 'application/octet-stream'),
+          url: String(media.url),
+          ...(filename ? { filename } : {}),
+        });
+      }
       continue;
     }
     if (typeof p.text === 'string' && p.text !== '') {

@@ -24,7 +24,10 @@ func TestBuildGenkitMessagesKeepsToolTranscript(t *testing.T) {
 		{Role: string(genkitAI.RoleModel), Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqPart})},
 		{Role: string(genkitAI.RoleTool), Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{respPart})},
 	}
-	msgs := buildGenkitMessages(history, "again", "sys")
+	msgs, err := buildGenkitMessages(history, []*genkitAI.Part{genkitAI.NewTextPart("again")}, "sys", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(msgs) != 5 {
 		t.Fatalf("len=%d", len(msgs))
 	}
@@ -255,7 +258,10 @@ func TestTrimIncompleteToolRound(t *testing.T) {
 		{Role: RoleUser, Content: "run", Parts: UserTextPartsJSON("run")},
 		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqPart})},
 	}
-	msgs := buildGenkitMessages(history, "next", "sys")
+	msgs, err := buildGenkitMessages(history, []*genkitAI.Part{genkitAI.NewTextPart("next")}, "sys", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(msgs) != 3 {
 		t.Fatalf("len=%d want system+user+newUser (dangling tool request dropped)", len(msgs))
 	}
@@ -270,7 +276,10 @@ func TestSanitizeDropsOrphanToolMessage(t *testing.T) {
 		{Role: RoleUser, Content: "hi", Parts: UserTextPartsJSON("hi")},
 		{Role: RoleTool, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{respPart})},
 	}
-	msgs := buildGenkitMessages(history, "next", "sys")
+	msgs, err := buildGenkitMessages(history, []*genkitAI.Part{genkitAI.NewTextPart("next")}, "sys", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(msgs) != 3 {
 		t.Fatalf("len=%d want system+user+newUser", len(msgs))
 	}
@@ -304,7 +313,10 @@ func TestBuildGenkitMessagesStripsUpsertPlanKeepsSSH(t *testing.T) {
 		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{sshReq})},
 		{Role: RoleTool, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{sshResp})},
 	}
-	msgs := buildGenkitMessages(history, "again", "sys")
+	msgs, err := buildGenkitMessages(history, []*genkitAI.Part{genkitAI.NewTextPart("again")}, "sys", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	// system + user + model(text only) + model(ssh req) + tool(ssh) + new user
 	if len(msgs) != 6 {
 		t.Fatalf("len=%d want 6", len(msgs))
