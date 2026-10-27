@@ -32,7 +32,7 @@ interface SSHContainerProps {
   isActive: boolean;
 }
 
-const tabHeight = "30px";
+const tabHeight = "26px";
 const statusBarHeight = `${SSH_STATUS_BAR_HEIGHT}px`;
 const AUTO_RECONNECT_MAX_ATTEMPTS = 5;
 
@@ -433,10 +433,11 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
               "&.MuiTab-root": {
                 height: tabHeight,
                 minHeight: tabHeight,
-                fontSize: "0.85rem",
-                minWidth: 80,
-                width: 80,
-                p: 0.5,
+                fontSize: "0.8125rem",
+                minWidth: 72,
+                width: 72,
+                py: 0,
+                px: 1,
               },
             }}
           />

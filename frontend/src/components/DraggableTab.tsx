@@ -4,7 +4,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import { Draggable } from "@hello-pangea/dnd";
 import { ConnectionStatus } from "../types/ssh";
 
-const tabHeight = "40px";
+const tabHeight = "34px";
 
 export interface DraggableTabProps {
   item: {
@@ -57,10 +57,11 @@ export const DraggableTab = React.memo(function DraggableTab({
             alignItems: "center",
             height: tabHeight,
             minHeight: tabHeight,
-            minWidth: 150,
-            width: 150,
-            px: 1,
-            gap: 0.5,
+            minWidth: 108,
+            width: 108,
+            px: 0.75,
+            py: 0,
+            gap: 0.25,
             borderRight: 2,
             borderColor: "divider",
             backgroundColor: getBackgroundColor(isActive, snapshot.isDragging),
@@ -96,7 +97,8 @@ export const DraggableTab = React.memo(function DraggableTab({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                fontSize: "0.875rem",
+                fontSize: "0.8125rem",
+                lineHeight: 1.2,
               }}
             >
               {item.name}
@@ -109,8 +111,8 @@ export const DraggableTab = React.memo(function DraggableTab({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              width: 20,
-              height: 20,
+              width: 16,
+              height: 16,
               borderRadius: "50%",
               cursor: "pointer",
               opacity: 0.7,
@@ -121,7 +123,7 @@ export const DraggableTab = React.memo(function DraggableTab({
               },
             }}
           >
-            <CloseIcon sx={{ fontSize: 14 }} />
+            <CloseIcon sx={{ fontSize: 12 }} />
           </Box>
         </Box>
       )}

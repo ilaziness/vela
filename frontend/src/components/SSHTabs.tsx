@@ -29,7 +29,7 @@ interface SSHTabsProps {
 }
 
 // tab栏的高度
-const tabHeight = "40px";
+const tabHeight = "34px";
 
 export default function SSHTabs({ onClose }: SSHTabsProps) {
   const sshTabs = useSSHTabsStore((state) => state.sshTabs);

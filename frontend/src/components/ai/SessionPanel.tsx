@@ -170,7 +170,17 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
             </IconButton>
           </Tooltip>
         </Box>
-        <Box sx={{ px: 1.5, pb: 0.75, pt: 0 }}>
+        <Box
+          sx={{
+            px: 1.5,
+            pb: 0.5,
+            pt: 0,
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 0.75,
+            minWidth: 0,
+          }}
+        >
           <Typography
             variant="caption"
             noWrap
@@ -179,13 +189,19 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
                 ? 'info.main'
                 : 'warning.main'
             }
-            sx={{ display: 'block', minWidth: 0, fontWeight: 500 }}
+            sx={{ flexShrink: 0, fontWeight: 500 }}
             title={sshIndicator.line}
           >
             {sshIndicator.line}
           </Typography>
           {sshIndicator.hint ? (
-            <Typography variant="caption" color="text.disabled" sx={{ display: 'block' }}>
+            <Typography
+              variant="caption"
+              noWrap
+              color="text.disabled"
+              sx={{ minWidth: 0 }}
+              title={sshIndicator.hint}
+            >
               {sshIndicator.hint}
             </Typography>
           ) : null}
