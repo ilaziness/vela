@@ -83,7 +83,6 @@
 │   │   ├── language/         # 多语言翻译文件
 │   │   ├── pages/            # 页面级组件（配合 React Router）
 │   │   ├── stores/           # 状态管理（zustand）
-│   │   ├── styles/           # 组件 CSS
 │   │   ├── theme/            # 主题配色
 │   │   ├── types/            # TypeScript 类型定义
 │   │   ├── main.tsx          # 前端入口

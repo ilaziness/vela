@@ -1,29 +1,3 @@
-/* 全局滚动条样式 */
-:root {
-  --scrollbar-width: 10px;
-  --scrollbar-track-bg: #1a1a1a;
-  --scrollbar-thumb-bg: #555;
-  --scrollbar-thumb-hover-bg: #888;
-}
-
-::-webkit-scrollbar {
-  width: var(--scrollbar-width);
-}
-
-::-webkit-scrollbar-track {
-  background: var(--scrollbar-track-bg);
-  border-radius: var(--scrollbar-width);
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb-bg);
-  border-radius: var(--scrollbar-width);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover-bg);
-}
-
 @font-face {
   font-family: "Noto Sans Mono";
   src: url("./fonts/NotoSansMono-Regular.ttf") format("truetype");

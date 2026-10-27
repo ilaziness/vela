@@ -53,6 +53,7 @@ import {
 } from "../func/shortcuts";
 import { useKeybindingsStore } from "../stores/keybindings";
 import type { CommandHistory } from "../types/command";
+import "./Terminal.module.css";
 
 const EVENT_SESSION_LOG_STOPPED = "eventSSHSessionLogStopped";
 
@@ -466,7 +467,6 @@ function Terminal(props: {
   const applyThemeVars = (theme: any) => {
     if (termRef.current) {
       termRef.current.style.setProperty("--term-bg", theme.background);
-      termRef.current.style.setProperty("--term-fg", theme.foreground);
     }
   };
 

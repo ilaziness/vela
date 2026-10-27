@@ -1,0 +1,4 @@
+/* xterm 6 draws this slider; it only inline-sets position, size, and background. */
+:global(.xterm .xterm-scrollable-element > .scrollbar > .slider) {
+  border-radius: 8px;
+}

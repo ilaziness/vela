@@ -123,6 +123,15 @@ export function appFontFamily(font: string): string {
   return [...families, SYSTEM_FONT_FAMILY].join(",");
 }
 
+/** Theme-token scrollbars (CSS vars switch with color scheme). */
+function appScrollbarColors(theme: Theme) {
+  const palette = (theme.vars || theme).palette;
+  return {
+    thumb: palette.text.disabled,
+    track: palette.background.default,
+  };
+}
+
 /**
  * SSH GUI 客户端主题配置
  */
@@ -136,9 +145,24 @@ export function createAppTheme(font = "", fontSize = 14) {
 
   components: {
     MuiCssBaseline: {
+      styleOverrides: (theme: Theme) => {
+        const { thumb, track } = appScrollbarColors(theme);
+        return {
+          html: {
+            fontSize,
+            scrollbarWidth: "thin",
+            scrollbarColor: `${thumb} ${track}`,
+          },
+        };
+      },
+    },
+    MuiChatMessageList: {
       styleOverrides: {
-        html: {
-          fontSize,
+        scroller: ({ theme: t }) => {
+          const { thumb, track } = appScrollbarColors(t);
+          return {
+            scrollbarColor: `${thumb} ${track}`,
+          };
         },
       },
     },

@@ -108,7 +108,7 @@ function Root() {
 
   return (
     <ThemeProvider theme={theme} defaultMode="dark">
-      <CssBaseline />
+      <CssBaseline enableColorScheme />
       <RouterProvider router={routes} />
     </ThemeProvider>
   );
