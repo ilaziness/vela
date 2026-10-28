@@ -8,6 +8,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   IconButton,
   LinearProgress,
   ListItemIcon,
@@ -413,6 +414,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
 
   const handleUpload = async (type: "file" | "directory") => {
     handleCloseBlankMenu();
+    handleCloseMenu();
     const remotePath = currentPath;
     const uploadPromise =
       type === "file"
@@ -544,6 +546,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     setCreateFileDialogOpen(true);
     setNewFileName("");
     handleCloseBlankMenu();
+    handleCloseMenu();
   };
 
   const handleCreateFileConfirm = async () => {
@@ -568,6 +571,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     setCreateDirDialogOpen(true);
     setNewFileName("");
     handleCloseBlankMenu();
+    handleCloseMenu();
   };
 
   const handleCreateDirectoryConfirm = async () => {
@@ -705,7 +709,14 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         </Box>
       ) : (
         <>
-          <Box sx={{ display: "flex", alignItems: "stretch" }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "stretch",
+              borderBottom: 1,
+              borderColor: "divider",
+            }}
+          >
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <SftpNavbar
                 currentPath={localDir}
@@ -735,14 +746,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                borderBottom: 1,
-                borderColor: "divider",
               }}
             >
               <Tooltip title="上传到远程当前目录">
                 <span>
                   <IconButton
                     size="small"
+                    sx={{ p: 0.25 }}
                     disabled={localSelected.size === 0 || remoteNavigating}
                     onClick={() => enqueueUpload(selectedLocalPaths())}
                   >
@@ -754,6 +764,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                 <span>
                   <IconButton
                     size="small"
+                    sx={{ p: 0.25 }}
                     disabled={selectionCount === 0 || !localDir || localNavigating}
                     onClick={() =>
                       enqueueDownload(
@@ -893,109 +904,130 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                 onDrop={(event) => handlePaneDrop(PaneSide.Remote, event)}
                 sx={{ flex: 1, overflow: "auto", position: "relative" }}
               >
-        {loading ? (
-          <Box
-            sx={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              height: "100%",
-            }}
-          >
-            <CircularProgress />
-          </Box>
-        ) : (
-          <TableContainer component={Paper} sx={{ boxShadow: "none" }}>
-            <Table stickyHeader size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      size="small"
-                      indeterminate={selectionCount > 0 && !allSelected}
-                      checked={allSelected}
-                      onChange={toggleSelectAll}
-                    />
-                  </TableCell>
-                  <TableCell>类型</TableCell>
-                  <TableCell>名称</TableCell>
-                  <TableCell align="center">大小</TableCell>
-                  <TableCell align="center">修改时间</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {fileList.map((file) => {
-                  const selected = selectedNames.has(file.name);
-                  return (
-                    <TableRow
-                      hover
-                      key={file.name}
-                      selected={selected}
-                      draggable
-                      sx={{
-                        cursor: file.isDir ? "pointer" : "default",
-                      }}
-                      onContextMenu={(e) => handleContextMenu(e, file)}
-                      onDoubleClick={() => handleItemClick(file)}
-                      onDragStart={(event) => {
-                        if (dragStartsOnControl(event.target)) {
-                          event.preventDefault();
-                          return;
-                        }
-                        writePaneDrag(event.dataTransfer, {
-                          side: PaneSide.Remote,
-                          paths: pathsForRemoteDrag(file),
-                        });
-                      }}
-                    >
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          size="small"
-                          checked={selected}
-                          onChange={() => {
-                            setSelectedNames((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(file.name)) next.delete(file.name);
-                              else next.add(file.name);
-                              return next;
-                            });
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell component="th" scope="row">
-                        {file.isDir ? (
-                          <FolderIcon sx={{ color: "#FFB74D" }} />
-                        ) : (
-                          <FileIcon sx={{ color: "#81C784" }} />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: "flex", alignItems: "center" }}>
-                          <Typography noWrap sx={{ flex: 1 }}>
-                            {file.name}
-                          </Typography>
-                          <Typography
-                            noWrap
-                            variant="subtitle2"
-                            color="textSecondary"
-                          >
-                            {file.mode}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        {file.isDir ? "-" : formatFileSize(file.size)}
-                      </TableCell>
-                      <TableCell align="center">
-                        {new Date(file.modTime).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
+                {loading ? (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      height: "100%",
+                    }}
+                  >
+                    <CircularProgress />
+                  </Box>
+                ) : (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      flexDirection: "column",
+                      minHeight: "100%",
+                    }}
+                  >
+                    <TableContainer component={Paper} sx={{ boxShadow: "none" }}>
+                      <Table stickyHeader size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell padding="checkbox">
+                              <Checkbox
+                                size="small"
+                                indeterminate={
+                                  selectionCount > 0 && !allSelected
+                                }
+                                checked={allSelected}
+                                onChange={toggleSelectAll}
+                              />
+                            </TableCell>
+                            <TableCell>类型</TableCell>
+                            <TableCell>名称</TableCell>
+                            <TableCell align="center">大小</TableCell>
+                            <TableCell align="center">修改时间</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {fileList.map((file) => {
+                            const selected = selectedNames.has(file.name);
+                            return (
+                              <TableRow
+                                hover
+                                key={file.name}
+                                selected={selected}
+                                draggable
+                                sx={{
+                                  cursor: file.isDir ? "pointer" : "default",
+                                }}
+                                onContextMenu={(e) =>
+                                  handleContextMenu(e, file)
+                                }
+                                onDoubleClick={() => handleItemClick(file)}
+                                onDragStart={(event) => {
+                                  if (dragStartsOnControl(event.target)) {
+                                    event.preventDefault();
+                                    return;
+                                  }
+                                  writePaneDrag(event.dataTransfer, {
+                                    side: PaneSide.Remote,
+                                    paths: pathsForRemoteDrag(file),
+                                  });
+                                }}
+                              >
+                                <TableCell padding="checkbox">
+                                  <Checkbox
+                                    size="small"
+                                    checked={selected}
+                                    onChange={() => {
+                                      setSelectedNames((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(file.name))
+                                          next.delete(file.name);
+                                        else next.add(file.name);
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell component="th" scope="row">
+                                  {file.isDir ? (
+                                    <FolderIcon sx={{ color: "#FFB74D" }} />
+                                  ) : (
+                                    <FileIcon sx={{ color: "#81C784" }} />
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <Box
+                                    sx={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                    }}
+                                  >
+                                    <Typography noWrap sx={{ flex: 1 }}>
+                                      {file.name}
+                                    </Typography>
+                                    <Typography
+                                      noWrap
+                                      variant="subtitle2"
+                                      color="textSecondary"
+                                    >
+                                      {file.mode}
+                                    </Typography>
+                                  </Box>
+                                </TableCell>
+                                <TableCell align="center">
+                                  {file.isDir
+                                    ? "-"
+                                    : formatFileSize(file.size)}
+                                </TableCell>
+                                <TableCell align="center">
+                                  {new Date(file.modTime).toLocaleString()}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Box sx={{ flex: 1, minHeight: 48 }} />
+                  </Box>
+                )}
               </Box>
               {fullScreenLoading && (
                 <Box
@@ -1093,6 +1125,31 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <ListItemText>修改属主</ListItemText>
           </MenuItem>
         )}
+        <Divider />
+        <MenuItem onClick={handleCreateFile}>
+          <ListItemIcon>
+            <CreateFileIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>新建文件</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={handleCreateDirectory}>
+          <ListItemIcon>
+            <CreateFolderIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>新建文件夹</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => void handleUpload("file")}>
+          <ListItemIcon>
+            <UploadIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>上传文件</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => void handleUpload("directory")}>
+          <ListItemIcon>
+            <FolderOpenIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>上传文件夹</ListItemText>
+        </MenuItem>
       </Menu>
 
       <Menu
@@ -1117,13 +1174,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           </ListItemIcon>
           <ListItemText>新建文件夹</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => handleUpload("file")}>
+        <MenuItem onClick={() => void handleUpload("file")}>
           <ListItemIcon>
             <UploadIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>上传文件</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => handleUpload("directory")}>
+        <MenuItem onClick={() => void handleUpload("directory")}>
           <ListItemIcon>
             <FolderOpenIcon fontSize="small" />
           </ListItemIcon>

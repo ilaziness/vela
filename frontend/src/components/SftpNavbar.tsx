@@ -59,8 +59,6 @@ const SftpNavbar: React.FC<SftpNavbarProps> = ({
       onSubmit={handlePathSubmit}
       sx={{
         p: 1,
-        borderBottom: 1,
-        borderColor: "divider",
         display: "flex",
         alignItems: "center",
         gap: 1,
