@@ -1,5 +1,7 @@
 # Vela — 跨平台 SSH & SFTP GUI 客户端
 
+[中文](README.md) | [English](README.en.md)
+
 [![CI](https://github.com/ilaziness/vela/actions/workflows/release.yml/badge.svg)](https://github.com/ilaziness/vela/actions/workflows/release.yml)
 [![Release](https://img.shields.io/github/v/release/ilaziness/vela)](https://github.com/ilaziness/vela/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vela/releases)
@@ -13,7 +15,7 @@
 
 ## 📖 简介
 
-**Vela** 是一个简洁、响应迅速的桌面应用程序，将 SSH 和 SFTP 的强大功能带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vela 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问和文件管理工具。
+**Vela** 是一个简洁、响应迅速的桌面应用程序，将 SSH 和 SFTP 的强大功能带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vela 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问和文件管理工具。界面支持英语、简体中文和繁体中文。
 
 ---
 
@@ -39,7 +41,8 @@
 
 **SFTP 与书签**
 
-- SFTP 文件浏览器：上传、下载、删除、重命名；修改远程权限与属主（chmod / chown）
+- SFTP 左右分栏，本机与远程目录并排管理
+- SFTP 文件浏览器：上传、下载、删除、重命名、就地编辑；修改远程权限与属主（chmod / chown）
 - 断点续传；传输失败可重试；未完成任务队列持久化（按书签恢复）
 - 多选批量下载与删除；传输任务管理
 - 书签管理与分组，快速连接常用服务器
@@ -47,10 +50,11 @@
 **效率与运维**
 
 - 命令库：自定义命令片段，一键发送到多个会话
+- 多语言：英语、简体中文、繁体中文
 - 主题切换：亮色、暗色、护眼等方案
 - 加密远程备份与多设备恢复，支持历史版本
 - 自动更新检查，自动下载安装新版
-- AI 侧边栏：分析问题并协助执行命令，支持自定义MCP和Skill
+- AI 侧边栏：分析问题并自动执行命令（需批准），内置远程命令执行工具，本地文件系统工具（目录白名单），网络搜索，并支持自定义MCP和Skill扩展
 
 ---
 
