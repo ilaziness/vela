@@ -28,9 +28,6 @@ interface SSHTabsProps {
   onClose?: () => void;
 }
 
-// tab栏的高度
-const tabHeight = "34px";
-
 export default function SSHTabs({ onClose }: SSHTabsProps) {
   const sshTabs = useSSHTabsStore((state) => state.sshTabs);
   const currentTab = useSSHTabsStore((state) => state.currentTab);
@@ -180,9 +177,8 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
           borderBottom: 1,
           borderColor: "divider",
           display: "flex",
-          alignItems: "center",
+          flexShrink: 0,
           width: "100%",
-          height: tabHeight,
           pr: 1,
           bgcolor: "background.paper",
         }}
@@ -200,7 +196,6 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
                   display: "flex",
                   flex: frameless ? "0 1 auto" : 1,
                   minWidth: 0,
-                  height: tabHeight,
                   overflow: "auto",
                   scrollbarWidth: "none",
                   "&::-webkit-scrollbar": {
@@ -239,7 +234,6 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
             }}
             sx={{
               flex: "1 0 0",
-              alignSelf: "stretch",
               minWidth: 0,
               "--wails-draggable": "drag",
             }}
@@ -265,7 +259,8 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
       <Box
         sx={{
           width: "100%",
-          height: `calc(100% - ${tabHeight})`,
+          flex: 1,
+          minHeight: 0,
           display: "flex",
           flexDirection: "row",
           overflow: "hidden",

@@ -4,8 +4,6 @@ import CloseIcon from "@mui/icons-material/Close";
 import { Draggable } from "@hello-pangea/dnd";
 import { ConnectionStatus } from "../types/ssh";
 
-const tabHeight = "34px";
-
 export interface DraggableTabProps {
   item: {
     index: string;
@@ -55,12 +53,10 @@ export const DraggableTab = React.memo(function DraggableTab({
           sx={{
             display: "flex",
             alignItems: "center",
-            height: tabHeight,
-            minHeight: tabHeight,
+            minHeight: 34,
             minWidth: 108,
             width: 108,
             px: 0.75,
-            py: 0,
             gap: 0.25,
             borderRight: 2,
             borderColor: "divider",
@@ -94,11 +90,10 @@ export const DraggableTab = React.memo(function DraggableTab({
             <Box
               sx={{
                 flex: 1,
+                minWidth: 0,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                fontSize: "0.8125rem",
-                lineHeight: 1.2,
               }}
             >
               {item.name}
