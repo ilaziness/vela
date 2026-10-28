@@ -17,6 +17,7 @@ import {
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { RegexMatchResult } from "../types/tool";
+import { t, tf } from "../i18n";
 
 export default function RegexTool() {
   const [pattern, setPattern] = useState("");
@@ -39,7 +40,7 @@ export default function RegexTool() {
       const res = await ToolService.RegexMatch(pattern, text, flagStr);
       setResult(res);
     } catch {
-      setResult({ matches: [], count: 0, error: "匹配失败" });
+      setResult({ matches: [], count: 0, error: t("tools.regex.match_failed") });
     }
   }, [pattern, text, flags]);
 
@@ -57,17 +58,17 @@ export default function RegexTool() {
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        正则表达式测试
+        {t("tools.regex.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        实时测试正则表达式匹配结果
+        {t("tools.regex.desc")}
       </Typography>
 
       <Paper sx={{ p: 3 }}>
         <Stack spacing={3}>
           <TextField
-            label="正则表达式"
-            placeholder="输入正则表达式，例如: \d+"
+            label={t("tools.regex.pattern")}
+            placeholder={t("tools.regex.pattern_placeholder")}
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
             fullWidth
@@ -81,7 +82,7 @@ export default function RegexTool() {
                   onChange={() => handleFlagChange("i")}
                 />
               }
-              label="忽略大小写 (i)"
+              label={t("tools.regex.flag_i")}
             />
             <FormControlLabel
               control={
@@ -90,7 +91,7 @@ export default function RegexTool() {
                   onChange={() => handleFlagChange("m")}
                 />
               }
-              label="多行模式 (m)"
+              label={t("tools.regex.flag_m")}
             />
             <FormControlLabel
               control={
@@ -99,13 +100,13 @@ export default function RegexTool() {
                   onChange={() => handleFlagChange("g")}
                 />
               }
-              label="全局匹配 (g)"
+              label={t("tools.regex.flag_g")}
             />
           </FormGroup>
 
           <TextField
-            label="测试文本"
-            placeholder="输入要测试的文本内容"
+            label={t("tools.regex.test_text")}
+            placeholder={t("tools.regex.test_placeholder")}
             value={text}
             onChange={(e) => setText(e.target.value)}
             multiline
@@ -118,29 +119,34 @@ export default function RegexTool() {
           {result && !result.error && (
             <Box>
               <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
-                <Typography variant="subtitle1">匹配结果</Typography>
+                <Typography variant="subtitle1">{t("tools.regex.results")}</Typography>
                 <Chip
-                  label={`${result.count} 个匹配`}
+                  label={tf("tools.regex.match_count", result.count)}
                   color={result.count > 0 ? "success" : "default"}
                   size="small"
                 />
               </Stack>
 
               {result.matches.length === 0 ? (
-                <Alert severity="info">未找到匹配项</Alert>
+                <Alert severity="info">{t("tools.regex.no_matches")}</Alert>
               ) : (
                 <Stack spacing={1}>
                   {result.matches.map((match, index) => (
                     <Accordion key={`${match.text}-${match.index}`} defaultExpanded={index === 0}>
                       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                         <Typography variant="body2">
-                          匹配 #{index + 1}: "{match.text}" (位置: {match.index})
+                          {tf(
+                            "tools.regex.match_n",
+                            index + 1,
+                            match.text,
+                            match.index,
+                          )}
                         </Typography>
                       </AccordionSummary>
                       {match.groups.length > 0 && (
                         <AccordionDetails>
                           <Typography variant="subtitle2" gutterBottom>
-                            捕获组:
+                            {t("tools.regex.capture_groups")}
                           </Typography>
                           <Stack spacing={0.5}>
                             {match.groups.map((group, groupIndex) => (

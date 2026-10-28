@@ -12,6 +12,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termws"
@@ -173,11 +174,12 @@ func (s *SSHService) hops(req ConnectRequest) ([]ssh.Endpoint, error) {
 }
 
 func (s *SSHService) connectHops(hops []ssh.Endpoint, proxy ssh.ProxyConfig) (string, error) {
-	return s.mgr.Connect(hops, proxy)
+	id, err := s.mgr.Connect(hops, proxy)
+	return id, mapSSHUserError(err)
 }
 
 func (s *SSHService) testHops(hops []ssh.Endpoint, proxy ssh.ProxyConfig) error {
-	return s.mgr.TestConnect(hops, proxy)
+	return mapSSHUserError(s.mgr.TestConnect(hops, proxy))
 }
 
 func (s *SSHService) hasSession(id string) bool {
@@ -277,11 +279,11 @@ func (s *SSHService) CloseByID(id string) error {
 }
 
 func (s *SSHService) SelectKeyFile() (string, error) {
-	return s.app.Dialog.OpenFile().SetTitle("选择私钥文件").PromptForSingleSelection()
+	return s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_private_key")).PromptForSingleSelection()
 }
 
 func (s *SSHService) SelectCertificateFile() (string, error) {
-	return s.app.Dialog.OpenFile().SetTitle("选择证书文件").PromptForSingleSelection()
+	return s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_certificate")).PromptForSingleSelection()
 }
 
 func (s *SSHService) GetActiveSessions() []map[string]any {
@@ -317,7 +319,8 @@ func (s *SSHService) GetOrFetchRemoteSystemInfo(linkID, host string) *ssh.Remote
 }
 
 func (s *SSHService) GetHostResources(linkID string) (ssh.HostResources, error) {
-	return s.mgr.FetchHostResources(context.Background(), linkID)
+	r, err := s.mgr.FetchHostResources(context.Background(), linkID)
+	return r, mapSSHUserError(err)
 }
 
 // StartSessionLog opens a save dialog and begins recording session output.
@@ -327,7 +330,7 @@ func (s *SSHService) StartSessionLog(sessionID string) (path string, started boo
 		return "", false, fmt.Errorf("session id is required")
 	}
 	if !s.mgr.HasSession(sessionID) {
-		return "", false, fmt.Errorf(ssh.ErrConnectionNotFound, sessionID)
+		return "", false, mapSSHUserError(fmt.Errorf("%w: %s", ssh.ErrSessionNotFound, sessionID))
 	}
 	if s.mgr.IsSessionLogging(sessionID) {
 		return "", false, fmt.Errorf("session log already recording")
@@ -337,7 +340,7 @@ func (s *SSHService) StartSessionLog(sessionID string) (path string, started boo
 		prefix = prefix[:8]
 	}
 	filename := fmt.Sprintf("vela-session-%s-%s.log", prefix, time.Now().Format("20060102-150405"))
-	path, err = promptSaveFile(s.app, "保存会话日志", filename)
+	path, err = promptSaveFile(s.app, i18n.T("dialog.save_session_log"), filename)
 	if dialogCancelled(err) || path == "" {
 		return "", false, nil
 	}

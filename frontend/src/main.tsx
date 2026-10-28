@@ -6,13 +6,23 @@ import { RouterProvider } from "react-router/dom";
 import { Events } from "@wailsio/runtime";
 import routes from "./routes.tsx";
 import { createAppTheme } from "./theme";
-import { ReadConfig } from "../bindings/github.com/ilaziness/vela/services/configservice";
+import {
+  GetI18nBootstrap,
+  ReadConfig,
+} from "../bindings/github.com/ilaziness/vela/services/configservice";
 import { Config } from "../bindings/github.com/ilaziness/vela/services";
 import useTerminalStore from "./stores/terminal";
 import type { AppTheme } from "./types/ssh";
+import {
+  ensureI18nBootstrap,
+  getLanguage,
+  reloadI18nBootstrap,
+  setI18nBootstrapLoader,
+} from "./i18n";
 
 const EVENT_APPEARANCE = "eventAppearance";
 const EVENT_TERMINAL = "eventTerminal";
+const EVENT_LANGUAGE = "eventLanguage";
 
 interface Appearance {
   Font?: string;
@@ -49,8 +59,16 @@ function syncTerminalTheme(globalTheme: string | undefined): void {
   useTerminalStore.getState().syncWithGlobalTheme(validTheme);
 }
 
+setI18nBootstrapLoader(() => GetI18nBootstrap());
+
 let initialFont = "";
 let initialFontSize = 14;
+
+try {
+  await ensureI18nBootstrap();
+} catch (err) {
+  console.error("I18n bootstrap failed:", err);
+}
 
 try {
   const config = await ReadConfig();
@@ -69,6 +87,7 @@ try {
 function Root() {
   const [font, setFont] = useState(initialFont);
   const [fontSize, setFontSize] = useState(initialFontSize);
+  const [lang, setLang] = useState(getLanguage());
 
   useEffect(() => {
     const unsubscribe = Events.On(
@@ -101,9 +120,22 @@ function Root() {
     };
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = Events.On(EVENT_LANGUAGE, () => {
+      void reloadI18nBootstrap()
+        .then(() => setLang(getLanguage()))
+        .catch((err) => {
+          console.error("eventLanguage reload failed:", err);
+        });
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const theme = useMemo(
-    () => createAppTheme(font, fontSize),
-    [font, fontSize],
+    () => createAppTheme(font, fontSize, lang),
+    [font, fontSize, lang],
   );
 
   return (

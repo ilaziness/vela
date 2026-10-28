@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -91,7 +92,7 @@ func TestAuthMethodsEmpty(t *testing.T) {
 
 func TestFinalizeAuthMethodsEmpty(t *testing.T) {
 	_, err := finalizeAuthMethods(nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "没有可用认证") {
+	if !errors.Is(err, ErrNoAuthMethods) {
 		t.Fatalf("err = %v", err)
 	}
 }

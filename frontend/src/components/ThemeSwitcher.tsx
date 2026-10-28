@@ -4,10 +4,11 @@ import { useColorScheme } from "@mui/material/styles";
 import PaletteIcon from "@mui/icons-material/Palette";
 import useTerminalStore from "../stores/terminal";
 import { AppTheme } from "../types/ssh";
-import { ThemeOptions } from "../theme";
+import { ThemeOptions, themeOptionLabel } from "../theme";
 import { RailMenuButton } from "./RailIconButton";
 import { SetTheme } from "../../bindings/github.com/ilaziness/vela/services/configservice";
 import { LogService } from "../../bindings/github.com/ilaziness/vela/services";
+import { t } from "../i18n";
 
 const VALID_THEMES: AppTheme[] = ["light", "dark", "eyeCare"];
 
@@ -74,7 +75,7 @@ export default function ThemeSwitcher() {
 
   return (
     <>
-      <RailMenuButton title="主题切换" onClick={handleMenuOpen}>
+      <RailMenuButton title={t("theme.switch")} onClick={handleMenuOpen}>
         <PaletteIcon />
       </RailMenuButton>
       <Menu
@@ -124,7 +125,7 @@ export default function ThemeSwitcher() {
               value={option.value}
               onClick={() => handleThemeSelect(option.value)}
             >
-              {option.label}
+              {themeOptionLabel(option)}
             </ToggleButton>
           ))}
         </ToggleButtonGroup>

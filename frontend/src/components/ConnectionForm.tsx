@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import {
   Button,
   FormControl,
@@ -22,13 +22,18 @@ import {
 import * as BookmarkService from "../../bindings/github.com/ilaziness/vela/services/bookmarkservice";
 import { SSHLinkInfo, toConnectRequest } from "../types/ssh";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { translateServiceError } from "../func/service";
 import {
   SSHBookmark,
   BookmarkGroup,
   BookmarkListItem,
 } from "../../bindings/github.com/ilaziness/vela/services/models";
 import { ProxyMode, ProxyType } from "../types/proxy";
+import {
+  DEFAULT_BOOKMARK_GROUP_ID,
+  displayBookmarkGroupName,
+  t,
+} from "../i18n";
 
 // 输入连接信息表单
 interface ConnectionFormProps {
@@ -36,8 +41,6 @@ interface ConnectionFormProps {
   error?: string;
   connecting?: boolean;
 }
-
-const DEFAULT_GROUP = "默认书签";
 
 const ConnectionForm: React.FC<ConnectionFormProps> = ({
   onConnect,
@@ -54,7 +57,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
   const [certificate, setCertificate] = useState("");
   const [allBookmarks, setAllBookmarks] = useState<BookmarkListItem[]>([]);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState(DEFAULT_GROUP);
+  const [selectedGroup, setSelectedGroup] = useState(DEFAULT_BOOKMARK_GROUP_ID);
   const [groups, setGroups] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
 
@@ -70,7 +73,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
         setAllBookmarks(res.filter((b): b is BookmarkListItem => b !== null));
       })
       .catch((err) => {
-        console.error("获取书签列表失败:", err);
+        console.error("GetAllBookmarks failed:", err);
       });
   }, []);
 
@@ -79,8 +82,8 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       const file = await SSHService.SelectKeyFile();
       LogService.Debug(`select key file ${file}`);
       setKey(file);
-    } catch (err: any) {
-      errorMessage(parseCallServiceError(err));
+    } catch (err: unknown) {
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -91,19 +94,19 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       if (file) {
         setCertificate(file);
       }
-    } catch (err: any) {
-      errorMessage(parseCallServiceError(err));
+    } catch (err: unknown) {
+      errorMessage(translateServiceError(err));
     }
   };
 
   const validate = (): number | null => {
     if (!host.trim() || !port.toString().trim() || !user.trim()) {
-      errorMessage("Host、Port 和 Username 为必填项");
+      errorMessage(t("bookmark.connect_fields_required"));
       return null;
     }
     const p = Number(port);
     if (Number.isNaN(p) || p <= 0) {
-      errorMessage("Port 必须是有效的数字");
+      errorMessage(t("bookmark.port_invalid"));
       return null;
     }
     return p;
@@ -147,28 +150,27 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
           certificate,
         }),
       );
-      successMessage("连接测试成功");
+      successMessage(t("bookmark.test_success"));
     } catch (err) {
       LogService.Warn(`Connection test failed: ${err}`);
-      errorMessage("连接测试失败: " + parseCallServiceError(err));
+      errorMessage(t("bookmark.test_failed", translateServiceError(err)));
     } finally {
       setTesting(false);
     }
   };
 
   const handleSaveClick = () => {
-    // 加载书签分组
     BookmarkService.ListBookmarks()
       .then((bookmarkGroups) => {
         const groupNames = bookmarkGroups
           .filter((group): group is BookmarkGroup => group !== null)
           .map((group) => group.name);
         setGroups(groupNames);
-        setSelectedGroup(groupNames[0] || DEFAULT_GROUP);
+        setSelectedGroup(groupNames[0] || DEFAULT_BOOKMARK_GROUP_ID);
         setSaveDialogOpen(true);
       })
       .catch((err) => {
-        errorMessage(parseCallServiceError(err));
+        errorMessage(translateServiceError(err));
       });
   };
 
@@ -218,7 +220,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
         });
       })
       .catch((err) => {
-        errorMessage(parseCallServiceError(err));
+        errorMessage(translateServiceError(err));
       });
   };
 
@@ -238,7 +240,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
         <FormControl sx={{ width: 300 }}>
           <TextField
             required
-            label="Host"
+            label={t("bookmark.field.host")}
             value={host}
             onChange={(e) => setHost(e.target.value)}
             variant="outlined"
@@ -248,7 +250,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
           />
           <TextField
             required
-            label="Port"
+            label={t("bookmark.field.port")}
             value={port}
             onChange={(e) => setPort(e.target.value)}
             variant="outlined"
@@ -258,7 +260,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
           />
           <TextField
             required
-            label="Username"
+            label={t("bookmark.field.username")}
             value={user}
             onChange={(e) => setUser(e.target.value)}
             variant="outlined"
@@ -267,7 +269,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             sx={{ m: 0.8 }}
           />
           <TextField
-            label="Password"
+            label={t("bookmark.field.password")}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             variant="outlined"
@@ -278,23 +280,23 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
           />
           <Box sx={{ display: "flex", gap: 1, m: 0.8 }}>
             <TextField
-              label="Key file"
+              label={t("bookmark.field.key_file")}
               value={key}
               variant="outlined"
               size="small"
               slotProps={{
                 input: { readOnly: true },
               }}
-              placeholder="please select key file"
+              placeholder={t("bookmark.field.key_file_placeholder")}
               sx={{ flex: 1 }}
             />
             <Button type="button" onClick={onSelectKeyFile} variant="outlined">
-              Select
+              {t("common.select_file")}
             </Button>
           </Box>
           {key && (
             <TextField
-              label="Key Password"
+              label={t("bookmark.field.key_passphrase")}
               value={keyPassword}
               onChange={(e) => setKeyPassword(e.target.value)}
               variant="outlined"
@@ -302,27 +304,27 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
               type="password"
               size="small"
               sx={{ m: 0.8 }}
-              placeholder="private key password (optional)"
+              placeholder={t("bookmark.field.key_passphrase_placeholder")}
             />
           )}
           <Box sx={{ display: "flex", gap: 1, m: 0.8 }}>
             <TextField
-              label="Certificate"
+              label={t("bookmark.field.cert_file")}
               value={certificate}
               variant="outlined"
               size="small"
               slotProps={{
                 input: { readOnly: true },
               }}
-              placeholder="OpenSSH user certificate"
+              placeholder={t("bookmark.field.cert_file_placeholder")}
               sx={{ flex: 1 }}
             />
             <Button type="button" onClick={onSelectCertificate} variant="outlined">
-              Select
+              {t("common.select_file")}
             </Button>
             {certificate ? (
               <Button type="button" onClick={() => setCertificate("")} variant="outlined">
-                Clear
+                {t("common.clear")}
               </Button>
             ) : null}
           </Box>
@@ -339,8 +341,8 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             renderInput={(params) => (
               <TextField
                 {...params}
-                label="ProxyJump"
-                placeholder="Select proxy jump bookmark"
+                label={t("bookmark.field.proxy_jump")}
+                placeholder={t("bookmark.field.proxy_jump_placeholder")}
               />
             )}
             isOptionEqualToValue={(option, value) => option.id === value.id}
@@ -360,7 +362,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             loading={testing}
             onClick={handleTestConnection}
           >
-            测试连接
+            {t("bookmark.test_connect")}
           </Button>
           <Button
             variant="contained"
@@ -368,7 +370,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             size="large"
             loading={connecting}
           >
-            连接
+            {t("common.connect")}
           </Button>
           <Button
             variant="outlined"
@@ -376,35 +378,38 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             loading={connecting}
             onClick={handleSaveClick}
           >
-            保存
+            {t("common.save")}
           </Button>
         </Box>
       </Box>
 
-      {/* 保存书签对话框 */}
       <Dialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)}>
-        <DialogTitle>保存到书签</DialogTitle>
+        <DialogTitle>{t("bookmark.save_to_bookmark")}</DialogTitle>
         <DialogContent>
           <Box sx={{ mt: 2, minWidth: 400 }}>
-            <InputLabel id="bookmark-group-select-label">选择分组</InputLabel>
+            <InputLabel id="bookmark-group-select-label">
+              {t("bookmark.select_group_label")}
+            </InputLabel>
             <Select
               labelId="bookmark-group-select-label"
               value={selectedGroup}
-              label="选择分组"
+              label={t("bookmark.select_group_label")}
               onChange={(e) => setSelectedGroup(e.target.value)}
               fullWidth
             >
               {groups.map((group) => (
                 <MenuItem key={group} value={group}>
-                  {group}
+                  {displayBookmarkGroupName(group)}
                 </MenuItem>
               ))}
             </Select>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSaveDialogOpen(false)}>取消</Button>
-          <Button onClick={handleSaveBookmark}>保存</Button>
+          <Button onClick={() => setSaveDialogOpen(false)}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={handleSaveBookmark}>{t("common.save")}</Button>
         </DialogActions>
       </Dialog>
     </>

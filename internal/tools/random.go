@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"strings"
 	"uuid"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // RandomResult 随机生成结果
@@ -35,7 +37,7 @@ func (ts *Service) GenerateRandom(kind string, length int, charset string, custo
 	case "string":
 		return generateRandomString(length, charset, customCharset)
 	default:
-		return RandomResult{Success: false, Error: "不支持的类型: " + kind}
+		return RandomResult{Success: false, Error: i18n.Tf("tool.err.unsupported_kind", kind)}
 	}
 }
 
@@ -44,7 +46,7 @@ func generateRandomString(length int, charsetName string, customCharset string) 
 		length = 16
 	}
 	if length > 1024 {
-		return RandomResult{Success: false, Error: "长度不能超过 1024"}
+		return RandomResult{Success: false, Error: i18n.T("tool.err.length_max")}
 	}
 
 	charset, err := resolveCharset(charsetName, customCharset)
@@ -58,7 +60,7 @@ func generateRandomString(length int, charsetName string, customCharset string) 
 	for i := 0; i < length; i++ {
 		n, err := rand.Int(rand.Reader, charsetLen)
 		if err != nil {
-			return RandomResult{Success: false, Error: "生成随机数失败: " + err.Error()}
+			return RandomResult{Success: false, Error: i18n.Tf("tool.err.random_failed", err.Error())}
 		}
 		b.WriteByte(charset[n.Int64()])
 	}
@@ -79,10 +81,10 @@ func resolveCharset(name string, custom string) (string, error) {
 		return charsetBase64, nil
 	case "custom":
 		if custom == "" {
-			return "", errors.New("自定义字符集不能为空")
+			return "", errors.New("custom charset cannot be empty")
 		}
 		return custom, nil
 	default:
-		return "", errors.New("不支持的字符集: " + name)
+		return "", errors.New("unsupported charset: " + name)
 	}
 }

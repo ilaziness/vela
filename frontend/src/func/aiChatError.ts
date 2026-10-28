@@ -1,24 +1,32 @@
-const AI_NOT_ENABLED =
-  "AI 助手尚未启用，请前往「设置 → AI」完成配置并启用后再试";
+import { t } from "../i18n";
 
-const LEGACY_ERROR_PATTERNS = [
+/** English / legacy raw errors that should map to catalog keys. */
+const NOT_ENABLED_PATTERNS = [
   /ai engine not initialized/i,
-  /ai 助手尚未启用/i,
-  /ai 助手初始化失败/i,
-  /ai 配置加载失败/i,
+  /ai assistant is not enabled/i,
+  /ai \u52a9\u624b\u5c1a\u672a\u542f\u7528/i,
+  /ai \u52a9\u624b\u521d\u59cb\u5316\u5931\u8d25/i,
+  /ai \u914d\u7f6e\u52a0\u8f7d\u5931\u8d25/i,
 ];
 
-/** 将 AI 对话相关错误转换为用户可读提示 */
+const TOOL_ARGS_PATTERNS = [
+  /could not parse tool args/i,
+  /unmarshal failed to parse json/i,
+  /\u5de5\u5177\u53c2\u6570 JSON \u65e0\u6548/i,
+];
+
+/**
+ * Polish AI chat errors for display.
+ * Prefer already-translated usererr strings from translateServiceError;
+ * only remap known technical/legacy English (or short legacy CN) fragments.
+ */
 export const formatAIChatError = (raw: string): string => {
   const message = raw.trim().replace(/^AI chat failed:\s*/i, "").trim();
-  if (LEGACY_ERROR_PATTERNS.some((pattern) => pattern.test(message))) {
-    return AI_NOT_ENABLED;
+  if (NOT_ENABLED_PATTERNS.some((pattern) => pattern.test(message))) {
+    return t("ai.not_enabled");
   }
-  if (message.startsWith("AI 助手")) {
-    return AI_NOT_ENABLED;
-  }
-  if (/could not parse tool args|unmarshal failed to parse json|工具参数 JSON 无效/i.test(message)) {
-    return "工具参数 JSON 无效（命令过长或引号未转义）。请改用更短的单条命令后重试。";
+  if (TOOL_ARGS_PATTERNS.some((pattern) => pattern.test(message))) {
+    return t("ai.error.tool_args_invalid");
   }
   if (message.length > 400) {
     return `${message.slice(0, 400)}…`;

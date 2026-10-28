@@ -33,7 +33,6 @@ import {
 import * as BookmarkService from "../../bindings/github.com/ilaziness/vela/services/bookmarkservice";
 import { BookmarkListItem } from "../../bindings/github.com/ilaziness/vela/services/models";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
 import FormRow from "./FormRow";
 import {
   BookmarkIconView,
@@ -47,6 +46,12 @@ import {
   normalizeBookmarkTags,
 } from "../func/bookmarkMeta";
 import { BOOKMARK_COLOR_OPTIONS, BookmarkColor } from "../types/bookmark";
+import {
+  DEFAULT_BOOKMARK_GROUP_ID,
+  displayBookmarkGroupName,
+  t,
+} from "../i18n";
+import { translateServiceError } from "../func/service";
 
 interface BookmarkFormProps {
   bookmark: SSHBookmark | null;
@@ -88,7 +93,7 @@ const CHARSET_OPTIONS = [
 const emptyBookmark = (): SSHBookmark => ({
   id: "",
   title: "",
-  group_name: "默认书签",
+  group_name: DEFAULT_BOOKMARK_GROUP_ID,
   host: "",
   port: 22,
   private_key: "",
@@ -142,7 +147,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         setAllBookmarks(res.filter((b): b is BookmarkListItem => b !== null));
       })
       .catch((err) => {
-        errorMessage(parseCallServiceError(err));
+        errorMessage(translateServiceError(err));
       });
   }, [errorMessage]);
 
@@ -175,7 +180,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         setStoredKeys((res ?? []).filter((item): item is SSHKeyInfo => item != null));
       })
       .catch((err) => {
-        errorMessage(parseCallServiceError(err));
+        errorMessage(translateServiceError(err));
       });
   }, [bookmark, errorMessage]);
 
@@ -231,39 +236,39 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
 
   const validateForm = (): boolean => {
     if (!formData.title.trim()) {
-      errorMessage("书签名称不能为空");
+      errorMessage(t("bookmark.name_required"));
       setTab(BookmarkFormTab.Basic);
       return false;
     }
     if (!formData.host.trim()) {
-      errorMessage("主机地址不能为空");
+      errorMessage(t("bookmark.host_required"));
       setTab(BookmarkFormTab.Connection);
       return false;
     }
     if (!formData.port || formData.port <= 0) {
-      errorMessage("端口必须是有效的正整数");
+      errorMessage(t("bookmark.port_invalid"));
       setTab(BookmarkFormTab.Connection);
       return false;
     }
     if (!formData.user.trim()) {
-      errorMessage("用户名不能为空");
+      errorMessage(t("bookmark.username_required"));
       setTab(BookmarkFormTab.Connection);
       return false;
     }
     if (formData.proxy_mode === ProxyMode.Custom) {
       if (!formData.proxy_type) {
-        errorMessage("请选择代理类型");
+        errorMessage(t("bookmark.proxy_type_required"));
         setTab(BookmarkFormTab.Connection);
         return false;
       }
       if (!formData.proxy_host?.trim()) {
-        errorMessage("代理主机不能为空");
+        errorMessage(t("bookmark.proxy_host_required"));
         setTab(BookmarkFormTab.Connection);
         return false;
       }
       const proxyPort = formData.proxy_port ?? 0;
       if (proxyPort < 1 || proxyPort > 65535) {
-        errorMessage("代理端口必须在 1–65535 之间");
+        errorMessage(t("bookmark.proxy_port_invalid"));
         setTab(BookmarkFormTab.Connection);
         return false;
       }
@@ -352,7 +357,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         }));
       }
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     }
   };
 
@@ -366,7 +371,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         }));
       }
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     }
   };
 
@@ -383,10 +388,10 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
         }}
       >
         <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-          请选择一个书签进行编辑
+          {t("bookmark.select_to_edit")}
         </Typography>
         <Typography variant="body2" color="text.disabled">
-          从左侧列表中选择或创建一个新书签
+          {t("bookmark.select_to_edit_hint")}
         </Typography>
       </Box>
     );
@@ -417,16 +422,22 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
           onChange={(_, v: BookmarkFormTab) => setTab(v)}
           sx={{ px: 1, flexShrink: 0, borderBottom: 1, borderColor: "divider" }}
         >
-          <Tab label="基本信息" value={BookmarkFormTab.Basic} />
-          <Tab label="连接信息" value={BookmarkFormTab.Connection} />
-          <Tab label="认证信息" value={BookmarkFormTab.Auth} />
-          <Tab label="会话选项" value={BookmarkFormTab.Session} />
+          <Tab label={t("bookmark.tab.basic")} value={BookmarkFormTab.Basic} />
+          <Tab
+            label={t("bookmark.tab.connection")}
+            value={BookmarkFormTab.Connection}
+          />
+          <Tab label={t("bookmark.tab.auth")} value={BookmarkFormTab.Auth} />
+          <Tab
+            label={t("bookmark.tab.session")}
+            value={BookmarkFormTab.Session}
+          />
         </Tabs>
 
         <Box sx={{ flex: 1, overflowY: "auto", minHeight: 0, px: 3, pt: 2, pb: 3 }}>
           {tab === BookmarkFormTab.Basic && (
             <Stack spacing={2}>
-              <FormRow label="图标" labelWidth={120}>
+              <FormRow label={t("bookmark.field.icon")} labelWidth={120}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <IconButton
                     size="small"
@@ -440,7 +451,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                     <BookmarkIconView icon={formData.icon} fontSize={20} />
                   </IconButton>
                   <Typography variant="body2" color="text.secondary">
-                    {formData.icon || "默认"}
+                    {formData.icon || t("common.default")}
                   </Typography>
                   <OsIconPicker
                     value={formData.icon || ""}
@@ -453,35 +464,38 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   />
                 </Box>
               </FormRow>
-              <FormRow label="书签名称" labelWidth={120}>
+              <FormRow label={t("bookmark.field.name")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
                   name="title"
                   value={formData.title}
                   onChange={handleChange}
-                  placeholder="请输入书签名称"
+                  placeholder={t("bookmark.field.name_placeholder")}
                 />
               </FormRow>
-              <FormRow label="分组" labelWidth={120}>
+              <FormRow label={t("bookmark.field.group")} labelWidth={120}>
                 <FormControl fullWidth size="small">
                   <Select
                     value={formData.group_name}
                     onChange={handleGroupChange}
                     displayEmpty
+                    renderValue={(v) => displayBookmarkGroupName(String(v))}
                   >
                     {groupNames.length === 0 && (
-                      <MenuItem value="默认书签">默认书签</MenuItem>
+                      <MenuItem value={DEFAULT_BOOKMARK_GROUP_ID}>
+                        {t("bookmark.group.default")}
+                      </MenuItem>
                     )}
                     {groupNames.map((groupName) => (
                       <MenuItem key={groupName} value={groupName}>
-                        {groupName}
+                        {displayBookmarkGroupName(groupName)}
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </FormRow>
-              <FormRow label="标签" labelWidth={120}>
+              <FormRow label={t("bookmark.field.tags")} labelWidth={120}>
                 <Autocomplete
                   multiple
                   freeSolo
@@ -497,13 +511,13 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                     }));
                   }}
                   renderInput={(params) => (
-                    <TextField {...params} placeholder="输入后回车添加" />
+                    <TextField {...params} placeholder={t("bookmark.field.tags_placeholder")} />
                   )}
                 />
               </FormRow>
-              <FormRow label="颜色" labelWidth={120}>
+              <FormRow label={t("bookmark.field.color")} labelWidth={120}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                  <Tooltip title="无">
+                  <Tooltip title={t("common.none")}>
                     <Box
                       component="button"
                       type="button"
@@ -560,17 +574,17 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
 
           {tab === BookmarkFormTab.Connection && (
             <Stack spacing={2}>
-              <FormRow label="主机地址" labelWidth={120}>
+              <FormRow label={t("bookmark.field.host")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
                   name="host"
                   value={formData.host}
                   onChange={handleChange}
-                  placeholder="例如: 192.168.1.100 或 example.com"
+                  placeholder={t("bookmark.field.host_placeholder")}
                 />
               </FormRow>
-              <FormRow label="端口" labelWidth={120}>
+              <FormRow label={t("bookmark.field.port")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
@@ -578,20 +592,20 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   type="number"
                   value={formData.port}
                   onChange={handleChange}
-                  placeholder="默认: 22"
+                  placeholder={t("bookmark.port_default_hint")}
                 />
               </FormRow>
-              <FormRow label="用户名" labelWidth={120}>
+              <FormRow label={t("bookmark.field.username")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
                   name="user"
                   value={formData.user}
                   onChange={handleChange}
-                  placeholder="SSH 登录用户名"
+                  placeholder={t("bookmark.field.username_placeholder")}
                 />
               </FormRow>
-              <FormRow label="跳板机(ProxyJump)" labelWidth={120}>
+              <FormRow label={t("bookmark.field.proxy_jump")} labelWidth={120}>
                 <Autocomplete
                   size="small"
                   fullWidth
@@ -611,7 +625,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                     }));
                   }}
                   renderInput={(params) => (
-                    <TextField {...params} placeholder="选择跳板机（可选）" />
+                    <TextField {...params} placeholder={t("bookmark.field.proxy_jump_placeholder")} />
                   )}
                   isOptionEqualToValue={(option, value) => option.id === value.id}
                 />
@@ -622,9 +636,9 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                 variant="subtitle2"
                 sx={{ fontWeight: 600, color: "text.secondary" }}
               >
-                拨号代理
+                {t("bookmark.dial_proxy")}
               </Typography>
-              <FormRow label="代理模式" labelWidth={120}>
+              <FormRow label={t("bookmark.field.proxy_mode")} labelWidth={120}>
                 <FormControl fullWidth size="small">
                   <Select
                     value={formData.proxy_mode || ProxyMode.Inherit}
@@ -639,15 +653,15 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       }));
                     }}
                   >
-                    <MenuItem value={ProxyMode.Inherit}>跟随全局设置</MenuItem>
-                    <MenuItem value={ProxyMode.None}>直连（不使用代理）</MenuItem>
-                    <MenuItem value={ProxyMode.Custom}>自定义代理</MenuItem>
+                    <MenuItem value={ProxyMode.Inherit}>{t("bookmark.proxy_mode.inherit")}</MenuItem>
+                    <MenuItem value={ProxyMode.None}>{t("bookmark.proxy_mode.none")}</MenuItem>
+                    <MenuItem value={ProxyMode.Custom}>{t("bookmark.proxy_mode.custom")}</MenuItem>
                   </Select>
                 </FormControl>
               </FormRow>
               {formData.proxy_mode === ProxyMode.Custom && (
                 <>
-                  <FormRow label="代理类型" labelWidth={120}>
+                  <FormRow label={t("bookmark.field.proxy_type")} labelWidth={120}>
                     <TextField
                       select
                       fullWidth
@@ -664,17 +678,17 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       <MenuItem value={ProxyType.Socks5}>SOCKS5</MenuItem>
                     </TextField>
                   </FormRow>
-                  <FormRow label="代理主机" labelWidth={120}>
+                  <FormRow label={t("bookmark.field.proxy_host")} labelWidth={120}>
                     <TextField
                       fullWidth
                       size="small"
                       name="proxy_host"
                       value={formData.proxy_host || ""}
                       onChange={handleChange}
-                      placeholder="例如: 127.0.0.1"
+                      placeholder={t("bookmark.proxy_host_placeholder")}
                     />
                   </FormRow>
-                  <FormRow label="代理端口" labelWidth={120}>
+                  <FormRow label={t("bookmark.field.proxy_port")} labelWidth={120}>
                     <TextField
                       fullWidth
                       size="small"
@@ -682,20 +696,20 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       type="number"
                       value={formData.proxy_port || ""}
                       onChange={handleChange}
-                      placeholder="例如: 1080"
+                      placeholder={t("bookmark.proxy_port_placeholder")}
                     />
                   </FormRow>
-                  <FormRow label="用户名" labelWidth={120}>
+                  <FormRow label={t("bookmark.field.username")} labelWidth={120}>
                     <TextField
                       fullWidth
                       size="small"
                       name="proxy_user"
                       value={formData.proxy_user || ""}
                       onChange={handleChange}
-                      placeholder="可选"
+                      placeholder={t("common.optional")}
                     />
                   </FormRow>
-                  <FormRow label="密码" labelWidth={120}>
+                  <FormRow label={t("bookmark.field.password")} labelWidth={120}>
                     <TextField
                       fullWidth
                       size="small"
@@ -703,11 +717,11 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       type="password"
                       value={formData.proxy_password || ""}
                       onChange={handleChange}
-                      placeholder="可选"
+                      placeholder={t("common.optional")}
                     />
                   </FormRow>
                   <Typography variant="caption" color="text.secondary">
-                    有跳板机时，代理只作用于连到第一跳；与系统代理无关
+                    {t("bookmark.proxy_jump_hint")}
                   </Typography>
                 </>
               )}
@@ -716,7 +730,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
 
           {tab === BookmarkFormTab.Auth && (
             <Stack spacing={2}>
-              <FormRow label="Agent 转发" labelWidth={120}>
+              <FormRow label={t("bookmark.field.agent_forward")} labelWidth={120}>
                 <FormControlLabel
                   control={
                     <Checkbox
@@ -729,10 +743,10 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       }
                     />
                   }
-                  label="转发 SSH Agent（需本机 Agent 在运行）"
+                  label={t("bookmark.field.agent_forward_label")}
                 />
               </FormRow>
-              <FormRow label="密码" labelWidth={120}>
+              <FormRow label={t("bookmark.field.password")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
@@ -740,10 +754,10 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   type="password"
                   value={formData.password}
                   onChange={handleChange}
-                  placeholder="密码认证（可选）"
+                  placeholder={t("bookmark.field.password_placeholder")}
                 />
               </FormRow>
-              <FormRow label="应用内密钥" labelWidth={120}>
+              <FormRow label={t("bookmark.field.app_key")} labelWidth={120}>
                 <TextField
                   select
                   fullWidth
@@ -758,25 +772,25 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                     }));
                   }}
                 >
-                  <MenuItem value="">不使用</MenuItem>
+                  <MenuItem value="">{t("bookmark.field.app_key_none")}</MenuItem>
                   {formData.ssh_key_id &&
                     !storedKeys.some((key) => key.id === formData.ssh_key_id) && (
-                      <MenuItem value={formData.ssh_key_id}>已保存的密钥</MenuItem>
+                      <MenuItem value={formData.ssh_key_id}>{t("bookmark.field.app_key_saved")}</MenuItem>
                     )}
                   {storedKeys.map((key) => (
                     <MenuItem key={key.id} value={key.id}>
-                      {key.name}（{key.algorithm}）
+                      {key.name} ({key.algorithm})
                     </MenuItem>
                   ))}
                 </TextField>
               </FormRow>
-              <FormRow label="密钥文件" labelWidth={120}>
+              <FormRow label={t("bookmark.field.key_file")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
                   name="private_key"
                   value={formData.private_key}
-                  placeholder="私钥文件路径（可选）"
+                  placeholder={t("bookmark.field.key_file_placeholder")}
                   slotProps={{
                     input: {
                       readOnly: true,
@@ -786,7 +800,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                             edge="end"
                             onClick={handleSelectFile}
                             size="small"
-                            title="选择文件"
+                            title={t("common.select_file")}
                           >
                             <MoreHorizIcon />
                           </IconButton>
@@ -796,7 +810,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   }}
                 />
               </FormRow>
-              <FormRow label="密钥密码" labelWidth={120}>
+              <FormRow label={t("bookmark.field.key_passphrase")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
@@ -807,18 +821,18 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   disabled={Boolean(formData.ssh_key_id)}
                   placeholder={
                     formData.ssh_key_id
-                      ? "应用内密钥不使用此口令"
-                      : "私钥密码（可选）"
+                      ? t("bookmark.field.key_passphrase_app")
+                      : t("bookmark.field.key_passphrase_placeholder")
                   }
                 />
               </FormRow>
-              <FormRow label="证书文件" labelWidth={120}>
+              <FormRow label={t("bookmark.field.cert_file")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
                   name="certificate"
                   value={formData.certificate || ""}
-                  placeholder="OpenSSH 用户证书（可选）"
+                  placeholder={t("bookmark.field.cert_file_placeholder")}
                   slotProps={{
                     input: {
                       readOnly: true,
@@ -834,7 +848,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                                 }))
                               }
                               size="small"
-                              title="清除证书"
+                              title={t("bookmark.clear_cert")}
                             >
                               <ClearIcon />
                             </IconButton>
@@ -843,7 +857,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                             edge="end"
                             onClick={handleSelectCertificate}
                             size="small"
-                            title="选择证书文件"
+                            title={t("bookmark.select_cert")}
                           >
                             <MoreHorizIcon />
                           </IconButton>
@@ -871,12 +885,12 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                       displayEmpty: true,
                       renderValue: (selected) => {
                         const v = String(selected ?? "");
-                        return v || "默认（xterm-256color）";
+                        return v || t("bookmark.term_type_default");
                       },
                     },
                   }}
                 >
-                  <MenuItem value="">默认（xterm-256color）</MenuItem>
+                  <MenuItem value="">{t("bookmark.term_type_default")}</MenuItem>
                   {TERM_OPTIONS.map((t) => (
                     <MenuItem key={t} value={t}>
                       {t}
@@ -888,7 +902,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                     )}
                 </TextField>
               </FormRow>
-              <FormRow label="终端编码" labelWidth={120}>
+              <FormRow label={t("bookmark.field.term_encoding")} labelWidth={120}>
                 <TextField
                   select
                   fullWidth
@@ -904,7 +918,7 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   ))}
                 </TextField>
               </FormRow>
-              <FormRow label="环境变量" labelWidth={120}>
+              <FormRow label={t("bookmark.field.env")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
@@ -912,17 +926,17 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
                   minRows={2}
                   value={envText}
                   onChange={(e) => setEnvText(e.target.value)}
-                  placeholder={"每行一条 KEY=value"}
+                  placeholder={t("bookmark.field.env_placeholder")}
                 />
               </FormRow>
-              <FormRow label="启动命令" labelWidth={120}>
+              <FormRow label={t("bookmark.field.startup_cmd")} labelWidth={120}>
                 <TextField
                   fullWidth
                   size="small"
                   name="startup_cmd"
                   value={formData.startup_cmd || ""}
                   onChange={handleChange}
-                  placeholder="登录后自动执行，例如：cd /var/www && ls（可选）"
+                  placeholder={t("bookmark.field.startup_cmd_placeholder")}
                 />
               </FormRow>
             </Stack>
@@ -947,17 +961,15 @@ const BookmarkForm: React.FC<BookmarkFormProps> = ({
             onClick={handleTestConnection}
             loading={isLoading}
           >
-            测试连接
+            {t("bookmark.test_connect")}
           </Button>
-          <Button variant="outlined" onClick={handleSave} loading={isLoading}>
-            保存
-          </Button>
+          <Button variant="outlined" onClick={handleSave} loading={isLoading}>{t("common.save")}</Button>
           <Button
             variant="contained"
             onClick={handleSaveAndConnect}
             loading={isLoading}
           >
-            保存并连接
+            {t("bookmark.save_and_connect")}
           </Button>
         </Box>
       </Paper>

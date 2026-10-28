@@ -3,20 +3,29 @@ package bookmark
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termcharset"
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
 )
 
 const PasswordMask = "********"
-const DefaultGroupName = "默认书签"
+
+// DefaultGroupName is the stable persisted id for the default bookmark group.
+// UI must display via i18n key bookmark.group.default.
+const DefaultGroupName = "__default__"
+
+// LegacyDefaultGroupName is the pre-i18n Chinese name; migrated to DefaultGroupName.
+const LegacyDefaultGroupName = "默认书签"
 
 type PasswordFn func(reason string) (string, error)
 
@@ -116,7 +125,7 @@ func (s *Service) password(reason string) (string, error) {
 }
 
 func (s *Service) encryptField(value, fieldName string) (string, error) {
-	password, err := s.password("需要密码来加密书签相关密码")
+	password, err := s.password(i18n.T("password.encrypt_bookmark"))
 	if err != nil {
 		return "", err
 	}
@@ -163,7 +172,7 @@ func (s *Service) encryptFieldIfNeeded(newValue, existing, fieldName string) (st
 }
 
 func (s *Service) decryptField(encrypted, fieldName string) (string, error) {
-	password, err := s.password("需要密码来加密书签相关密码")
+	password, err := s.password(i18n.T("password.encrypt_bookmark"))
 	if err != nil {
 		return "", err
 	}
@@ -208,7 +217,7 @@ func (s *Service) decryptBookmark(b Bookmark) (Bookmark, error) {
 func (s *Service) Get(id string) (*Bookmark, error) {
 	dbBookmark, err := s.db.BookmarkRepo.GetBookmarkByID(id)
 	if err != nil {
-		return nil, fmt.Errorf("未找到 ID 为 '%s' 的书签", id)
+		return nil, usererr.Coded("bookmark.not_found", "Bookmark not found")
 	}
 	groupName := ""
 	if group, _ := s.db.BookmarkRepo.GetGroupByID(dbBookmark.GroupID); group != nil {
@@ -272,7 +281,7 @@ func (s *Service) ResolveHops(target ssh.Endpoint, jumpID string) ([]ssh.Endpoin
 	id := jumpID
 	for id != "" {
 		if len(hops) > 6 {
-			return nil, fmt.Errorf("跳板机层数超过最大限制 (5)")
+			return nil, usererr.Coded("bookmark.jump_too_deep", "ProxyJump chain exceeds the maximum of 5 hops")
 		}
 		b, err := s.GetDecrypted(id)
 		if err != nil {
@@ -289,10 +298,10 @@ func (s *Service) ResolveHops(target ssh.Endpoint, jumpID string) ([]ssh.Endpoin
 		ep.Charset = ""
 		ep.ForwardAgent = false
 		if seen[ep.Addr()] {
-			return nil, fmt.Errorf("检测到跳板机循环引用: %s", ep.Addr())
+			return nil, usererr.Coded("bookmark.jump_cycle", "ProxyJump cycle detected: %s", ep.Addr())
 		}
 		if ep.Host == hops[len(hops)-1].Host && ep.Port == hops[len(hops)-1].Port {
-			return nil, fmt.Errorf("跳板机不能与目标主机相同")
+			return nil, usererr.Coded("bookmark.jump_same_host", "ProxyJump host cannot be the same as the target")
 		}
 		seen[ep.Addr()] = true
 		hops = append([]ssh.Endpoint{ep}, hops...)
@@ -319,7 +328,7 @@ func (s *Service) attachKey(ep ssh.Endpoint, keyID string) (ssh.Endpoint, error)
 		return ep, nil
 	}
 	if s.keyPEM == nil {
-		return ssh.Endpoint{}, fmt.Errorf("密钥服务未初始化")
+		return ssh.Endpoint{}, usererr.Coded("bookmark.key_service_nil", "Key service is not initialized")
 	}
 	pem, err := s.keyPEM(keyID)
 	if err != nil {
@@ -414,14 +423,14 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 	if b.GroupName != "" {
 		g, err := s.db.BookmarkRepo.GetGroupByName(b.GroupName)
 		if err != nil {
-			return fmt.Errorf("未找到分组 '%s'", b.GroupName)
+			return usererr.Coded("bookmark.group_not_found", "Group '%s' not found", b.GroupName)
 		}
 		groupID = g.ID
 	}
 	if existing.Title != b.Title || existing.GroupID != groupID {
 		dup, err := s.db.BookmarkRepo.GetBookmarkByTitleAndGroup(b.Title, groupID)
 		if err == nil && dup.ID != b.ID {
-			return fmt.Errorf("分组 '%s' 中已存在名称为 '%s' 的书签", b.GroupName, b.Title)
+			return usererr.Coded("bookmark.title_exists", "Bookmark '%s' already exists in group '%s'", b.Title, b.GroupName)
 		}
 		if err != nil && err.Error() != "bookmark not found" {
 			return err
@@ -481,14 +490,14 @@ func (s *Service) insert(b Bookmark) (string, error) {
 	}
 	group, err := s.db.BookmarkRepo.GetGroupByName(groupName)
 	if err != nil {
-		return "", fmt.Errorf("未找到分组 '%s'", groupName)
+		return "", usererr.Coded("bookmark.group_not_found", "Group '%s' not found", groupName)
 	}
 	exists, err := s.titleExistsInGroup(b.Title, group.ID)
 	if err != nil {
 		return "", err
 	}
 	if exists {
-		return "", fmt.Errorf("分组 '%s' 中已存在名称为 '%s' 的书签", groupName, b.Title)
+		return "", usererr.Coded("bookmark.title_exists", "Bookmark '%s' already exists in group '%s'", b.Title, groupName)
 	}
 	processed, err := s.encryptBookmark(b)
 	if err != nil {
@@ -528,7 +537,7 @@ func validateSessionOptions(b *Bookmark) error {
 	b.EnvVars = normalized
 	b.StartupCmd = strings.TrimSpace(b.StartupCmd)
 	if strings.ContainsAny(b.StartupCmd, "\r\n") {
-		return fmt.Errorf("启动命令不能包含换行")
+		return usererr.Coded("bookmark.startup_cmd_newline", "Startup command cannot contain newlines")
 	}
 	b.Term = strings.TrimSpace(b.Term)
 	charset, err := termcharset.Normalize(b.Charset)
@@ -549,7 +558,7 @@ func (s *Service) Delete(id string) error {
 
 func (s *Service) AddGroup(name string) error {
 	if _, err := s.db.BookmarkRepo.GetGroupByName(name); err == nil {
-		return fmt.Errorf("分组 '%s' 已存在", name)
+		return usererr.Coded("bookmark.group_exists", "Group '%s' already exists", name)
 	}
 	if err := s.db.BookmarkRepo.InsertGroup(&database.BookmarkGroupDB{Name: name}); err != nil {
 		return err
@@ -562,12 +571,12 @@ func (s *Service) UpdateGroup(oldName, newName, icon string) error {
 	if newName == "" {
 		newName = oldName
 	}
-	if oldName == DefaultGroupName && newName != oldName {
-		return fmt.Errorf("不能修改默认分组名称")
+	if (oldName == DefaultGroupName || oldName == LegacyDefaultGroupName) && newName != oldName {
+		return usererr.Coded("bookmark.cannot_rename_default", "Cannot rename the default group")
 	}
 	if newName != oldName {
 		if _, err := s.db.BookmarkRepo.GetGroupByName(newName); err == nil {
-			return fmt.Errorf("分组 '%s' 已存在", newName)
+			return usererr.Coded("bookmark.group_exists", "Group '%s' already exists", newName)
 		}
 	}
 	if err := s.db.BookmarkRepo.UpdateGroup(oldName, newName, icon); err != nil {
@@ -580,7 +589,7 @@ func (s *Service) UpdateGroup(oldName, newName, icon string) error {
 func (s *Service) Copy(id string) (*Bookmark, error) {
 	src, err := s.db.BookmarkRepo.GetBookmarkByID(id)
 	if err != nil {
-		return nil, fmt.Errorf("未找到 ID 为 '%s' 的书签", id)
+		return nil, usererr.Coded("bookmark.not_found", "Bookmark not found")
 	}
 	title, err := s.uniqueCopyTitle(src.Title, src.GroupID)
 	if err != nil {
@@ -630,7 +639,7 @@ func (s *Service) titleExistsInGroup(title string, groupID int) (bool, error) {
 }
 
 func (s *Service) uniqueCopyTitle(base string, groupID int) (string, error) {
-	title := base + " 复制"
+	title := base + " copy"
 	exists, err := s.titleExistsInGroup(title, groupID)
 	if err != nil {
 		return "", err
@@ -639,7 +648,7 @@ func (s *Service) uniqueCopyTitle(base string, groupID int) (string, error) {
 		return title, nil
 	}
 	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s 复制%d", base, i)
+		candidate := fmt.Sprintf("%s copy%d", base, i)
 		exists, err := s.titleExistsInGroup(candidate, groupID)
 		if err != nil {
 			return "", err
@@ -651,15 +660,15 @@ func (s *Service) uniqueCopyTitle(base string, groupID int) (string, error) {
 }
 
 func (s *Service) DeleteGroup(name string) error {
-	if name == DefaultGroupName {
-		return fmt.Errorf("不能删除默认分组")
+	if name == DefaultGroupName || name == LegacyDefaultGroupName {
+		return usererr.Coded("bookmark.cannot_delete_default", "Cannot delete the default group")
 	}
 	count, err := s.db.BookmarkRepo.GetGroupBookmarkCount(name)
 	if err != nil {
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("分组 '%s' 下还有 %d 个书签，无法删除", name, count)
+		return usererr.Coded("bookmark.group_not_empty", "Group '%s' still has %s bookmarks and cannot be deleted", name, strconv.Itoa(count))
 	}
 	if err := s.db.BookmarkRepo.DeleteGroup(name); err != nil {
 		return err
@@ -744,7 +753,7 @@ func (s *Service) normalizeKeySource(b Bookmark) (Bookmark, error) {
 		return b, nil
 	}
 	if _, err := s.db.SSHKeyRepo.Get(b.SshKeyID); err != nil {
-		return b, fmt.Errorf("应用内密钥不存在")
+		return b, usererr.Coded("bookmark.app_key_missing", "Application SSH key not found")
 	}
 	b.PrivateKey = ""
 	b.PrivateKeyPassword = ""

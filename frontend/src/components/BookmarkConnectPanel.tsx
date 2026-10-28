@@ -29,13 +29,14 @@ import {
 import { Events } from "@wailsio/runtime";
 import { useSSHTabsStore } from "../stores/ssh";
 import { ConnectionStatus } from "../types/ssh";
-import { genTabIndex, parseCallServiceError } from "../func/service";
+import { displayBookmarkGroupName, t } from "../i18n";
 import {
   bookmarkColorHex,
   filterBookmarkGroups,
 } from "../func/bookmarkMeta";
 import { useMessageStore } from "../stores/message";
 import { BookmarkIconView, GroupIconView } from "./icons/bookmarkIcons";
+import { genTabIndex, translateServiceError } from "../func/service";
 
 const PANEL_WIDTH = 220;
 const PANEL_WIDTH_TRANSITION = "width 225ms ease";
@@ -72,7 +73,7 @@ export default function BookmarkConnectPanel({
         setBookmarks([]);
       }
     } catch (error) {
-      errorMessage("加载书签失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.load_failed", translateServiceError(error)));
     }
   }, [errorMessage]);
 
@@ -125,7 +126,7 @@ export default function BookmarkConnectPanel({
     try {
       const bookmark = await BookmarkService.GetBookmarkByID(bookmarkID);
       if (!bookmark) {
-        errorMessage("书签不存在");
+        errorMessage(t("bookmark.not_found"));
         return;
       }
       const sshInfo = {
@@ -144,7 +145,7 @@ export default function BookmarkConnectPanel({
       });
       setCurrentTab(newIndex);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -199,7 +200,7 @@ export default function BookmarkConnectPanel({
             fullWidth
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索书签"
+            placeholder={t("bookmark.search_connect_placeholder")}
             sx={{
               "& .MuiInputBase-root": {
                 height: 28,
@@ -227,7 +228,7 @@ export default function BookmarkConnectPanel({
                       size="small"
                       onClick={() => setSearchQuery("")}
                       edge="end"
-                      aria-label="清除搜索"
+                      aria-label={t("common.clear_search")}
                       sx={{ p: 0.25 }}
                     >
                       <ClearIcon sx={{ fontSize: 14 }} />
@@ -244,7 +245,7 @@ export default function BookmarkConnectPanel({
             {filtering && visibleGroups.length === 0 ? (
               <Box sx={{ px: 2, py: 3, textAlign: "center" }}>
                 <Typography variant="body2" color="text.secondary">
-                  无匹配书签
+                  {t("bookmark.no_match")}
                 </Typography>
               </Box>
             ) : null}
@@ -263,7 +264,9 @@ export default function BookmarkConnectPanel({
                     <ListItemIcon sx={{ minWidth: 28 }}>
                       <GroupIconView icon={group.icon} fontSize={18} />
                     </ListItemIcon>
-                    <ListItemText primary={group.name} />
+                    <ListItemText
+                      primary={displayBookmarkGroupName(group.name)}
+                    />
                   </ListItemButton>
                 </ListItem>
                 <Collapse

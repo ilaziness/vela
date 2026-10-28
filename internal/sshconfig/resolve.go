@@ -50,7 +50,7 @@ func Resolve(blocks []RawHostBlock) ([]HostEntry, []Warning) {
 			}
 		}
 		if !hasConcrete && len(b.Patterns) > 0 {
-			warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: 通配 Host %s 仅作默认合并，不单独导入为书签", b.Source, strings.Join(b.Patterns, " "))})
+			warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: wildcard Host %s used for defaults only; not imported as a bookmark", b.Source, strings.Join(b.Patterns, " "))})
 		}
 	}
 	return entries, warnings
@@ -89,14 +89,14 @@ func resolveAlias(alias string, blocks []RawHostBlock) (HostEntry, []Warning) {
 				got["port"] = true
 				e.Port = p
 			} else {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: 无效 Port %q", alias, vals[0])})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: invalid Port %q", alias, vals[0])})
 			}
 		}
 		if vals := kw["identityfile"]; len(vals) > 0 && take("identityfile") {
 			for _, v := range vals {
 				expanded, err := ExpandPath(v)
 				if err != nil {
-					warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: IdentityFile 展开失败 %s: %v", alias, v, err)})
+					warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: IdentityFile expand failed %s: %v", alias, v, err)})
 					// ExpandPath still returns an unquoted path on failure.
 				}
 				if expanded != "" {
@@ -104,13 +104,13 @@ func resolveAlias(alias string, blocks []RawHostBlock) (HostEntry, []Warning) {
 				}
 			}
 			if len(vals) > 1 {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: 多个 IdentityFile，导入时仅使用第一条", alias)})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: multiple IdentityFile entries; only the first is imported", alias)})
 			}
 		}
 		if vals := kw["certificatefile"]; len(vals) > 0 && take("certificatefile") {
 			expanded, err := ExpandPath(vals[0])
 			if err != nil {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: CertificateFile 展开失败: %v", alias, err)})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: CertificateFile expand failed: %v", alias, err)})
 			}
 			e.CertificateFile = expanded
 		}
@@ -131,7 +131,7 @@ func resolveAlias(alias string, blocks []RawHostBlock) (HostEntry, []Warning) {
 				k, val, ok := strings.Cut(v, "=")
 				k = strings.TrimSpace(k)
 				if !ok || k == "" {
-					warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: 无效 SetEnv %q", alias, v)})
+					warnings = append(warnings, Warning{Message: fmt.Sprintf("Host %s: invalid SetEnv %q", alias, v)})
 					continue
 				}
 				val = unquoteSSH(val)

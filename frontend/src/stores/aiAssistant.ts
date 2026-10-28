@@ -3,9 +3,10 @@ import {
   AIService,
 } from '../../bindings/github.com/ilaziness/vela/services/index';
 import type { AISession } from '../../bindings/github.com/ilaziness/vela/services/models';
-import { parseCallServiceError } from '../func/service';
 import { useMessageStore } from './message';
 import { loadStoredSidebarWidth, persistSidebarWidth, clampSidebarWidth } from '../func/aiSidebar';
+import { t } from '../i18n';
+import { translateServiceError } from "../func/service";
 
 export interface AISessionItem {
   id: string;
@@ -16,7 +17,7 @@ export interface AISessionItem {
 function mapSession(session: AISession): AISessionItem {
   return {
     id: session.id,
-    title: session.title || '新会话',
+    title: session.title ?? '',
     updatedAt: session.updated_at,
   };
 }
@@ -108,7 +109,7 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
       set({ sessions: items, activeSessionId: nextActive, loadingSessions: false });
     } catch (err) {
       set({ loadingSessions: false });
-      useMessageStore.getState().errorMessage(parseCallServiceError(err));
+      useMessageStore.getState().errorMessage(translateServiceError(err));
     }
   },
 
@@ -122,7 +123,7 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
     try {
       const session = await AIService.CreateSession();
       if (!session) {
-        useMessageStore.getState().errorMessage('创建会话失败');
+        useMessageStore.getState().errorMessage(t('ai.session.create_failed'));
         return false;
       }
       const item = mapSession(session);
@@ -133,7 +134,7 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
       }));
       return true;
     } catch (err) {
-      useMessageStore.getState().errorMessage(parseCallServiceError(err));
+      useMessageStore.getState().errorMessage(translateServiceError(err));
       return false;
     }
   },
@@ -155,7 +156,7 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
       const nextActive = activeSessionId === id ? remaining[0].id : activeSessionId;
       set({ sessions: remaining, activeSessionId: nextActive });
     } catch (err) {
-      useMessageStore.getState().errorMessage(parseCallServiceError(err));
+      useMessageStore.getState().errorMessage(translateServiceError(err));
     }
   },
 

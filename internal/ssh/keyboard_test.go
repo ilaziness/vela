@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -213,7 +214,7 @@ func TestKeyboardChallengeCancelAndTimeout(t *testing.T) {
 		return nil
 	}
 	_, err := m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, nil, time.Second, time.Second, "", "info", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "已取消") {
+	if !errors.Is(err, ErrAuthCancelled) {
 		t.Fatalf("err = %v", err)
 	}
 	if len(prompter.dismissed) != 1 {
@@ -222,7 +223,7 @@ func TestKeyboardChallengeCancelAndTimeout(t *testing.T) {
 
 	prompter.fn = func(KeyboardChallenge) error { return nil }
 	_, err = m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, nil, time.Second, 20*time.Millisecond, "", "", []string{"Code:"}, []bool{false})
-	if err == nil || !strings.Contains(err.Error(), "等待超时") {
+	if !errors.Is(err, ErrAuthTimeout) {
 		t.Fatalf("err = %v", err)
 	}
 	if len(prompter.dismissed) != 2 {

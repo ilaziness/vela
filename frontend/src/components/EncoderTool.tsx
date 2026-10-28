@@ -19,7 +19,8 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { EncodingType } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function EncoderTool() {
   const [input, setInput] = useState("");
@@ -31,7 +32,7 @@ export default function EncoderTool() {
 
   const handleEncode = async () => {
     if (!input.trim()) {
-      setError("请输入要编码的内容");
+      setError(t("tools.encoder.encode_required"));
       return;
     }
     setError(null);
@@ -45,7 +46,7 @@ export default function EncoderTool() {
         setOutput(res.result);
       }
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -53,7 +54,7 @@ export default function EncoderTool() {
 
   const handleDecode = async () => {
     if (!input.trim()) {
-      setError("请输入要解码的内容");
+      setError(t("tools.encoder.decode_required"));
       return;
     }
     setError(null);
@@ -67,7 +68,7 @@ export default function EncoderTool() {
         setOutput(res.result);
       }
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -77,34 +78,28 @@ export default function EncoderTool() {
     if (!output) return;
     try {
       await navigator.clipboard.writeText(output);
-      successMessage("已复制到剪贴板");
+      successMessage(t("common.copied"));
     } catch {
-      errorMessage("复制失败");
+      errorMessage(t("common.copy_failed"));
     }
-  };
-
-  const encodingLabels: Record<EncodingType, string> = {
-    [EncodingType.Base64]: "Base64",
-    [EncodingType.URL]: "URL",
-    [EncodingType.HTML]: "HTML",
   };
 
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        编码解码工具
+        {t("tools.encoder.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        支持 Base64、URL、HTML 编码和解码
+        {t("tools.encoder.desc")}
       </Typography>
 
       <Paper sx={{ p: 3 }}>
         <Stack spacing={3}>
           <FormControl fullWidth>
-            <InputLabel>编码类型</InputLabel>
+            <InputLabel>{t("tools.encoder.encoding_type")}</InputLabel>
             <Select
               value={encodingType}
-              label="编码类型"
+              label={t("tools.encoder.encoding_type")}
               onChange={(e) => setEncodingType(e.target.value as EncodingType)}
             >
               <MenuItem value={EncodingType.Base64}>Base64</MenuItem>
@@ -114,8 +109,8 @@ export default function EncoderTool() {
           </FormControl>
 
           <TextField
-            label="输入内容"
-            placeholder={`请输入要${encodingLabels[encodingType]}编码或解码的内容`}
+            label={t("tools.timestamp.input_label")}
+            placeholder={t("tools.encoder.input_placeholder")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             multiline
@@ -130,7 +125,7 @@ export default function EncoderTool() {
               onClick={handleEncode}
               disabled={isLoading}
             >
-              编码
+              {t("tools.shared.encode")}
             </Button>
             <Button
               variant="outlined"
@@ -138,7 +133,7 @@ export default function EncoderTool() {
               onClick={handleDecode}
               disabled={isLoading}
             >
-              解码
+              {t("tools.shared.decode")}
             </Button>
           </Stack>
 
@@ -150,8 +145,8 @@ export default function EncoderTool() {
                 direction="row"
                 sx={{ mb: 1, alignItems: "center", justifyContent: "space-between" }}
               >
-                <Typography variant="subtitle2">结果</Typography>
-                <Tooltip title="复制结果">
+                <Typography variant="subtitle2">{t("tools.shared.result")}</Typography>
+                <Tooltip title={t("tools.shared.copy_result")}>
                   <IconButton onClick={handleCopy} size="small">
                     <ContentCopyIcon fontSize="small" />
                   </IconButton>

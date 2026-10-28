@@ -13,7 +13,8 @@ import NetworkCheckIcon from "@mui/icons-material/NetworkCheck";
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { PortCheckResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t, tf } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function PortCheckTool() {
   const [host, setHost] = useState("");
@@ -25,11 +26,11 @@ export default function PortCheckTool() {
   const handleCheck = async () => {
     const portNum = Number.parseInt(port, 10);
     if (!host.trim()) {
-      errorMessage("请输入主机地址");
+      errorMessage(t("tools.port_check.host_required"));
       return;
     }
     if (Number.isNaN(portNum) || portNum < 1 || portNum > 65535) {
-      errorMessage("端口号必须在 1-65535 之间");
+      errorMessage(t("tools.port_check.port_range"));
       return;
     }
 
@@ -39,7 +40,7 @@ export default function PortCheckTool() {
       const res = await ToolService.CheckPort(host.trim(), portNum);
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -48,23 +49,23 @@ export default function PortCheckTool() {
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        端口连通性检测
+        {t("tools.port_check.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        检测目标主机的 TCP 端口是否开放
+        {t("tools.port_check.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <TextField
-            label="主机地址"
-            placeholder="例如: 192.168.1.1 或 example.com"
+            label={t("tools.port_check.host")}
+            placeholder={t("tools.port_check.host_placeholder")}
             value={host}
             onChange={(e) => setHost(e.target.value)}
             fullWidth
           />
           <TextField
-            label="端口号"
+            label={t("tools.port_check.port")}
             placeholder="1-65535"
             type="number"
             value={port}
@@ -79,7 +80,7 @@ export default function PortCheckTool() {
             disabled={isLoading}
             fullWidth
           >
-            {isLoading ? "检测中..." : "开始检测"}
+            {isLoading ? t("tools.shared.checking") : t("tools.shared.check")}
           </Button>
         </Stack>
       </Paper>
@@ -87,23 +88,23 @@ export default function PortCheckTool() {
       {result && (
         <Paper sx={{ p: 3 }}>
           <Typography variant="subtitle1" gutterBottom>
-            检测结果
+            {t("tools.shared.result")}
           </Typography>
           {result.success ? (
             <Alert severity="success" sx={{ mb: 2 }}>
-              端口连接成功
+              {t("tools.port_check.success")}
             </Alert>
           ) : (
             <Alert severity="error" sx={{ mb: 2 }}>
-              端口连接失败: {result.error}
+              {tf("tools.port_check.failed", result.error ?? "")}
             </Alert>
           )}
           <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
-            <Chip label={`主机: ${result.host}`} variant="outlined" />
-            <Chip label={`端口: ${result.port}`} variant="outlined" />
+            <Chip label={tf("tools.port_check.chip_host", result.host)} variant="outlined" />
+            <Chip label={tf("tools.port_check.chip_port", result.port)} variant="outlined" />
             {result.success && (
               <Chip
-                label={`响应时间: ${result.responseTime}ms`}
+                label={tf("tools.port_check.chip_latency", result.responseTime)}
                 color="success"
                 variant="outlined"
               />

@@ -13,6 +13,7 @@ import {
   VisibilityOff as VisibilityOffIcon,
 } from "@mui/icons-material";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
+import { t } from "../i18n";
 
 interface SftpNavbarProps {
   currentPath: string;
@@ -64,7 +65,11 @@ const SftpNavbar: React.FC<SftpNavbarProps> = ({
         gap: 1,
       }}
     >
-      <Tooltip title={showHiddenFiles ? "隐藏点号文件" : "显示隐藏文件"}>
+      <Tooltip
+        title={
+          showHiddenFiles ? t("sftp.hide_dotfiles") : t("sftp.show_dotfiles")
+        }
+      >
         <IconButton size="small" onClick={onToggleShowHidden}>
           {showHiddenFiles ? (
             <VisibilityIcon fontSize="small" />
@@ -73,7 +78,7 @@ const SftpNavbar: React.FC<SftpNavbarProps> = ({
           )}
         </IconButton>
       </Tooltip>
-      <Tooltip title="返回上级">
+      <Tooltip title={t("sftp.go_up")}>
         <IconButton
           size="small"
           onClick={onNavigateToParent}
@@ -93,12 +98,12 @@ const SftpNavbar: React.FC<SftpNavbarProps> = ({
           input: {
             endAdornment: (
               <InputAdornment position="end">
-                <Tooltip title="导航到路径">
+                <Tooltip title={t("sftp.navigate_to_path")}>
                   <IconButton size="small" onClick={handleNavigateToInputPath}>
                     <ArrowForwardIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="刷新">
+                <Tooltip title={t("common.refresh")}>
                   <IconButton size="small" onClick={onRefresh}>
                     <RefreshIcon fontSize="small" />
                   </IconButton>

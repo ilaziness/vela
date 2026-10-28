@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/sshkey"
 )
 
@@ -76,7 +77,7 @@ func (s *KeyService) GenerateAndExport(algorithm, comment, passphrase string) (S
 }
 
 func (s *KeyService) pickPath(filename string) (string, bool, error) {
-	path, err := promptSaveFile(s.app, "导出私钥", filename)
+	path, err := promptSaveFile(s.app, i18n.T("dialog.export_private_key"), filename)
 	if dialogCancelled(err) || path == "" {
 		return "", false, nil
 	}

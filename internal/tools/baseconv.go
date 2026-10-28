@@ -4,6 +4,8 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // BaseConvertResult 进制转换结果
@@ -17,13 +19,13 @@ type BaseConvertResult struct {
 func (ts *Service) ConvertBase(input string, fromBase int, toBase int) BaseConvertResult {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return BaseConvertResult{Success: false, Error: "输入内容不能为空"}
+		return BaseConvertResult{Success: false, Error: i18n.T("tool.err.input_empty")}
 	}
 	if fromBase < 2 || fromBase > 36 {
-		return BaseConvertResult{Success: false, Error: "源进制必须在 2–36 之间"}
+		return BaseConvertResult{Success: false, Error: i18n.T("tool.err.from_base")}
 	}
 	if toBase < 2 || toBase > 36 {
-		return BaseConvertResult{Success: false, Error: "目标进制必须在 2–36 之间"}
+		return BaseConvertResult{Success: false, Error: i18n.T("tool.err.to_base")}
 	}
 
 	negative := false
@@ -42,7 +44,8 @@ func (ts *Service) ConvertBase(input string, fromBase int, toBase int) BaseConve
 
 	n := new(big.Int)
 	if _, ok := n.SetString(input, fromBase); !ok {
-		return BaseConvertResult{Success: false, Error: "无法按进制 " + strconv.Itoa(fromBase) + " 解析: " + input}
+		// en.json: "Cannot parse %s in base %s" — input then fromBase
+		return BaseConvertResult{Success: false, Error: i18n.Tf("tool.err.base_parse", input, strconv.Itoa(fromBase))}
 	}
 
 	result := n.Text(toBase)

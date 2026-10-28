@@ -8,6 +8,7 @@ import {
   Divider,
   Typography,
 } from "@mui/material";
+import { t, useLanguage } from "../../i18n";
 
 export type SettingsTab =
   | "general"
@@ -22,19 +23,19 @@ export type SettingsTab =
 
 interface NavItem {
   key: SettingsTab;
-  label: string;
+  labelKey: string;
 }
 
 const navItems: NavItem[] = [
-  { key: "general", label: "通用" },
-  { key: "terminal", label: "终端" },
-  { key: "ssh", label: "连接" },
-  { key: "sync", label: "同步" },
-  { key: "ai", label: "AI" },
-  { key: "keys", label: "身份密钥" },
-  { key: "knownHosts", label: "已知主机" },
-  { key: "keybindings", label: "快捷键" },
-  { key: "about", label: "关于" },
+  { key: "general", labelKey: "settings.nav.general" },
+  { key: "terminal", labelKey: "settings.nav.terminal" },
+  { key: "ssh", labelKey: "settings.nav.ssh" },
+  { key: "sync", labelKey: "settings.nav.sync" },
+  { key: "ai", labelKey: "settings.nav.ai" },
+  { key: "keys", labelKey: "settings.nav.keys" },
+  { key: "knownHosts", labelKey: "settings.nav.known_hosts" },
+  { key: "keybindings", labelKey: "settings.nav.keybindings" },
+  { key: "about", labelKey: "settings.nav.about" },
 ];
 
 interface SettingsNavProps {
@@ -43,11 +44,12 @@ interface SettingsNavProps {
 }
 
 const SettingsNav: React.FC<SettingsNavProps> = ({ activeTab, onTabChange }) => {
+  useLanguage();
   return (
     <Box>
       <Box sx={{ p: 2, pb: 1.5 }}>
         <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1.2rem" }}>
-          设置
+          {t("window.settings")}
         </Typography>
       </Box>
       <Divider />
@@ -69,7 +71,7 @@ const SettingsNav: React.FC<SettingsNavProps> = ({ activeTab, onTabChange }) => 
                 },
               }}
             >
-              <ListItemText primary={item.label} />
+              <ListItemText primary={t(item.labelKey)} />
             </ListItemButton>
           </ListItem>
         ))}

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
 )
 
@@ -15,7 +16,7 @@ func resolveDialProxy(mode string, custom ssh.ProxyConfig, global config.SSHConf
 	case "custom":
 		custom.Type = strings.ToLower(strings.TrimSpace(custom.Type))
 		custom.Host = strings.TrimSpace(custom.Host)
-		if err := custom.Validate("书签自定义代理"); err != nil {
+		if err := custom.Validate(i18n.T("bookmark.custom_proxy")); err != nil {
 			return ssh.ProxyConfig{}, err
 		}
 		return custom, nil
@@ -30,7 +31,7 @@ func resolveDialProxy(mode string, custom ssh.ProxyConfig, global config.SSHConf
 			User:     global.ProxyUser,
 			Password: global.ProxyPassword,
 		}
-		if err := p.Validate("全局拨号代理"); err != nil {
+		if err := p.Validate(i18n.T("proxy.label_default")); err != nil {
 			return ssh.ProxyConfig{}, err
 		}
 		return p, nil

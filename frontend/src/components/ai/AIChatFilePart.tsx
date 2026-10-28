@@ -8,8 +8,9 @@ import type {
 } from "@mui/x-chat/headless";
 import { AIService } from "../../../bindings/github.com/ilaziness/vela/services";
 import { fileToDataURL } from "../../func/aiAttachments";
-import { parseCallServiceError } from "../../func/service";
 import { useMessageStore } from "../../stores/message";
+import { t } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 async function blobToDataURL(url: string): Promise<string> {
   return fileToDataURL(await (await fetch(url)).blob());
@@ -83,7 +84,7 @@ export function AIChatFilePart(props: ChatPartRendererProps<ChatFileMessagePart>
         : part.url;
       await AIService.OpenChatAttachment(uri, part.filename || "");
     } catch (err) {
-      useMessageStore.getState().errorMessage(parseCallServiceError(err));
+      useMessageStore.getState().errorMessage(translateServiceError(err));
     }
   };
 
@@ -94,7 +95,11 @@ export function AIChatFilePart(props: ChatPartRendererProps<ChatFileMessagePart>
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => void handleOpen(e)}
-        title={isImage ? `预览 ${label}` : `用系统默认应用打开 ${label}`}
+        title={
+          isImage
+            ? t("ai.chat.preview_image", label)
+            : t("ai.chat.open_file", label)
+        }
         sx={chipSx}
       >
         {isImage && thumbSrc ? (

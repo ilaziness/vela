@@ -1,8 +1,9 @@
 package tools
 
 import (
-	"fmt"
 	"strings"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 const (
@@ -32,13 +33,13 @@ func (ts *Service) DiffText(left string, right string) DiffResult {
 	if len(a) > maxDiffLines || len(b) > maxDiffLines {
 		return DiffResult{
 			Success: false,
-			Error:   fmt.Sprintf("文本行数过多（单侧最多 %d 行）", maxDiffLines),
+			Error:   i18n.Tf("tool.err.diff_too_many_lines", maxDiffLines),
 		}
 	}
 	if int64(len(a))*int64(len(b)) > maxDiffCells {
 		return DiffResult{
 			Success: false,
-			Error:   "对比规模过大，请缩小文本后再试",
+			Error:   i18n.T("tool.err.diff_too_large"),
 		}
 	}
 	ops := lcsDiff(a, b)

@@ -1,85 +1,80 @@
 /**
- * 验证工具函数
+ * Tunnel / address validation helpers (messages via i18n catalog).
  */
 
-// 验证 IP:Port 格式
+import { t } from "../i18n";
+
 export const validateIpPort = (addr: string): { valid: boolean; error: string } => {
   if (!addr.trim()) {
-    return { valid: false, error: "请输入地址" };
+    return { valid: false, error: t("validation.addr_required") };
   }
 
   const parts = addr.split(":");
   if (parts.length !== 2) {
-    return { valid: false, error: "格式应为 ip:port" };
+    return { valid: false, error: t("validation.addr_ip_port") };
   }
 
   const [ip, portStr] = parts;
 
-  // 验证 IP 地址
   const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
   if (!ipRegex.test(ip)) {
-    return { valid: false, error: "IP 地址格式不正确" };
+    return { valid: false, error: t("validation.ip_invalid") };
   }
 
-  // 验证 IP 各部分范围
   const ipParts = ip.split(".");
   for (const part of ipParts) {
     const num = Number.parseInt(part, 10);
     if (num < 0 || num > 255) {
-      return { valid: false, error: "IP 地址各部分应在 0-255 之间" };
+      return { valid: false, error: t("validation.ip_octet_range") };
     }
   }
 
-  // 验证端口
   const port = Number.parseInt(portStr, 10);
   if (Number.isNaN(port) || port < 1 || port > 65535) {
-    return { valid: false, error: "端口必须是 1-65535 之间的数字" };
+    return { valid: false, error: t("validation.port_range") };
   }
 
   return { valid: true, error: "" };
 };
 
-// 验证远程地址格式 (host:port)
 export const validateRemoteAddr = (
   addr: string,
 ): { valid: boolean; error: string } => {
   if (!addr.trim()) {
-    return { valid: false, error: "请输入远程地址" };
+    return { valid: false, error: t("validation.remote_addr_required") };
   }
 
   const parts = addr.split(":");
   if (parts.length !== 2) {
-    return { valid: false, error: "格式应为 host:port" };
+    return { valid: false, error: t("validation.addr_host_port") };
   }
 
   const [host, portStr] = parts;
   if (!host.trim()) {
-    return { valid: false, error: "主机名不能为空" };
+    return { valid: false, error: t("validation.host_required") };
   }
 
   const port = Number.parseInt(portStr, 10);
   if (Number.isNaN(port) || port < 1 || port > 65535) {
-    return { valid: false, error: "端口必须是 1-65535 之间的数字" };
+    return { valid: false, error: t("validation.port_range") };
   }
 
   return { valid: true, error: "" };
 };
 
-// 验证端口号
 export const validatePort = (portStr: string): { valid: boolean; error: string } => {
   if (!portStr.trim()) {
-    return { valid: false, error: "请输入端口号" };
+    return { valid: false, error: t("validation.port_required") };
   }
 
   const port = Number.parseInt(portStr, 10);
   if (Number.isNaN(port) || port < 1 || port > 65535) {
-    return { valid: false, error: "端口必须是 1-65535 之间的数字" };
+    return { valid: false, error: t("validation.port_range") };
   }
 
   return { valid: true, error: "" };
 };
 
-// 验证 SSH 隧道表单数据
 export interface TunnelFormData {
   localAddr: string;
   remoteAddr: string;
@@ -94,9 +89,6 @@ export interface TunnelFormErrors {
 
 export type TunnelType = "local" | "remote" | "dynamic";
 
-/**
- * 计算隧道表单的错误状态
- */
 export const calculateTunnelFormErrors = (
   tunnelType: TunnelType,
   formData: TunnelFormData,
@@ -106,29 +98,23 @@ export const calculateTunnelFormErrors = (
     remoteAddr: "",
     remotePort: "",
   };
-  
-  // 本地地址验证
+
   const localResult = validateIpPort(formData.localAddr);
   newErrors.localAddr = localResult.error;
-  
-  // 远程地址验证（仅本地转发）
+
   if (tunnelType === "local") {
     const remoteResult = validateRemoteAddr(formData.remoteAddr);
     newErrors.remoteAddr = remoteResult.error;
   }
-  
-  // 远程端口验证（仅远程转发）
+
   if (tunnelType === "remote") {
     const portResult = validatePort(formData.remotePort);
     newErrors.remotePort = portResult.error;
   }
-  
+
   return newErrors;
 };
 
-/**
- * 验证隧道表单是否有效
- */
 export const isTunnelFormValid = (
   tunnelType: TunnelType,
   formData: TunnelFormData,
@@ -137,54 +123,39 @@ export const isTunnelFormValid = (
   return !errors.localAddr && !errors.remoteAddr && !errors.remotePort;
 };
 
-/**
- * 获取隧道类型显示名称
- */
 export const getTunnelTypeName = (tunnelType: TunnelType): string => {
   switch (tunnelType) {
     case "local":
-      return "本地端口转发";
+      return t("validation.tunnel_local");
     case "remote":
-      return "远程端口转发";
+      return t("validation.tunnel_remote");
     case "dynamic":
-      return "动态端口转发";
+      return t("validation.tunnel_dynamic");
     default:
-      return "隧道";
+      return t("validation.tunnel");
   }
 };
 
-/**
- * 获取本地地址的 placeholder 提示
- */
 export const getLocalAddrPlaceholder = (tunnelType: TunnelType): string => {
-  return tunnelType === "remote" 
-    ? "例如: 127.0.0.1:3306" 
-    : "例如: 127.0.0.1:8080";
+  return tunnelType === "remote"
+    ? t("validation.example_local_target")
+    : t("validation.example_local_listen");
 };
 
-/**
- * 获取本地地址的 helper text
- */
 export const getLocalAddrHelperText = (
   tunnelType: TunnelType,
   error: string,
 ): string => {
   if (error) return error;
   return tunnelType === "remote"
-    ? "本地目标地址，格式: ip:port"
-    : "本地监听地址，格式: ip:port";
+    ? t("validation.helper_local_target")
+    : t("validation.helper_local_listen");
 };
 
-/**
- * 获取远程地址的 helper text
- */
 export const getRemoteAddrHelperText = (error: string): string => {
-  return error || "远程目标地址，格式: host:port";
+  return error || t("validation.helper_remote_addr");
 };
 
-/**
- * 获取远程端口的 helper text
- */
 export const getRemotePortHelperText = (error: string): string => {
-  return error || "远端将在 127.0.0.1:<端口> 上监听";
+  return error || t("validation.helper_remote_port");
 };

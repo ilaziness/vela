@@ -1,5 +1,14 @@
 import React from "react";
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Box } from "@mui/material";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  TextField,
+  Box,
+} from "@mui/material";
+import { t } from "../i18n";
 
 interface AddCommandDialogProps {
   open: boolean;
@@ -29,31 +38,26 @@ const AddCommandDialog: React.FC<AddCommandDialogProps> = ({
   onSave,
 }) => {
   return (
-    <Dialog 
-      open={open} 
-      onClose={onClose}
-      maxWidth="sm"
-      fullWidth
-    >
-      <DialogTitle>添加自定义命令</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>{t("command.add_title")}</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
           <TextField
-            label="分类"
+            label={t("command.category")}
             value={category}
             onChange={(e) => onCategoryChange(e.target.value)}
             fullWidth
             required
           />
           <TextField
-            label="名称"
+            label={t("command.name")}
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
             fullWidth
             required
           />
           <TextField
-            label="描述"
+            label={t("command.description")}
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
             fullWidth
@@ -62,7 +66,7 @@ const AddCommandDialog: React.FC<AddCommandDialogProps> = ({
             minRows={2}
           />
           <TextField
-            label="命令"
+            label={t("command.command")}
             value={command}
             onChange={(e) => onCommandChange(e.target.value)}
             fullWidth
@@ -74,9 +78,11 @@ const AddCommandDialog: React.FC<AddCommandDialogProps> = ({
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} variant="outlined">取消</Button>
+        <Button onClick={onClose} variant="outlined">
+          {t("common.cancel")}
+        </Button>
         <Button onClick={onSave} variant="contained">
-          保存
+          {t("common.save")}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Box, Button, CircularProgress } from "@mui/material";
 import { AIService } from "../../../bindings/github.com/ilaziness/vela/services/index";
-import { parseCallServiceError } from "../../func/service";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { useMessageStore } from "../../stores/message";
+import { t } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 /**
  * run_ssh_command state slot: keep the status label, and while Exec is running
@@ -70,11 +71,11 @@ const SSHToolState = React.forwardRef<HTMLSpanElement, any>(
               setStopping(true);
               void AIService.CancelSSHExec(activeSessionId).catch((err) => {
                 setStopping(false);
-                useMessageStore.getState().errorMessage(parseCallServiceError(err));
+                useMessageStore.getState().errorMessage(translateServiceError(err));
               });
             }}
           >
-            停止命令
+            {t("ai.chat.stop_command")}
           </Button>
         ) : null}
       </Box>

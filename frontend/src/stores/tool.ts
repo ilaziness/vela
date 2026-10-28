@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Tool } from "../types/tool";
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
+import { translateServiceError } from "../func/service";
 
 interface ToolStore {
   tools: Tool[];
@@ -22,7 +23,7 @@ export const useToolStore = create<ToolStore>((set, get) => ({
       set({ tools: tools || [], isLoading: false });
     } catch (err) {
       set({
-        error: err instanceof Error ? err.message : "Failed to fetch tools",
+        error: translateServiceError(err),
         isLoading: false,
       });
     }

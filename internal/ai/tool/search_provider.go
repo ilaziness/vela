@@ -1,5 +1,7 @@
 package tool
 
+import "github.com/ilaziness/vela/internal/i18n"
+
 // SearchProvider identifies a web search API vendor.
 type SearchProvider string
 
@@ -26,9 +28,9 @@ func GetAllSearchProviders() []SearchProviderInfo {
 		{Name: SearchBrave, Label: "Brave Search"},
 		{Name: SearchSerper, Label: "Serper (Google)"},
 		{Name: SearchDeepseek, Label: "DeepSeek"},
-		{Name: SearchYuanbao, Label: "元宝搜索"},
-		{Name: SearchBocha, Label: "博查"},
-		{Name: SearchMetaso, Label: "秘塔"},
+		{Name: SearchYuanbao, Label: i18n.T("search.yuanbao")},
+		{Name: SearchBocha, Label: i18n.T("search.bocha")},
+		{Name: SearchMetaso, Label: i18n.T("search.metaso")},
 	}
 }
 

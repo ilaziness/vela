@@ -18,6 +18,7 @@ import {
 } from "@mui/icons-material";
 import { Entry } from "../../bindings/github.com/ilaziness/vela/internal/localfs/models";
 import { formatFileSize } from "../func/service";
+import { t } from "../i18n";
 import {
   PaneSide,
   dragStartsOnControl,
@@ -79,9 +80,9 @@ const LocalFilePane: React.FC<LocalFilePaneProps> = ({
                     onChange={onToggleAll}
                   />
                 </TableCell>
-                <TableCell>名称</TableCell>
-                <TableCell align="center">大小</TableCell>
-                <TableCell align="center">修改时间</TableCell>
+                <TableCell>{t("sftp.name")}</TableCell>
+                <TableCell align="center">{t("sftp.size")}</TableCell>
+                <TableCell align="center">{t("sftp.modified")}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>

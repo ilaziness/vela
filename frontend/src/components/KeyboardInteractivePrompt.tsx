@@ -10,8 +10,9 @@ import {
 } from "@mui/material";
 import { Events } from "@wailsio/runtime";
 import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
-import { parseCallServiceError } from "../func/service";
 import { useMessageStore } from "../stores/message";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 interface KeyboardQuestion {
   prompt: string;
@@ -116,7 +117,7 @@ const KeyboardInteractivePrompt: React.FC = () => {
       handled.current.add(id);
       drop(id);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setBusy(false);
     }
@@ -132,7 +133,7 @@ const KeyboardInteractivePrompt: React.FC = () => {
     try {
       await SSHService.CancelKeyboardInteractive(id);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -152,7 +153,7 @@ const KeyboardInteractivePrompt: React.FC = () => {
       maxWidth="sm"
       fullWidth
     >
-      <DialogTitle>服务器身份验证</DialogTitle>
+      <DialogTitle>{t("keyboard.title")}</DialogTitle>
       <DialogContent>
         {current && (
           <>
@@ -182,7 +183,7 @@ const KeyboardInteractivePrompt: React.FC = () => {
                 autoFocus={index === 0}
                 margin="dense"
                 size="small"
-                label={question.prompt || "回答"}
+                label={question.prompt || t("keyboard.default_prompt")}
                 type={question.echo ? "text" : "password"}
                 value={answers[index] ?? ""}
                 onChange={(event) => {
@@ -209,14 +210,14 @@ const KeyboardInteractivePrompt: React.FC = () => {
       </DialogContent>
       <DialogActions>
         <Button onClick={() => void handleCancel()} disabled={busy}>
-          取消
+          {t("common.cancel")}
         </Button>
         <Button
           onClick={() => void handleSubmit()}
           variant="contained"
           disabled={busy}
         >
-          确定
+          {t("common.ok")}
         </Button>
       </DialogActions>
     </Dialog>

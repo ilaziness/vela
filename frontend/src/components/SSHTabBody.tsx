@@ -26,6 +26,7 @@ import { useTransferStore } from "../stores/transfer";
 import { sftpOwnerKey } from "../func/types";
 import { SSH_STATUS_BAR_HEIGHT } from "../func/aiSidebar";
 import StatusBar from "./StatusBar";
+import { t, tf, useLanguage } from "../i18n";
 
 interface SSHContainerProps {
   tabIndex: string;
@@ -38,6 +39,7 @@ const AUTO_RECONNECT_MAX_ATTEMPTS = 5;
 
 // SSH 连接容器组件，管理连接状态和错误处理
 const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
+  useLanguage();
   const setName = useSSHTabsStore((state) => state.setName);
   const setSSHInfo = useSSHTabsStore((state) => state.setSSHInfo);
   const getByIndex = useSSHTabsStore((state) => state.getByIndex);
@@ -162,7 +164,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
       // No credentials to retry — fall back to the connect form with an error.
       setTabConnectionStatus(tabIndex, ConnectionStatus.Disconnected);
       clearSessionUI();
-      setConnectionError("连接已断开");
+      setConnectionError(t("ssh.disconnected"));
       setShowReconnect(false);
       return;
     }
@@ -177,7 +179,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
       );
     }
     if (!autoReconnect) {
-      enterReconnectUI("连接已断开");
+      enterReconnectUI(t("ssh.disconnected"));
       return;
     }
 
@@ -188,7 +190,11 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
           return;
         }
         infoMessage(
-          `连接已断开，正在重连 (${attempt}/${AUTO_RECONNECT_MAX_ATTEMPTS})…`,
+          tf(
+            "ssh.reconnecting",
+            attempt,
+            AUTO_RECONNECT_MAX_ATTEMPTS,
+          ),
         );
         const delayMs = Math.min(1000 * 2 ** (attempt - 1), 8000);
         await sleep(delayMs);
@@ -206,7 +212,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
         try {
           const nextID = await connectRef.current(info);
           if (nextID) {
-            successMessage("已重新连接");
+            successMessage(t("ssh.reconnected"));
             return;
           }
         } finally {
@@ -214,8 +220,8 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
           skipAutoReconnectRef.current = false;
         }
       }
-      errorMessage("自动重连失败，请手动重试");
-      enterReconnectUI("自动重连失败，请手动重试");
+      errorMessage(t("ssh.auto_reconnect_failed"));
+      enterReconnectUI(t("ssh.auto_reconnect_failed"));
     } finally {
       autoReconnectingRef.current = false;
       setIsReloading(false);
@@ -305,7 +311,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
       }
       // Clean exit (e.g. remote `exit`): show reconnect UI, no auto-reconnect.
       if (reason !== "unexpected") {
-        enterReconnectUI("连接已关闭");
+        enterReconnectUI(t("ssh.connection_closed"));
         return;
       }
       void runAutoReconnectRef.current();
@@ -388,7 +394,7 @@ const SSHTabBody: React.FC<SSHContainerProps> = ({ tabIndex, isActive }) => {
               });
             }}
           >
-            重新连接
+            {t("ssh.reconnect")}
           </Button>
         </Box>
       );

@@ -1,7 +1,6 @@
 package services
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -9,7 +8,9 @@ import (
 
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -128,19 +129,19 @@ func validateBookmarkProxy(b SSHBookmark) error {
 		return nil
 	case "custom":
 		p := ssh.ProxyConfig{Type: b.ProxyType, Host: b.ProxyHost, Port: b.ProxyPort}
-		return p.Validate("书签自定义代理")
+		return p.Validate(i18n.T("bookmark.custom_proxy"))
 	default:
-		return fmt.Errorf("无效的代理模式: %s", b.ProxyMode)
+		return usererr.Coded("bookmark.proxy_mode_invalid", "Invalid proxy mode: %s", b.ProxyMode)
 	}
 }
 
 func (bs *BookmarkService) SaveAndConnect(b SSHBookmark) (string, error) {
 	if err := bs.TestConnection(b); err != nil {
-		return "", fmt.Errorf("连接测试失败: %w", err)
+		return "", usererr.Coded("bookmark.test_failed", "Connection test failed: %s", err.Error())
 	}
 	id, err := bs.SaveBookmark(b)
 	if err != nil {
-		return "", fmt.Errorf("保存书签失败: %w", err)
+		return "", usererr.Coded("bookmark.save_failed", "Failed to save bookmark: %s", err.Error())
 	}
 	bs.ConnectBookmark(id)
 	return id, nil
@@ -150,7 +151,7 @@ func (bs *BookmarkService) SaveAndConnect(b SSHBookmark) (string, error) {
 // Cancelled dialog returns Cancelled=true without error.
 func (bs *BookmarkService) ImportSSHConfig(groupName string) (SSHConfigImportResult, error) {
 	path, err := bs.app.Dialog.OpenFile().
-		SetTitle("选择 OpenSSH 配置文件").
+		SetTitle(i18n.T("dialog.select_openssh_config")).
 		CanChooseDirectories(false).
 		CanChooseFiles(true).
 		PromptForSingleSelection()
@@ -172,7 +173,7 @@ func (bs *BookmarkService) ExportSSHConfig(groupName string) (SSHConfigExportRes
 	}
 	if strings.TrimSpace(content) == "" {
 		if len(warnings) == 0 {
-			warnings = []string{"没有可导出的内容"}
+			warnings = []string{i18n.T("bookmark.export_empty")}
 		}
 		return SSHConfigExportResult{Warnings: warnings}, nil
 	}
@@ -186,7 +187,7 @@ func (bs *BookmarkService) ExportSSHConfig(groupName string) (SSHConfigExportRes
 		b.WriteString(content)
 		content = b.String()
 	}
-	path, err := promptSaveFile(bs.app, "导出 OpenSSH 配置", "config")
+	path, err := promptSaveFile(bs.app, i18n.T("dialog.export_openssh_config"), "config")
 	if dialogCancelled(err) || path == "" {
 		return SSHConfigExportResult{Cancelled: true, Warnings: warnings}, nil
 	}

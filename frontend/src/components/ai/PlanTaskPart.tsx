@@ -4,6 +4,7 @@ import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined';
 import RadioButtonUncheckedOutlinedIcon from '@mui/icons-material/RadioButtonUncheckedOutlined';
 import ErrorOutlinedIcon from '@mui/icons-material/ErrorOutlined';
 import { UPSERT_PLAN_TOOL } from '../../func/aiContext';
+import { t } from '../../i18n';
 
 export type PlanTaskStatus = 'pending' | 'running' | 'done' | 'failed';
 
@@ -22,13 +23,13 @@ function asPlan(value: unknown): PlanSnapshot | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
   if (!Array.isArray(v.tasks) || v.tasks.length === 0) return null;
-  const tasks: PlanTask[] = v.tasks.map((t: any, i: number) => ({
-    id: String(t?.id ?? i),
-    title: String(t?.title ?? `任务 ${i + 1}`),
-    status: normalizeStatus(t?.status),
+  const tasks: PlanTask[] = v.tasks.map((task: any, i: number) => ({
+    id: String(task?.id ?? i),
+    title: String(task?.title ?? t('ai.plan.task_n', i + 1)),
+    status: normalizeStatus(task?.status),
   }));
   return {
-    title: String(v.title ?? '计划'),
+    title: String(v.title ?? t('ai.plan.title')),
     tasks,
   };
 }
@@ -65,9 +66,9 @@ function planBadge(tasks: PlanTask[]): { label: string; palette: 'primary' | 'su
     return { label: `${doneCount(tasks)} / ${total}`, palette: 'primary' };
   }
   if (anyFailed(tasks)) {
-    return { label: '失败', palette: 'error' };
+    return { label: t('ai.plan.failed'), palette: 'error' };
   }
-  return { label: '完成', palette: 'success' };
+  return { label: t('ai.plan.done'), palette: 'success' };
 }
 
 function StatusIcon({ status }: { status: PlanTaskStatus }) {
@@ -139,7 +140,7 @@ function PlanTaskList({ plan }: { plan: PlanSnapshot }) {
     >
       <Box component="summary">
         <Typography variant="subtitle2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }}>
-          {plan.title || '计划'}
+          {plan.title || t('ai.plan.title')}
         </Typography>
         <Typography
           component="span"

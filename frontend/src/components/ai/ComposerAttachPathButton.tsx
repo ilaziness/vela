@@ -8,8 +8,8 @@ import {
   formatAttachmentRejectMessage,
   rememberLocalFilePath,
 } from "../../func/aiAttachments";
-import { parseCallServiceError } from "../../func/service";
 import { useMessageStore } from "../../stores/message";
+import { translateServiceError } from "../../func/service";
 
 async function addPickedLocalFiles(
   composer: ReturnType<typeof useChatComposer>,
@@ -18,7 +18,7 @@ async function addPickedLocalFiles(
   try {
     paths = await AIService.PickChatAttachments();
   } catch (err) {
-    useMessageStore.getState().errorMessage(parseCallServiceError(err));
+    useMessageStore.getState().errorMessage(translateServiceError(err));
     return;
   }
   if (!paths?.length) return;
@@ -46,7 +46,7 @@ async function addPickedLocalFiles(
       rememberLocalFilePath(file, path);
       composer.addAttachment(file);
     } catch (err) {
-      useMessageStore.getState().errorMessage(parseCallServiceError(err));
+      useMessageStore.getState().errorMessage(translateServiceError(err));
     }
   }
 }

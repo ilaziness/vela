@@ -24,7 +24,8 @@ import {
 } from "../../bindings/github.com/ilaziness/vela/services";
 import { GetAppInfo } from "../../bindings/github.com/ilaziness/vela/services/appservice";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { translateServiceError } from "../func/service";
+import { t } from "../i18n";
 import { useFrameless } from "../hooks/useFrameless";
 
 const Setting: React.FC = () => {
@@ -60,10 +61,12 @@ const Setting: React.FC = () => {
       setConfig((prev) =>
         prev ? { ...prev, Sync: { ...prev.Sync, ...syncConfig } } : prev
       );
-      successMessage("同步配置保存成功");
+      successMessage(t("settings.sync.save_success"));
     } catch (error) {
       console.error("Failed to save sync config:", error);
-      errorMessage(parseCallServiceError(error) || "同步配置保存失败");
+      errorMessage(
+        translateServiceError(error) || t("settings.sync.save_failed"),
+      );
     }
   };
 

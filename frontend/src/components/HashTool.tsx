@@ -16,7 +16,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { HashAlgorithm, HashResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t, tf } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function HashTool() {
   const [input, setInput] = useState("");
@@ -27,7 +28,7 @@ export default function HashTool() {
 
   const handleCalculate = async () => {
     if (!input.trim()) {
-      errorMessage("请输入要计算哈希的内容");
+      errorMessage(t("tools.shared.input_required"));
       return;
     }
 
@@ -37,7 +38,7 @@ export default function HashTool() {
       const res = await ToolService.CalculateHash(input, algorithm);
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -47,26 +48,26 @@ export default function HashTool() {
     if (!result?.result) return;
     try {
       await navigator.clipboard.writeText(result.result);
-      successMessage("已复制到剪贴板");
+      successMessage(t("common.copied"));
     } catch {
-      errorMessage("复制失败");
+      errorMessage(t("common.copy_failed"));
     }
   };
 
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        哈希计算工具
+        {t("tools.hash.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        计算字符串的哈希值（支持 MD5、SHA1、SHA256、SHA512）
+        {t("tools.hash.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <TextField
-            label="输入内容"
-            placeholder="请输入要计算哈希的内容"
+            label={t("tools.timestamp.input_label")}
+            placeholder={t("tools.hash.input_placeholder")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             multiline
@@ -74,10 +75,10 @@ export default function HashTool() {
             fullWidth
           />
           <FormControl fullWidth>
-            <InputLabel>哈希算法</InputLabel>
+            <InputLabel>{t("tools.hash.algorithm")}</InputLabel>
             <Select
               value={algorithm}
-              label="哈希算法"
+              label={t("tools.hash.algorithm")}
               onChange={(e) => setAlgorithm(e.target.value as HashAlgorithm)}
             >
               <MenuItem value={HashAlgorithm.MD5}>MD5</MenuItem>
@@ -92,7 +93,7 @@ export default function HashTool() {
             disabled={isLoading}
             fullWidth
           >
-            {isLoading ? "计算中..." : "开始计算"}
+            {isLoading ? t("tools.shared.calculating") : t("tools.shared.calculate")}
           </Button>
         </Stack>
       </Paper>
@@ -100,26 +101,26 @@ export default function HashTool() {
       {result && (
         <Paper sx={{ p: 3 }}>
           <Typography variant="subtitle1" gutterBottom>
-            计算结果
+            {t("tools.shared.result")}
           </Typography>
           {result.success ? (
             <Alert severity="success" sx={{ mb: 2 }}>
-              哈希计算成功
+              {t("tools.hash.hash_success")}
             </Alert>
           ) : (
             <Alert severity="error" sx={{ mb: 2 }}>
-              哈希计算失败: {result.error}
+              {tf("tools.hash.hash_failed", result.error ?? "")}
             </Alert>
           )}
           <Stack spacing={2}>
-            <Chip label={`输入: ${result.input}`} variant="outlined" />
-            <Chip label={`算法: ${result.algorithm}`} variant="outlined" />
+            <Chip label={tf("tools.hash.chip_input", result.input)} variant="outlined" />
+            <Chip label={tf("tools.hash.chip_algorithm", result.algorithm)} variant="outlined" />
             <TextField
-              label="哈希结果"
+              label={t("tools.hash.chip_result")}
               value={result.result}
               fullWidth
               multiline
-              slotProps={{ input: { readOnly: true, style: { fontFamily: 'monospace' } } }}
+              slotProps={{ input: { readOnly: true, style: { fontFamily: "monospace" } } }}
             />
           </Stack>
           <Button
@@ -128,7 +129,7 @@ export default function HashTool() {
             disabled={isLoading}
             sx={{ mt: 2 }}
           >
-            复制结果
+            {t("tools.shared.copy_result")}
           </Button>
         </Paper>
       )}

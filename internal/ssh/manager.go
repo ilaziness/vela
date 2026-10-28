@@ -20,7 +20,8 @@ import (
 	"github.com/ilaziness/vela/internal/zmodem"
 )
 
-const ErrConnectionNotFound = "SSH connection with ID %s not found"
+// ErrSessionNotFound is returned when a session id is unknown or has no client.
+var ErrSessionNotFound = errors.New("ssh: session not found")
 
 // CloseReason distinguishes clean shell exits from unexpected drops for auto-reconnect.
 type CloseReason string
@@ -234,7 +235,7 @@ func (m *Manager) SetOnClose(fn func(sessionID string, reason CloseReason)) {
 func (m *Manager) GetSession(id string) (*Session, error) {
 	v, ok := m.sessions.Load(id)
 	if !ok {
-		return nil, fmt.Errorf(ErrConnectionNotFound, id)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
 	}
 	return v.(*Session), nil
 }
@@ -245,7 +246,7 @@ func (m *Manager) GetClient(sessionID string) (*cryptossh.Client, error) {
 		return nil, err
 	}
 	if sess.client == nil {
-		return nil, fmt.Errorf(ErrConnectionNotFound, sessionID)
+		return nil, fmt.Errorf("%w: %s", ErrSessionNotFound, sessionID)
 	}
 	return sess.client, nil
 }
@@ -339,7 +340,7 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 func (m *Manager) SendToSession(sessionID, command string) error {
 	sess, err := m.GetSession(sessionID)
 	if err != nil {
-		return fmt.Errorf("SSH session %s not found", sessionID)
+		return err
 	}
 	if sess.Stdin == nil {
 		return fmt.Errorf("stdin not available")

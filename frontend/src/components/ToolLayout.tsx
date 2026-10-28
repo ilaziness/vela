@@ -13,6 +13,7 @@ import { useToolStore } from "../stores/tool";
 import OpBar from "./OpBar";
 import { getToolIcon } from "../func/toolIcons";
 import { useFrameless } from "../hooks/useFrameless";
+import { displayToolName } from "../func/toolDisplay";
 
 interface ToolLayoutProps {
   readonly children: React.ReactNode;
@@ -84,7 +85,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
                       />
                     </ListItemIcon>
                     <ListItemText
-                      primary={tool.name}
+                      primary={displayToolName(tool)}
                       slotProps={{
                         primary: {
                           sx: {

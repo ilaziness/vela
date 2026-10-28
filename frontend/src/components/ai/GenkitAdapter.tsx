@@ -9,7 +9,6 @@ import {
   ChatAttachment,
 } from '../../../bindings/github.com/ilaziness/vela/services/models';
 import { formatAIChatError } from '../../func/aiChatError';
-import { parseCallServiceError } from '../../func/service';
 import {
   getCurrentSSHBindState,
   isKnownChatTool,
@@ -18,6 +17,8 @@ import {
 import { fileToDataURL, localFilePath } from '../../func/aiAttachments';
 import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
+import { t } from '../../i18n';
+import { parseCallServiceError, translateServiceError } from "../../func/service";
 
 const EVENT_AI_STREAM_CHUNK = 'eventAIStreamChunk';
 
@@ -29,15 +30,13 @@ function isToolMessagePart(part: { type?: string } | null | undefined): boolean 
   return part?.type === 'tool' || part?.type === 'dynamic-tool';
 }
 
-export const currentUser: ChatUser = {
-  id: 'user',
-  displayName: 'You',
-};
+export function getCurrentUser(): ChatUser {
+  return { id: 'user', displayName: t('ai.chat.user_you') };
+}
 
-export const aiUser: ChatUser = {
-  id: 'assistant',
-  displayName: 'AI',
-};
+export function getAiUser(): ChatUser {
+  return { id: 'assistant', displayName: t('ai.chat.user_assistant') };
+}
 
 type SendMessageInput = Parameters<ChatAdapter['sendMessage']>[0];
 type ListMessagesInput = Parameters<NonNullable<ChatAdapter['listMessages']>>[0];
@@ -68,14 +67,14 @@ export class GenkitAdapter implements ChatAdapter {
     const textPart = input.message.parts.find((part) => part.type === 'text');
     const newMessage = (textPart?.text || '').trim();
     if (!newMessage) {
-      const message = '消息内容不能为空';
+      const message = t('ai.chat.message_empty');
       useMessageStore.getState().errorMessage(message);
       throw new Error(message);
     }
 
     const sessionId = input.conversationId || '';
     if (!sessionId) {
-      const message = '会话未就绪，请稍后重试';
+      const message = t('ai.chat.session_not_ready');
       useMessageStore.getState().errorMessage(message);
       throw new Error(message);
     }
@@ -124,7 +123,7 @@ export class GenkitAdapter implements ChatAdapter {
       messageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       chatPromise = AIService.Chat(request);
     } catch (err) {
-      const message = parseCallServiceError(err);
+      const message = translateServiceError(err);
       useMessageStore.getState().errorMessage(message);
       throw new Error(message, { cause: err });
     }
@@ -146,7 +145,7 @@ export class GenkitAdapter implements ChatAdapter {
           if (!hasStarted) {
             hasStarted = true;
             useAIAssistantStore.getState().setStreaming(true);
-            controller.enqueue({ type: 'start', messageId, author: aiUser } as ChatMessageChunk);
+            controller.enqueue({ type: 'start', messageId, author: getAiUser() } as ChatMessageChunk);
           }
         };
 
@@ -332,8 +331,8 @@ export class GenkitAdapter implements ChatAdapter {
           .catch((err: any) => {
             chatDone = true;
             if (aborted) return;
-            const errText = parseCallServiceError(err);
-            if (signal.aborted || /generation stopped/i.test(errText)) {
+            const rawErr = parseCallServiceError(err);
+            if (signal.aborted || /generation stopped/i.test(rawErr)) {
               closeAsAborted();
               return;
             }
@@ -345,7 +344,7 @@ export class GenkitAdapter implements ChatAdapter {
               return;
             }
             ensureStarted();
-            const message = formatAIChatError(errText);
+            const message = formatAIChatError(translateServiceError(err));
             useMessageStore.getState().errorMessage(message);
             closeOpenTextParts();
             enqueue({ type: 'text-start', id: textId });
@@ -365,7 +364,7 @@ export class GenkitAdapter implements ChatAdapter {
       const rows = (msgs || []).filter((m): m is AIMessage => m !== null);
       return { messages: genkitRowsToMui(rows) };
     } catch (err) {
-      useMessageStore.getState().errorMessage(parseCallServiceError(err));
+      useMessageStore.getState().errorMessage(translateServiceError(err));
       return { messages: [] };
     }
   }
@@ -373,7 +372,7 @@ export class GenkitAdapter implements ChatAdapter {
   async addToolApprovalResponse(input: AddToolApprovalInput): Promise<void> {
     const sessionId = this.activeSessionId || useAIAssistantStore.getState().activeSessionId || '';
     if (!sessionId) {
-      throw new Error('会话未就绪');
+      throw new Error(t('ai.chat.session_not_ready'));
     }
     try {
       await AIService.RespondToolApproval(
@@ -385,7 +384,7 @@ export class GenkitAdapter implements ChatAdapter {
         }),
       );
     } catch (err) {
-      const message = parseCallServiceError(err);
+      const message = translateServiceError(err);
       useMessageStore.getState().errorMessage(message);
       throw new Error(message, { cause: err });
     }
@@ -423,7 +422,7 @@ function genkitRowsToMui(rows: AIMessage[]): ListChatMessage[] {
         parts: genkitPartsToMui(parseGenkitParts(m.parts), m.content),
         createdAt: new Date(m.timestamp * 1000).toISOString(),
         conversationId: m.session_id,
-        author: currentUser,
+        author: getCurrentUser(),
       });
       continue;
     }
@@ -437,7 +436,7 @@ function genkitRowsToMui(rows: AIMessage[]): ListChatMessage[] {
         parts: nextParts,
         createdAt: new Date(m.timestamp * 1000).toISOString(),
         conversationId: m.session_id,
-        author: aiUser,
+        author: getAiUser(),
       };
     } else {
       pending.parts = mergeToolParts(pending.parts, nextParts);

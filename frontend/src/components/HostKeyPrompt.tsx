@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import { Events } from "@wailsio/runtime";
 import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
+import { t, tf } from "../i18n";
 
 interface Payload {
   host: string;
@@ -64,21 +65,19 @@ const HostKeyPrompt: React.FC = () => {
       fullWidth
     >
       <DialogTitle>
-        {mismatch ? "主机密钥已变更" : "新的主机密钥"}
+        {mismatch ? t("hostkey.mismatch_title") : t("hostkey.new_title")}
       </DialogTitle>
       <DialogContent>
         {payload && (
           <Stack spacing={2}>
             {mismatch && (
-              <Alert severity="warning">
-                服务器主机密钥与本地已信任记录不一致。若你刚重装系统或更换了机器，可选择更新；否则请拒绝连接，以防中间人攻击。
-              </Alert>
+              <Alert severity="warning">{t("hostkey.mismatch_warning")}</Alert>
             )}
             <Typography variant="body2" color="text.secondary">
-              主机: {payload.host} ({payload.address})
+              {tf("hostkey.host_line", payload.host, payload.address)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              类型: {payload.key_type || "—"}
+              {tf("hostkey.type_line", payload.key_type || "—")}
             </Typography>
             {mismatch ? (
               <>
@@ -87,14 +86,17 @@ const HostKeyPrompt: React.FC = () => {
                   color="text.secondary"
                   sx={{ wordBreak: "break-all" }}
                 >
-                  旧指纹: {payload.old_fingerprint || "—"}
+                  {tf(
+                    "hostkey.old_fingerprint",
+                    payload.old_fingerprint || "—",
+                  )}
                 </Typography>
                 <Typography
                   variant="body2"
                   color="text.secondary"
                   sx={{ wordBreak: "break-all" }}
                 >
-                  新指纹: {payload.fingerprint}
+                  {tf("hostkey.new_fingerprint", payload.fingerprint)}
                 </Typography>
               </>
             ) : (
@@ -104,10 +106,10 @@ const HostKeyPrompt: React.FC = () => {
                   color="text.secondary"
                   sx={{ wordBreak: "break-all" }}
                 >
-                  指纹: {payload.fingerprint}
+                  {tf("hostkey.fingerprint", payload.fingerprint)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  若信任此主机，选择“信任并继续”，将会把该主机密钥保存到文件中。
+                  {t("hostkey.trust_hint")}
                 </Typography>
               </>
             )}
@@ -115,9 +117,13 @@ const HostKeyPrompt: React.FC = () => {
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => handleClose(false)}>拒绝</Button>
+        <Button onClick={() => handleClose(false)}>
+          {t("hostkey.reject")}
+        </Button>
         <Button onClick={() => handleClose(true)} variant="contained">
-          {mismatch ? "更新并继续" : "信任并继续"}
+          {mismatch
+            ? t("hostkey.update_continue")
+            : t("hostkey.trust_continue")}
         </Button>
       </DialogActions>
     </Dialog>

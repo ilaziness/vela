@@ -1,0 +1,282 @@
+[
+  {
+    "category": "系統監控",
+    "commands": [
+      {
+        "name": "系統負載",
+        "command": "uptime",
+        "description": "查看系統运行時間和平均負載\n\n用法：直接執行，輸出包括：\n- 當前時間\n- 运行時間\n- 登錄用戶數\n- 1/5/15 分鐘平均負載"
+      },
+      {
+        "name": "記憶體使用",
+        "command": "free -h",
+        "description": "以人類可讀單位顯示內存和交換分區使用情況\n\n用法：\n- total: 總量\n- used: 已使用\n- free: 空閒\n- shared: 共享內存\n- buff/cache: 緩存\n- available: 可供新進程使用的內存"
+      },
+      {
+        "name": "磁碟使用",
+        "command": "df -hT",
+        "description": "以人類可讀格式顯示磁盤空間和文件系統類型\n\n用法：\n- Filesystem: 文件系統\n- Type: 文件系統類型\n- Size: 總容量\n- Used: 已使用\n- Avail: 可用\n- Use%: 使用百分比\n- Mounted on: 掛載點"
+      },
+      {
+        "name": "inode 使用",
+        "command": "df -ih",
+        "description": "查看各文件系統的 inode 占用\n\n磁盤空間未滿但無法創建文件時，優先檢查 inode 是否耗盡"
+      },
+      {
+        "name": "核心與架構",
+        "command": "uname -a",
+        "description": "查看內核版本、主機名和硬件架構\n\n輸出依次包含：內核名、主機名、內核發行號、內核版本、機器架構、處理器類型、硬件平台、操作系統"
+      },
+      {
+        "name": "發行版資訊",
+        "command": "cat /etc/os-release",
+        "description": "查看操作系統名稱和版本\n\n常見字段：\n- NAME / PRETTY_NAME: 發行版名稱\n- VERSION_ID: 版本號\n- ID: 發行版標識，可用於判斷包管理器"
+      },
+      {
+        "name": "CPU 信息",
+        "command": "lscpu",
+        "description": "查看 CPU 架構、核心數和頻率\n\n重點字段：\n- Architecture: 架構\n- CPU(s): 邏辑 CPU 數\n- Thread(s) per core / Core(s) per socket: 線程與核心\n- Model name: 型號"
+      },
+      {
+        "name": "虛擬記憶體統計",
+        "command": "vmstat 1 3",
+        "description": "採樣 3 次系統資源統計，間隔 1 秒\n\n用法：\n- r: 运行隊列中的進程數\n- b: 不可中斷睡眠的進程數\n- si/so: 換入/換出\n- us/sy/id/wa: 用戶態、內核態、空閒、IO 等待占比"
+      },
+      {
+        "name": "區塊裝置",
+        "command": "lsblk -f",
+        "description": "以樹形列出磁盤、分區和掛載點\n\n用法：\n- NAME: 設備名\n- FSTYPE: 文件系統\n- LABEL / UUID: 卷標與標識\n- MOUNTPOINT: 掛載點"
+      },
+      {
+        "name": "目前登入",
+        "command": "w",
+        "description": "查看當前登錄用戶及其正在執行的命令\n\n同時顯示系統負載，以及每個會話的來源地址和空閒時間"
+      },
+      {
+        "name": "時間與時區",
+        "command": "timedatectl",
+        "description": "查看系統時間、時區和 NTP 同步狀態\n\n重點字段：\n- Local time: 本地時間\n- Time zone: 時區\n- NTP service: 是否啟用時間同步\n- System clock synchronized: 時鐘是否已同步"
+      }
+    ]
+  },
+  {
+    "category": "網路工具",
+    "commands": [
+      {
+        "name": "網路連線",
+        "command": "netstat -tulpn",
+        "description": "查看所有 TCP/UDP 監聽端口和進程\n\n用法：\n-t: TCP 連接\n-u: UDP 連接\n-l: 僅監聽端口\n-p: 顯示進程 PID/名稱\n-n: 不解析主機名"
+      },
+      {
+        "name": "通訊端統計",
+        "command": "ss -tulpn",
+        "description": "netstat 的現代替代品，顯示套接字統計\n\n用法參數與 netstat 相同，但性能更好"
+      },
+      {
+        "name": "通訊端概覽",
+        "command": "ss -s",
+        "description": "匯總 TCP、UDP 等套接字數量\n\n適合快速判斷連接是否堆積，例如 TIME-WAIT、ESTAB 數量異常升高"
+      },
+      {
+        "name": "網卡位址",
+        "command": "ip -br addr",
+        "description": "以簡表顯示網卡、狀態和 IP 地址\n\n用法：\n- UP/DOWN: 網卡狀態\n- 地址列同時包含 IPv4 與 IPv6"
+      },
+      {
+        "name": "路由表",
+        "command": "ip route",
+        "description": "查看 IPv4 路由\n\n默認路由一般以 default via 開頭，後面是網關和出口網卡"
+      },
+      {
+        "name": "DNS 設定",
+        "command": "cat /etc/resolv.conf",
+        "description": "查看當前使用的 DNS 服務器\n\nnameserver 行是解析用的 DNS 地址；search 行是默認搜索域"
+      },
+      {
+        "name": "鄰居快取",
+        "command": "ip neigh",
+        "description": "查看 ARP/NDP 邻居緩存\n\n用於確認局域網內主機是否可達，以及對應的 MAC 地址"
+      },
+      {
+        "name": "網路連通性測試",
+        "command": "ping -c 4 www.google.com",
+        "description": "測試網絡連通性\n\n用法：\n-c 4: 發送 4 個包後停止\n可替換目標地址為其他主機"
+      },
+      {
+        "name": "HTTP 探測",
+        "command": "curl -I --max-time 10 https://www.google.com",
+        "description": "只請求響應頭，檢查 HTTP 服務是否可達\n\n用法：\n-I: 發送 HEAD 請求\n--max-time 10: 最多等待 10 秒\n可把 URL 換成要檢查的站點"
+      },
+      {
+        "name": "DNS 解析",
+        "command": "getent hosts www.google.com",
+        "description": "用系統解析器查詢主機名對應的地址\n\n走本機配置的 DNS，結果比直接指定公共 DNS 更接近應用實際解析路徑"
+      }
+    ]
+  },
+  {
+    "category": "檔案操作",
+    "commands": [
+      {
+        "name": "詳細目錄列表",
+        "command": "ls -lah",
+        "description": "以詳細列表格式顯示目錄內容\n\n用法：\n-l: 長格式\n-a: 顯示隱藏文件\n-h: 人類可讀文件大小"
+      },
+      {
+        "name": "尋找檔案",
+        "command": "find . -name \"*.log\" -type f",
+        "description": "在當前目錄遞歸查找指定類型的文件\n\n用法：\n.: 當前目錄\n-name: 按名稱匹配\n-type f: 僅查找文件"
+      },
+      {
+        "name": "目錄佔用排行",
+        "command": "du -xh --max-depth=1 2>/dev/null | sort -hr | head -n 20",
+        "description": "統計當前目錄下一層子目錄的磁盤占用，並按大小排序\n\n用法：\n-x: 不跨越文件系統\n--max-depth=1: 只統計一層\nsort -hr: 按人類可讀大小倒序\nhead: 只顯示前 20 项"
+      },
+      {
+        "name": "尋找大檔案",
+        "command": "find . -xdev -type f -size +100M -printf '%s %p\\n' 2>/dev/null | sort -nr | head -n 20",
+        "description": "在當前文件系統中查找大於 100MB 的文件\n\n用法：\n-xdev: 不進入其他掛載點\n-size +100M: 大於 100MB\n輸出第一列是字節數，可按需要調整閾值"
+      },
+      {
+        "name": "文字搜尋",
+        "command": "grep -RIn --exclude-dir=.git --color=never \"pattern\" .",
+        "description": "在當前目錄遞歸搜索文本\n\n用法：\n-R: 遞歸\n-I: 跳过二進制文件\n-n: 顯示行號\n把 pattern 換成要查找的關鍵字"
+      },
+      {
+        "name": "最近修改的檔案",
+        "command": "find . -xdev -type f -mtime -1 -printf '%TY-%Tm-%Td %TH:%TM %p\\n' 2>/dev/null | sort | tail -n 30",
+        "description": "列出最近 24 小時內修改过的文件\n\n用法：\n-mtime -1: 一天內修改\n適合排查剛寫入的日志、配置或臨時文件"
+      },
+      {
+        "name": "查看壓縮包",
+        "command": "tar -tzvf archive.tar.gz",
+        "description": "列出 tar.gz 壓縮包內容，不解壓\n\n用法：\n-t: 列出內容\n-z: gzip 壓縮\n-v: 顯示權限、所有者和大小\n把 archive.tar.gz 換成實際文件名"
+      }
+    ]
+  },
+  {
+    "category": "進程管理",
+    "commands": [
+      {
+        "name": "進程快照",
+        "command": "ps aux",
+        "description": "顯示所有進程的詳細信息\n\n用法：\n-a: 所有終端上的進程\n-u: 用戶格式\n-x: 無控制終端的進程"
+      },
+      {
+        "name": "動態進程查看",
+        "command": "top -b -n 1",
+        "description": "以批處理模式輸出一次進程狀態後退出\n\n用法：\n-b: 批處理模式\n-n 1: 僅執行一次後退出"
+      },
+      {
+        "name": "CPU 佔用排行",
+        "command": "ps aux --sort=-%cpu | head -n 15",
+        "description": "按 CPU 占用從高到低列出前 15 個進程\n\n%CPU 列是採樣時刻的 CPU 占比，適合快速定位吃 CPU 的進程"
+      },
+      {
+        "name": "記憶體佔用排行",
+        "command": "ps aux --sort=-%mem | head -n 15",
+        "description": "按內存占用從高到低列出前 15 個進程\n\n%MEM 是物理內存占比，RSS 列是實際駐留內存"
+      },
+      {
+        "name": "進程樹",
+        "command": "pstree -ap | head -n 80",
+        "description": "以樹形顯示進程父子關系\n\n用法：\n-a: 顯示命令行參數\n-p: 顯示 PID\n輸出較多時只保留前 80 行"
+      },
+      {
+        "name": "依名稱尋找進程",
+        "command": "pgrep -af sshd",
+        "description": "按進程名列出匹配的 PID 和完整命令行\n\n用法：\n-a: 顯示命令行\n-f: 匹配完整命令行\n把 sshd 換成要查找的進程名"
+      }
+    ]
+  },
+  {
+    "category": "日誌查看",
+    "commands": [
+      {
+        "name": "即時日誌追蹤",
+        "command": "tail -f /var/log/syslog",
+        "description": "實時跟蹤日志文件更新\n\n用法：\n-f: 持續跟蹤文件末尾\n可替換為其他日志文件路徑。部分發行版的系統日志在 /var/log/messages"
+      },
+      {
+        "name": "日誌末尾",
+        "command": "tail -n 100 /var/log/syslog",
+        "description": "查看日志文件最後 100 行後退出\n\n適合不需要持續跟蹤、只想看最近記錄的場景。可替換路徑和行數"
+      },
+      {
+        "name": "系統日誌",
+        "command": "journalctl -b --no-pager -n 200",
+        "description": "查看本次啟動以來最近的系統日志\n\n用法：\n-b: 本次啟動的日志\n-n 200: 最近 200 行\n--no-pager: 不使用分頁器"
+      },
+      {
+        "name": "啟動以來的錯誤",
+        "command": "journalctl -p err -b --no-pager -n 80",
+        "description": "只看本次啟動中 error 及以上級別的日志\n\n-p err 包含 err、crit、alert、emerg，用來快速定位啟動失敗和服務異常"
+      },
+      {
+        "name": "核心日誌",
+        "command": "dmesg -T | tail -n 50",
+        "description": "查看最近的內核環形緩衝區消息\n\n用法：\n-T: 顯示可讀時間\n常見內容包括磁盤、網卡、OOM 和驅動報錯"
+      },
+      {
+        "name": "SSH 服務日誌",
+        "command": "journalctl -u ssh -u sshd --no-pager -n 80",
+        "description": "查看 SSH 服務最近的日志\n\n同時匹配 ssh 與 sshd 單元名，兼容 Debian 系和 RHEL 系的服務名差異"
+      }
+    ]
+  },
+  {
+    "category": "服務管理",
+    "commands": [
+      {
+        "name": "執行中的服務",
+        "command": "systemctl list-units --type=service --state=running --no-pager",
+        "description": "列出當前正在运行的 systemd 服務\n\n只顯示 state=running 的 service 單元，便於確認關鍵服務是否在線"
+      },
+      {
+        "name": "失敗的服務",
+        "command": "systemctl --failed --no-pager",
+        "description": "列出處於 failed 狀態的 systemd 單元\n\n沒有失敗單元時會提示 0 loaded units listed"
+      },
+      {
+        "name": "服務狀態",
+        "command": "systemctl status ssh --no-pager -l",
+        "description": "查看指定服務的运行狀態和最近日志\n\n用法：\n-l: 不截斷長日志行\n把 ssh 換成 nginx、docker 等服務名"
+      },
+      {
+        "name": "開機自啟服務",
+        "command": "systemctl list-unit-files --type=service --state=enabled --no-pager",
+        "description": "列出已設置為開機啟動的服務\n\nenabled 表示開機自啟，與當前是否正在运行是兩回事"
+      }
+    ]
+  },
+  {
+    "category": "使用者與權限",
+    "commands": [
+      {
+        "name": "目前使用者",
+        "command": "id",
+        "description": "查看當前用戶的 uid、gid 和所屬組\n\nuid=0 表示 root。groups 列出辅助組，用於判斷是否具備 sudo 或 docker 等權限"
+      },
+      {
+        "name": "使用者列表",
+        "command": "getent passwd | awk -F: '$3>=1000 || $3==0 {print $1\"\\t\"$3\"\\t\"$6\"\\t\"$7}'",
+        "description": "列出 root 和普通用戶，跳过大多數系統賬號\n\n列依次為：用戶名、uid、家目錄、登錄 shell"
+      },
+      {
+        "name": "最近登入",
+        "command": "last -n 15",
+        "description": "查看最近 15 條登錄記錄\n\n包含用戶、來源地址、登錄和退出時間。still logged in 表示會話仍在"
+      },
+      {
+        "name": "失敗登入",
+        "command": "lastb -n 15",
+        "description": "查看最近 15 條失敗的登錄嘗試\n\n通常需要 root 權限。短時間內大量失敗記錄可能是口令爆破"
+      },
+      {
+        "name": "sudo 記錄",
+        "command": "journalctl _COMM=sudo --no-pager -n 30",
+        "description": "查看最近的 sudo 調用記錄\n\n用於審計誰在什麼時間提升了權限。部分系統會把同類記錄寫在 /var/log/auth.log"
+      }
+    ]
+  }
+]

@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, TextField, Button } from "@mui/material";
+import { t } from "../i18n";
 
 interface CommandInputProps {
   inputCommand: string;
@@ -22,8 +23,8 @@ const CommandInput: React.FC<CommandInputProps> = ({
         value={inputCommand}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => onKeyDown(e as unknown as React.KeyboardEvent<HTMLTextAreaElement>)}
-        placeholder="输入命令..."
-        helperText="↵ 发送 | Shift+↵ 换行"
+        placeholder={t("command.input_placeholder")}
+        helperText={t("command.input_helper")}
         fullWidth
         variant="outlined"
         slotProps={{
@@ -34,7 +35,7 @@ const CommandInput: React.FC<CommandInputProps> = ({
       />
       <Box sx={{ mt: 1, display: "flex", justifyContent: "flex-end" }}>
         <Button sx={{ px: 5 }} variant="contained" onClick={onSend}>
-          发送
+          {t("command.send")}
         </Button>
       </Box>
     </>

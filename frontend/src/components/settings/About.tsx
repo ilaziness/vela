@@ -7,8 +7,9 @@ import {
   AppInfo,
   NewVersion,
 } from "../../../bindings/github.com/ilaziness/vela/services";
-import { parseCallServiceError } from "../../func/service";
 import { useMessageStore } from "../../stores/message";
+import { t, tf } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 const UpdateAvailableDialog = React.lazy(
   () => import("../UpdateAvailableDialog"),
@@ -39,10 +40,10 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
         setNewVersion(ver);
         setUpdateDialogOpen(true);
       } else {
-        infoMessage("当前已是最新版本");
+        infoMessage(t("settings.about.up_to_date"));
       }
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setCheckingUpdate(false);
     }
@@ -51,7 +52,7 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
   return (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
-        关于
+        {t("settings.about.title")}
       </Typography>
       <Box>
         <Stack spacing={1} sx={{ textAlign: "center", alignItems: "center" }}>
@@ -91,7 +92,7 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
               loading={checkingUpdate}
               variant="outlined"
             >
-              检查更新
+              {t("settings.about.check_update")}
             </Button>
           </Box>
 
@@ -110,7 +111,7 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
             variant="body2"
             sx={{ fontWeight: 500, ml: 1 }}
           >
-            跨平台SSH/SFTP桌面客户端，支持Windows、Linux和MacOS
+            {t("settings.about.tagline")}
           </Typography>
 
           <Typography
@@ -118,7 +119,7 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
             variant="body2"
             sx={{ fontSize: "12px", ml: 1 }}
           >
-            Build Time: {appinfo.BuildTime}
+            {tf("settings.about.build_time", appinfo.BuildTime)}
           </Typography>
 
           <Typography
@@ -126,7 +127,7 @@ const About: React.FC<AboutProps> = ({ appinfo }) => {
             variant="body2"
             sx={{ fontSize: "12px", ml: 1 }}
           >
-            Git: {appinfo.GitInfo}
+            {tf("settings.about.git", appinfo.GitInfo)}
           </Typography>
         </Stack>
       </Box>

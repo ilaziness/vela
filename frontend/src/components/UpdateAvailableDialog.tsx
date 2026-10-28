@@ -13,8 +13,9 @@ import {
 import Markdown from "markdown-to-jsx";
 import { NewVersion } from "../../bindings/github.com/ilaziness/vela/services";
 import { InstallUpdate } from "../../bindings/github.com/ilaziness/vela/services/appservice";
-import { formatFileSize, parseCallServiceError } from "../func/service";
 import { useMessageStore } from "../stores/message";
+import { t } from "../i18n";
+import { formatFileSize, translateServiceError } from "../func/service";
 
 const EventDownloadProgress = "wails:updater:download-progress";
 const EventVerifying = "wails:updater:verifying";
@@ -203,7 +204,7 @@ export default function UpdateAvailableDialog({
     } catch (err) {
       installingRef.current = false;
       setInstalling(false);
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -218,7 +219,7 @@ export default function UpdateAvailableDialog({
       maxWidth="sm"
       fullWidth
     >
-      <DialogTitle>发现新版本</DialogTitle>
+      <DialogTitle>{t("update.title")}</DialogTitle>
       <DialogContent>
         <Typography sx={{ fontWeight: 600 }}>{newVersion?.Version}</Typography>
         {newVersion?.Notes ? (
@@ -249,32 +250,32 @@ export default function UpdateAvailableDialog({
             />
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
               {phase === "verify"
-                ? "正在校验…"
+                ? t("update.verifying")
                 : phase === "install"
-                  ? "正在安装…"
+                  ? t("update.installing")
                   : progress && progress.total > 0
                     ? `${formatFileSize(progress.written)} / ${formatFileSize(progress.total)}`
-                    : "正在下载…"}
+                    : t("update.downloading")}
             </Typography>
           </Box>
         ) : null}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={installing}>
-          关闭
+          {t("common.close")}
         </Button>
         <Button
           onClick={() => openExternalURL(newVersion?.URL)}
           disabled={installing}
         >
-          打开下载页
+          {t("update.open_download_page")}
         </Button>
         <Button
           variant="contained"
           onClick={handleInstall}
           loading={installing}
         >
-          安装更新
+          {t("update.install")}
         </Button>
       </DialogActions>
     </Dialog>

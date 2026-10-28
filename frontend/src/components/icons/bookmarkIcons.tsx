@@ -7,6 +7,7 @@ import {
   alpha,
   SvgIconProps,
 } from "@mui/material";
+import { t } from "../../i18n";
 import {
   BookmarkBorderOutlined,
   FolderOutlined,
@@ -428,7 +429,7 @@ export function OsIconPicker({
       <PickerGrid>
         <PickerCell
           selected={!value}
-          title="默认"
+          title={t("common.default")}
           onClick={() => pick("")}
         >
           <BookmarkBorderOutlined sx={{ fontSize: 18 }} />
@@ -472,7 +473,7 @@ export function GroupIconPicker({
       <PickerGrid>
         <PickerCell
           selected={!value}
-          title="默认"
+          title={t("common.default")}
           onClick={() => pick("")}
         >
           <FolderOutlined sx={{ fontSize: 18 }} />

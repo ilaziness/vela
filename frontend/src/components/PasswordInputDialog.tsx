@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import { Events, Window } from "@wailsio/runtime";
 import * as ConfigService from "../../bindings/github.com/ilaziness/vela/services/configservice";
+import { t, tf } from "../i18n";
 
 const PasswordInputDialog: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -29,7 +30,9 @@ const PasswordInputDialog: React.FC = () => {
         if (!alive || !focused) {
           return;
         }
-        setMessage(event?.data || "需要密码来加密/解密密码");
+        setMessage(
+          event?.data || t("password.encrypt_decrypt_required"),
+        );
         setPassword("");
         setOpen(true);
       })();
@@ -59,18 +62,17 @@ const PasswordInputDialog: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!password.trim()) {
-      setMessage("密码不能为空");
+      setMessage(t("password.required"));
       return;
     }
 
     try {
-      // 调用ConfigService.SetUserPassword保存密码
       await ConfigService.SetUserPassword(password);
       console.log("Password set successfully");
       close();
     } catch (error) {
       console.error("Failed to set password:", error);
-      setMessage("设置密码失败: " + error);
+      setMessage(tf("password.set_failed", String(error)));
     }
   };
 
@@ -82,7 +84,7 @@ const PasswordInputDialog: React.FC = () => {
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-      <DialogTitle>输入密码</DialogTitle>
+      <DialogTitle>{t("password.title")}</DialogTitle>
       <DialogContent>
         {message && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -92,20 +94,20 @@ const PasswordInputDialog: React.FC = () => {
         <TextField
           autoFocus
           margin="dense"
-          label="密码"
+          label={t("password.label")}
           type="password"
           fullWidth
           variant="outlined"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="请输入密码"
+          placeholder={t("password.placeholder")}
         />
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>取消</Button>
+        <Button onClick={handleClose}>{t("common.cancel")}</Button>
         <Button onClick={handleSubmit} variant="contained">
-          确定
+          {t("common.ok")}
         </Button>
       </DialogActions>
     </Dialog>

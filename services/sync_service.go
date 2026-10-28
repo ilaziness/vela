@@ -1,17 +1,18 @@
 package services
 
 import (
-	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/database"
 	internalsync "github.com/ilaziness/vela/internal/sync"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
-var ErrSyncNotConfigured = errors.New("sync not configured")
+var ErrSyncNotConfigured = usererr.Coded("sync.not_configured", "Sync is not configured")
 
 type SyncProgress = internalsync.Progress
 
@@ -74,7 +75,7 @@ func (s *SyncService) uploadWithRetry(manager *internalsync.SyncManager, userDat
 		lastErr = err
 		s.logger.Error("Upload failed, will retry", zap.Int("attempt", i+1), zap.Error(err))
 	}
-	return fmt.Errorf("upload failed after %d attempts: %w", maxRetries, lastErr)
+	return usererr.Coded("sync.upload_failed", "Upload failed after %d attempts: %s", strconv.Itoa(maxRetries), lastErr.Error())
 }
 
 func (s *SyncService) DownloadSync(version int) error {
@@ -87,7 +88,7 @@ func (s *SyncService) DownloadSync(version int) error {
 	err := s.downloadWithRetry(manager, s.configService.userDataDir(), version, 3)
 	if err != nil {
 		s.progress.SetError(err.Error())
-		return fmt.Errorf("%w: 数据恢复失败，请手动重启应用", err)
+		return usererr.Coded("sync.restore_failed", "Data restore failed; please restart the app manually")
 	}
 	s.progress.SetCompleted()
 	return nil
@@ -108,7 +109,7 @@ func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userD
 		lastErr = err
 		s.logger.Error("Download failed, will retry", zap.Int("attempt", i+1), zap.Error(err))
 	}
-	return fmt.Errorf("download failed after %d attempts: %w", maxRetries, lastErr)
+	return usererr.Coded("sync.download_failed", "Download failed after %d attempts: %s", strconv.Itoa(maxRetries), lastErr.Error())
 }
 
 func (s *SyncService) ListSyncVersions(limit, offset int) ([]internalsync.VersionInfo, error) {

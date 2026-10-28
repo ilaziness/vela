@@ -1,3 +1,5 @@
+import { tf } from "../i18n";
+
 /** Parse KEY=value lines into a record. TERM lines are ignored. */
 export function parseEnvLines(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -8,7 +10,7 @@ export function parseEnvLines(text: string): Record<string, string> {
     }
     const eq = line.indexOf("=");
     if (eq <= 0) {
-      throw new Error(`环境变量格式无效，应为 KEY=value: ${line}`);
+      throw new Error(tf("validation.env_invalid_line", line));
     }
     const key = line.slice(0, eq).trim();
     if (!key || key.toUpperCase() === "TERM") {

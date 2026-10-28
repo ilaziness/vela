@@ -16,6 +16,8 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // Tool 工具定义
@@ -69,94 +71,94 @@ func (ts *Service) GetTools() []Tool {
 	return []Tool{
 		{
 			ID:          "json-yaml",
-			Name:        "JSON/YAML",
-			Description: "格式化、压缩、校验，以及 JSON 与 YAML 互转",
+			Name:        i18n.T("tool.json_yaml.name"),
+			Description: i18n.T("tool.json_yaml.desc"),
 			Icon:        "DataObject",
-			Category:    "开发",
+			Category:    "dev",
 		},
 		{
 			ID:          "timestamp",
-			Name:        "时间戳转换",
-			Description: "Unix时间戳和日期时间相互转换工具",
+			Name:        i18n.T("tool.timestamp.name"),
+			Description: i18n.T("tool.timestamp.desc"),
 			Icon:        "AccessTime",
-			Category:    "开发",
+			Category:    "dev",
 		},
 		{
 			ID:          "encoder",
-			Name:        "编码解码",
-			Description: "Base64、URL、HTML编解码工具",
+			Name:        i18n.T("tool.encoder.name"),
+			Description: i18n.T("tool.encoder.desc"),
 			Icon:        "Code",
-			Category:    "编码",
+			Category:    "encoding",
 		},
 		{
 			ID:          "hash",
-			Name:        "哈希计算",
-			Description: "字符串哈希值计算（MD5、SHA1、SHA256等）",
+			Name:        i18n.T("tool.hash.name"),
+			Description: i18n.T("tool.hash.desc"),
 			Icon:        "Fingerprint",
-			Category:    "安全",
+			Category:    "security",
 		},
 		{
 			ID:          "regex",
-			Name:        "正则测试",
-			Description: "正则表达式匹配测试工具",
+			Name:        i18n.T("tool.regex.name"),
+			Description: i18n.T("tool.regex.desc"),
 			Icon:        "RegularExpression",
-			Category:    "开发",
+			Category:    "dev",
 		},
 		{
 			ID:          "cron",
-			Name:        "Cron 表达式",
-			Description: "解析 Cron 表达式并列出接下来的执行时间",
+			Name:        i18n.T("tool.cron.name"),
+			Description: i18n.T("tool.cron.desc"),
 			Icon:        "Schedule",
-			Category:    "运维",
+			Category:    "ops",
 		},
 		{
 			ID:          "cidr",
-			Name:        "子网计算",
-			Description: "CIDR 网段、掩码、主机范围与包含判断",
+			Name:        i18n.T("tool.cidr.name"),
+			Description: i18n.T("tool.cidr.desc"),
 			Icon:        "Lan",
-			Category:    "网络",
+			Category:    "network",
 		},
 		{
 			ID:          "port-check",
-			Name:        "端口检测",
-			Description: "TCP端口连通性测试工具",
+			Name:        i18n.T("tool.port_check.name"),
+			Description: i18n.T("tool.port_check.desc"),
 			Icon:        "NetworkCheck",
-			Category:    "网络",
+			Category:    "network",
 		},
 		{
 			ID:          "jwt",
-			Name:        "JWT 解码",
-			Description: "本地拆分 Header / Payload，不校验签名",
+			Name:        i18n.T("tool.jwt.name"),
+			Description: i18n.T("tool.jwt.desc"),
 			Icon:        "Key",
-			Category:    "安全",
+			Category:    "security",
 		},
 		{
 			ID:          "random",
-			Name:        "随机生成",
-			Description: "UUID v4/v7 与自定义字符集随机串",
+			Name:        i18n.T("tool.random.name"),
+			Description: i18n.T("tool.random.desc"),
 			Icon:        "Casino",
-			Category:    "开发",
+			Category:    "dev",
 		},
 		{
 			ID:          "base-convert",
-			Name:        "进制转换",
-			Description: "2–36 进制数字相互转换",
+			Name:        i18n.T("tool.base_convert.name"),
+			Description: i18n.T("tool.base_convert.desc"),
 			Icon:        "Pin",
-			Category:    "开发",
+			Category:    "dev",
 		},
 		{
 			ID:          "text-diff",
-			Name:        "文本对比",
-			Description: "按行对比两段文本，标出增删",
+			Name:        i18n.T("tool.text_diff.name"),
+			Description: i18n.T("tool.text_diff.desc"),
 			Icon:        "Compare",
-			Category:    "开发",
+			Category:    "dev",
 		},
 		{
 			ID:          "chmod",
-			Name:        "权限计算",
-			Description: "chmod 八进制与 rwx 符号互转",
+			Name:        i18n.T("tool.chmod.name"),
+			Description: i18n.T("tool.chmod.desc"),
 			Icon:        "Lock",
-			Category:    "运维",
+			Category:    "ops",
 		},
 	}
 }
@@ -168,7 +170,7 @@ func (ts *Service) CheckPort(host string, port int) PortCheckResult {
 			Success: false,
 			Host:    host,
 			Port:    port,
-			Error:   "主机地址不能为空",
+			Error:   i18n.T("tool.err.host_empty"),
 		}
 	}
 	if port < 1 || port > 65535 {
@@ -176,7 +178,7 @@ func (ts *Service) CheckPort(host string, port int) PortCheckResult {
 			Success: false,
 			Host:    host,
 			Port:    port,
-			Error:   "端口号必须在1-65535之间",
+			Error:   i18n.T("tool.err.port_range"),
 		}
 	}
 
@@ -217,7 +219,7 @@ func (ts *Service) Encode(toolType string, input string) EncodeResponse {
 		result = html.EscapeString(input)
 	default:
 		return EncodeResponse{
-			Error: "不支持的编码类型: " + toolType,
+			Error: i18n.Tf("tool.err.unsupported_encode", toolType),
 		}
 	}
 
@@ -234,19 +236,19 @@ func (ts *Service) Decode(toolType string, input string) EncodeResponse {
 		var decoded []byte
 		decoded, err = base64.StdEncoding.DecodeString(input)
 		if err != nil {
-			return EncodeResponse{Error: "Base64解码失败: " + err.Error()}
+			return EncodeResponse{Error: i18n.Tf("tool.err.base64_decode", err.Error())}
 		}
 		result = string(decoded)
 	case "url":
 		result, err = url.QueryUnescape(input)
 		if err != nil {
-			return EncodeResponse{Error: "URL解码失败: " + err.Error()}
+			return EncodeResponse{Error: i18n.Tf("tool.err.url_decode", err.Error())}
 		}
 	case "html":
 		result = html.UnescapeString(input)
 	default:
 		return EncodeResponse{
-			Error: "不支持的解码类型: " + toolType,
+			Error: i18n.Tf("tool.err.unsupported_decode", toolType),
 		}
 	}
 
@@ -302,7 +304,7 @@ func (ts *Service) RegexMatch(pattern string, text string, flags string) RegexMa
 	re, err := regexp.Compile(fullPattern)
 	if err != nil {
 		return RegexMatchResult{
-			Error: "正则表达式编译失败: " + err.Error(),
+			Error: i18n.Tf("tool.err.regex_compile", err.Error()),
 		}
 	}
 
@@ -351,7 +353,7 @@ func (ts *Service) CalculateHash(input string, algorithm string) HashResult {
 		return HashResult{
 			Success: false,
 			Input:   input,
-			Error:   "输入内容不能为空",
+			Error:   i18n.T("tool.err.input_empty"),
 		}
 	}
 	if algorithm == "" {
@@ -377,7 +379,7 @@ func (ts *Service) CalculateHash(input string, algorithm string) HashResult {
 		return HashResult{
 			Success: false,
 			Input:   input,
-			Error:   "不支持的哈希算法: " + algorithm,
+			Error:   i18n.Tf("tool.err.unsupported_hash", algorithm),
 		}
 	}
 
@@ -394,7 +396,7 @@ func (ts *Service) ConvertTimestamp(input string, toTimestamp bool) TimestampRes
 	if input == "" {
 		return TimestampResult{
 			Success: false,
-			Error:   "输入内容不能为空",
+			Error:   i18n.T("tool.err.input_empty"),
 		}
 	}
 
@@ -438,7 +440,7 @@ func (ts *Service) ConvertTimestamp(input string, toTimestamp bool) TimestampRes
 		if !parsed {
 			return TimestampResult{
 				Success: false,
-				Error:   "无法解析日期时间格式",
+				Error:   i18n.T("tool.err.datetime_parse"),
 			}
 		}
 
@@ -452,7 +454,7 @@ func (ts *Service) ConvertTimestamp(input string, toTimestamp bool) TimestampRes
 	if err != nil {
 		return TimestampResult{
 			Success: false,
-			Error:   "无效的时间戳: " + err.Error(),
+			Error:   i18n.Tf("tool.err.invalid_timestamp", err.Error()),
 		}
 	}
 

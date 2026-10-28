@@ -7,6 +7,7 @@ import DiskUsageRow from "./DiskUsageRow";
 import DualRateChart from "./DualRateChart";
 import MetricChart from "./MetricChart";
 import { pct } from "./format";
+import { t, tf } from "../../i18n";
 
 interface HostResourcesContentProps {
   resources: HostResources;
@@ -37,14 +38,14 @@ const HostResourcesContent: React.FC<HostResourcesContentProps> = ({
           />
         )}
         <CompactStat
-          label="延迟 (SSH)"
+          label={t("host.latency_ssh")}
           value={`${resources.latency_ms ?? 0} ms`}
         />
       </Stack>
 
       {resources.has_disk && (
         <DiskUsageRow
-          label="磁盘 (/)"
+          label={t("host.disk_root")}
           value={`${formatFileSize(resources.disk_used ?? 0)} / ${formatFileSize(resources.disk_total ?? 0)}`}
           progress={pct(resources.disk_used ?? 0, resources.disk_total ?? 0)}
         />
@@ -72,7 +73,7 @@ const HostResourcesContent: React.FC<HostResourcesContentProps> = ({
           )}
           {resources.has_mem && (
             <MetricChart
-              label="内存"
+              label={t("host.memory")}
               value={`${formatFileSize(resources.mem_used ?? 0)} / ${formatFileSize(resources.mem_total ?? 0)}`}
               data={history.mem}
               color={theme.palette.secondary.main}
@@ -90,7 +91,7 @@ const HostResourcesContent: React.FC<HostResourcesContentProps> = ({
             return (
               <DualRateChart
                 key={`net-${name}`}
-                title={`网络 (${name})`}
+                title={tf("host.network", name)}
                 seriesId={`net-${name}`}
                 aBps={iface!.rx_bps ?? 0}
                 bBps={iface!.tx_bps ?? 0}
@@ -109,14 +110,14 @@ const HostResourcesContent: React.FC<HostResourcesContentProps> = ({
             return (
               <DualRateChart
                 key={`disk-${name}`}
-                title={`磁盘 I/O (${name})`}
+                title={tf("host.disk_io", name)}
                 seriesId={`disk-${name}`}
                 aBps={disk!.read_bps ?? 0}
                 bBps={disk!.write_bps ?? 0}
                 aHistory={hist?.a ?? []}
                 bHistory={hist?.b ?? []}
-                aLabel="↓ 读"
-                bLabel="↑ 写"
+                aLabel={t("host.read")}
+                bLabel={t("host.write")}
                 aColor={theme.palette.primary.main}
                 bColor={theme.palette.secondary.main}
               />

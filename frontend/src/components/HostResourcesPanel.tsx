@@ -11,6 +11,7 @@ import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal
 import { useHostMetricHistory } from "../hooks/useHostMetricHistory";
 import CompactStat from "./hostResources/CompactStat";
 import HostResourcesContent from "./hostResources/HostResourcesContent";
+import { t, tf } from "../i18n";
 
 interface HostResourcesPanelProps {
   open: boolean;
@@ -32,8 +33,8 @@ const HostResourcesPanel: React.FC<HostResourcesPanelProps> = ({
   const history = useHostMetricHistory(sessionID, resources);
 
   const title = resources?.hostname
-    ? `主机资源 · ${resources.hostname}`
-    : "主机资源";
+    ? tf("host.title_with_hostname", resources.hostname)
+    : t("host.title");
 
   let body: React.ReactNode;
   if (resources?.supported) {
@@ -45,25 +46,25 @@ const HostResourcesPanel: React.FC<HostResourcesPanelProps> = ({
       <>
         <Stack direction="row" spacing={3} sx={{ mb: 1.5 }}>
           <CompactStat
-            label="延迟 (SSH)"
+            label={t("host.latency_ssh")}
             value={`${resources.latency_ms ?? 0} ms`}
           />
         </Stack>
         <Typography variant="body2" color="text.secondary">
-          当前远程系统不支持资源采集（需 Linux /proc）
+          {t("host.unsupported")}
         </Typography>
       </>
     );
   } else if (pollStopped) {
     body = (
       <Typography variant="body2" color="text.secondary">
-        无法获取主机资源
+        {t("host.fetch_failed")}
       </Typography>
     );
   } else {
     body = (
       <Typography variant="body2" color="text.secondary">
-        正在采集主机资源…
+        {t("host.collecting")}
       </Typography>
     );
   }
@@ -107,7 +108,7 @@ const HostResourcesPanel: React.FC<HostResourcesPanelProps> = ({
             <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
               {title}
             </Typography>
-            <Tooltip title="关闭">
+            <Tooltip title={t("common.close")}>
               <IconButton onClick={onClose} size="small">
                 <Close fontSize="small" />
               </IconButton>

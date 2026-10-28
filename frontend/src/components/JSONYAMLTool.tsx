@@ -15,7 +15,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { FormatResult, JSONYAMLAction } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function JSONYAMLTool() {
   const [input, setInput] = useState("");
@@ -26,7 +27,7 @@ export default function JSONYAMLTool() {
 
   const handleRun = async () => {
     if (!input.trim()) {
-      errorMessage("请输入内容");
+      errorMessage(t("tools.shared.input_required"));
       return;
     }
     setIsLoading(true);
@@ -35,7 +36,7 @@ export default function JSONYAMLTool() {
       const res = await ToolService.FormatJSONYAML(action, input);
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -45,39 +46,49 @@ export default function JSONYAMLTool() {
     if (!result?.result) return;
     try {
       await navigator.clipboard.writeText(result.result);
-      successMessage("已复制到剪贴板");
+      successMessage(t("common.copied"));
     } catch {
-      errorMessage("复制失败");
+      errorMessage(t("common.copy_failed"));
     }
   };
 
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        JSON / YAML
+        {t("tools.json_yaml.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        格式化、压缩、校验，以及 JSON 与 YAML 互转
+        {t("tools.json_yaml.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <FormControl fullWidth>
-            <InputLabel>操作</InputLabel>
+            <InputLabel>{t("tools.json_yaml.action")}</InputLabel>
             <Select
               value={action}
-              label="操作"
+              label={t("tools.json_yaml.action")}
               onChange={(e) => setAction(e.target.value as JSONYAMLAction)}
             >
-              <MenuItem value={JSONYAMLAction.Format}>JSON 格式化</MenuItem>
-              <MenuItem value={JSONYAMLAction.Minify}>JSON 压缩</MenuItem>
-              <MenuItem value={JSONYAMLAction.Validate}>JSON 校验</MenuItem>
-              <MenuItem value={JSONYAMLAction.Json2Yaml}>JSON → YAML</MenuItem>
-              <MenuItem value={JSONYAMLAction.Yaml2Json}>YAML → JSON</MenuItem>
+              <MenuItem value={JSONYAMLAction.Format}>
+                {t("tools.json_yaml.format")}
+              </MenuItem>
+              <MenuItem value={JSONYAMLAction.Minify}>
+                {t("tools.json_yaml.minify")}
+              </MenuItem>
+              <MenuItem value={JSONYAMLAction.Validate}>
+                {t("tools.json_yaml.validate")}
+              </MenuItem>
+              <MenuItem value={JSONYAMLAction.Json2Yaml}>
+                {t("tools.json_yaml.to_yaml")}
+              </MenuItem>
+              <MenuItem value={JSONYAMLAction.Yaml2Json}>
+                {t("tools.json_yaml.to_json")}
+              </MenuItem>
             </Select>
           </FormControl>
           <TextField
-            label="输入内容"
+            label={t("tools.timestamp.input_label")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             multiline
@@ -86,7 +97,7 @@ export default function JSONYAMLTool() {
             slotProps={{ input: { style: { fontFamily: "monospace" } } }}
           />
           <Button variant="contained" onClick={handleRun} disabled={isLoading} fullWidth>
-            {isLoading ? "处理中..." : "执行"}
+            {isLoading ? t("tools.shared.processing") : t("tools.shared.run")}
           </Button>
         </Stack>
       </Paper>
@@ -95,7 +106,7 @@ export default function JSONYAMLTool() {
         <Paper sx={{ p: 3 }}>
           {result.success ? (
             <Alert severity="success" sx={{ mb: 2 }}>
-              处理成功
+              {t("tools.shared.success")}
             </Alert>
           ) : (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -105,7 +116,7 @@ export default function JSONYAMLTool() {
           {result.success && (
             <>
               <TextField
-                label="结果"
+                label={t("tools.shared.result")}
                 value={result.result}
                 fullWidth
                 multiline
@@ -113,7 +124,7 @@ export default function JSONYAMLTool() {
                 slotProps={{ input: { readOnly: true, style: { fontFamily: "monospace" } } }}
               />
               <Button variant="outlined" onClick={handleCopy} sx={{ mt: 2 }}>
-                复制结果
+                {t("tools.shared.copy_result")}
               </Button>
             </>
           )}

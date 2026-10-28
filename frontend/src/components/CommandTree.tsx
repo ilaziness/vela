@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import { ExpandMore, ChevronRight, Delete, Add } from "@mui/icons-material";
 import { CommandInfo } from "../types/command";
+import { t } from "../i18n";
 
 interface CommandTreeProps {
   commandsByCategory: { [key: string]: CommandInfo[] };
@@ -98,7 +99,7 @@ const CommandTree: React.FC<CommandTreeProps> = ({
           startIcon={<Add />}
           onClick={onAddCommand}
         >
-          添加自定义命令
+          {t("command.add_custom")}
         </Button>
       </Box>
     </>

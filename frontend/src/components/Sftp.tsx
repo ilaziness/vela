@@ -52,7 +52,8 @@ import {
 } from "../../bindings/github.com/ilaziness/vela/services";
 import { Entry } from "../../bindings/github.com/ilaziness/vela/internal/localfs/models";
 import { ProgressData } from "../../bindings/github.com/ilaziness/vela/services/models";
-import { formatFileSize, parseCallServiceError } from "../func/service";
+import { formatFileSize, translateServiceError } from "../func/service";
+import { t, tf } from "../i18n";
 import { sortFileList } from "../func/ftp";
 import {
   PaneSide,
@@ -174,7 +175,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       return true;
     } catch (err: any) {
       if (seq !== remoteListSeq.current) return false;
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to list files: ${err.message || err}`);
       throw err;
     } finally {
@@ -218,7 +219,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       return true;
     } catch (err: any) {
       if (seq !== localListSeq.current) return false;
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to list local files: ${err.message || err}`);
       return false;
     } finally {
@@ -261,7 +262,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       onReady?.();
     } catch (err: any) {
       initStartedRef.current = false;
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to initialize SFTP: ${err.message || err}`);
     }
   });
@@ -384,7 +385,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     try {
       await SftpService.EditRemoteFile(linkID, remoteJoin(currentPath, file.name));
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to edit: ${err.message || err}`);
     }
   };
@@ -407,7 +408,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         await SftpService.DownloadPathsDialog(linkID, paths);
       }
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to download: ${err.message || err}`);
     }
   };
@@ -422,7 +423,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         : SftpService.UploadDirectoryDialog(linkID, remotePath);
 
     uploadPromise.catch((err) => {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to upload ${type}: ${err.message || err}`);
     });
   };
@@ -442,7 +443,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       clearSelection();
       await refreshFileList();
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to delete: ${err.message || err}`);
       await refreshFileList();
     } finally {
@@ -470,7 +471,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         await refreshFileList();
       }
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
       LogService.Error(`Failed to rename: ${err.message || err}`);
     } finally {
       if (!remoteListInFlight.current) setFullScreenLoading(false);
@@ -499,7 +500,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     if (!chmodTarget) return;
     const bits = parseOctalMode(chmodOctal);
     if (bits === null) {
-      showMessageError("请输入有效的八进制权限，例如 755 或 4755");
+      showMessageError(t("sftp.invalid_chmod"));
       return;
     }
     try {
@@ -509,7 +510,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       setChmodTarget(null);
       await refreshFileList();
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
     }
   };
 
@@ -528,7 +529,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     const uid = Number.parseInt(chownUid, 10);
     const gid = Number.parseInt(chownGid, 10);
     if (Number.isNaN(uid) || Number.isNaN(gid) || uid < 0 || gid < 0) {
-      showMessageError("UID / GID 须为非负整数");
+      showMessageError(t("sftp.invalid_uid_gid"));
       return;
     }
     try {
@@ -538,7 +539,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       setChownTarget(null);
       await refreshFileList();
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
     }
   };
 
@@ -560,7 +561,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       );
       await refreshFileList();
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
     } finally {
       if (!remoteListInFlight.current) setFullScreenLoading(false);
       setNewFileName("");
@@ -585,7 +586,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       );
       await refreshFileList();
     } catch (err: any) {
-      showMessageError(parseCallServiceError(err));
+      showMessageError(translateServiceError(err));
     } finally {
       if (!remoteListInFlight.current) setFullScreenLoading(false);
       setNewFileName("");
@@ -641,12 +642,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const enqueueUpload = (paths: string[]) => {
     if (paths.length === 0) return;
     if (remoteNavTarget.current) {
-      showMessageError("远程目录正在切换");
+      showMessageError(t("sftp.remote_dir_switching"));
       return;
     }
     SftpService.UploadPaths(linkID, currentPathRef.current, paths).catch(
       (err) => {
-        showMessageError(parseCallServiceError(err));
+        showMessageError(translateServiceError(err));
         LogService.Error(`Failed to upload paths: ${err.message || err}`);
       },
     );
@@ -656,12 +657,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const enqueueDownload = (paths: string[]) => {
     if (paths.length === 0 || !localDirRef.current) return;
     if (localNavTarget.current) {
-      showMessageError("本地目录正在切换");
+      showMessageError(t("sftp.local_dir_switching"));
       return;
     }
     SftpService.DownloadPaths(linkID, localDirRef.current, paths).catch(
       (err) => {
-        showMessageError(parseCallServiceError(err));
+        showMessageError(translateServiceError(err));
         LogService.Error(`Failed to download paths: ${err.message || err}`);
       },
     );
@@ -748,7 +749,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                 justifyContent: "center",
               }}
             >
-              <Tooltip title="上传到远程当前目录">
+              <Tooltip title={t("sftp.upload_to_remote")}>
                 <span>
                   <IconButton
                     size="small"
@@ -760,7 +761,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                   </IconButton>
                 </span>
               </Tooltip>
-              <Tooltip title="下载到本地当前目录">
+              <Tooltip title={t("sftp.download_to_local")}>
                 <span>
                   <IconButton
                     size="small"
@@ -870,7 +871,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                   }}
                 >
                   <Typography variant="body2" sx={{ flex: 1 }}>
-                    已选 {selectionCount} 项
+                    {tf("sftp.selected_n", selectionCount)}
                   </Typography>
                   <Button
                     size="small"
@@ -879,7 +880,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                       void handleDownload(selectedFiles());
                     }}
                   >
-                    下载
+                    {t("sftp.download")}
                   </Button>
                   <Button
                     size="small"
@@ -887,10 +888,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                     startIcon={<DeleteIcon />}
                     onClick={() => openDeleteConfirm(selectedFiles())}
                   >
-                    删除
+                    {t("common.delete")}
                   </Button>
                   <Button size="small" onClick={clearSelection}>
-                    取消选择
+                    {t("sftp.deselect")}
                   </Button>
                 </Toolbar>
               )}
@@ -937,10 +938,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                                 onChange={toggleSelectAll}
                               />
                             </TableCell>
-                            <TableCell>类型</TableCell>
-                            <TableCell>名称</TableCell>
-                            <TableCell align="center">大小</TableCell>
-                            <TableCell align="center">修改时间</TableCell>
+                            <TableCell>{t("sftp.type")}</TableCell>
+                            <TableCell>{t("sftp.name")}</TableCell>
+                            <TableCell align="center">{t("sftp.size")}</TableCell>
+                            <TableCell align="center">{t("sftp.modified")}</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -1052,7 +1053,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                       align="center"
                       sx={{ mt: 2 }}
                     >
-                      请稍候...
+                      {t("sftp.please_wait")}
                     </Typography>
                   </Box>
                 </Box>
@@ -1077,7 +1078,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <ListItemIcon>
               <EditIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>编辑</ListItemText>
+            <ListItemText>{t("common.edit")}</ListItemText>
           </MenuItem>
         )}
         <MenuItem onClick={() => void handleDownload(menuActionTargets())}>
@@ -1085,7 +1086,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <DownloadIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>
-            {menuTargetCount > 1 ? `下载 (${menuTargetCount})` : "下载"}
+            {menuTargetCount > 1 ? tf("sftp.download_with_count", menuTargetCount) : t("sftp.download")}
           </ListItemText>
         </MenuItem>
         <MenuItem
@@ -1098,7 +1099,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <DeleteIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>
-            {menuTargetCount > 1 ? `删除 (${menuTargetCount})` : "删除"}
+            {menuTargetCount > 1 ? tf("sftp.delete_with_count", menuTargetCount) : t("common.delete")}
           </ListItemText>
         </MenuItem>
         {menuTargetCount <= 1 && (
@@ -1106,7 +1107,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <ListItemIcon>
               <RenameIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>重命名</ListItemText>
+            <ListItemText>{t("common.rename")}</ListItemText>
           </MenuItem>
         )}
         {menuTargetCount <= 1 && (
@@ -1114,7 +1115,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <ListItemIcon>
               <ChmodIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>修改权限</ListItemText>
+            <ListItemText>{t("sftp.chmod")}</ListItemText>
           </MenuItem>
         )}
         {menuTargetCount <= 1 && (
@@ -1122,7 +1123,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <ListItemIcon>
               <ChownIcon fontSize="small" />
             </ListItemIcon>
-            <ListItemText>修改属主</ListItemText>
+            <ListItemText>{t("sftp.chown")}</ListItemText>
           </MenuItem>
         )}
         <Divider />
@@ -1130,25 +1131,25 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           <ListItemIcon>
             <CreateFileIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>新建文件</ListItemText>
+          <ListItemText>{t("sftp.new_file")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleCreateDirectory}>
           <ListItemIcon>
             <CreateFolderIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>新建文件夹</ListItemText>
+          <ListItemText>{t("sftp.new_folder")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => void handleUpload("file")}>
           <ListItemIcon>
             <UploadIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>上传文件</ListItemText>
+          <ListItemText>{t("sftp.upload_file")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => void handleUpload("directory")}>
           <ListItemIcon>
             <FolderOpenIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>上传文件夹</ListItemText>
+          <ListItemText>{t("sftp.upload_folder")}</ListItemText>
         </MenuItem>
       </Menu>
 
@@ -1166,25 +1167,25 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           <ListItemIcon>
             <CreateFileIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>新建文件</ListItemText>
+          <ListItemText>{t("sftp.new_file")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleCreateDirectory}>
           <ListItemIcon>
             <CreateFolderIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>新建文件夹</ListItemText>
+          <ListItemText>{t("sftp.new_folder")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => void handleUpload("file")}>
           <ListItemIcon>
             <UploadIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>上传文件</ListItemText>
+          <ListItemText>{t("sftp.upload_file")}</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => void handleUpload("directory")}>
           <ListItemIcon>
             <FolderOpenIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>上传文件夹</ListItemText>
+          <ListItemText>{t("sftp.upload_folder")}</ListItemText>
         </MenuItem>
       </Menu>
 
@@ -1192,18 +1193,17 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
         open={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
       >
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t("sftp.confirm_delete_title")}</DialogTitle>
         <DialogContent>
           <Typography>
             {filesToDelete.length === 1
-              ? `确定要删除 "${filesToDelete[0]?.name}" 吗?此操作不可撤销。`
-              : `确定要删除选中的 ${filesToDelete.length} 项吗?此操作不可撤销。`}
+              ? tf("sftp.confirm_delete_one", filesToDelete[0]?.name ?? "") : tf("sftp.confirm_delete_many", filesToDelete.length)}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)}>取消</Button>
+          <Button onClick={() => setDeleteConfirmOpen(false)}>{t("common.cancel")}</Button>
           <Button onClick={() => void handleDelete()} color="error">
-            删除
+                    {t("common.delete")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1215,7 +1215,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           setChmodTarget(null);
         }}
       >
-        <DialogTitle>修改权限</DialogTitle>
+        <DialogTitle>{t("sftp.chmod_title")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             {chmodTarget?.name}
@@ -1223,12 +1223,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           <TextField
             autoFocus
             margin="dense"
-            label="八进制权限"
+            label={t("sftp.octal_permission")}
             fullWidth
             value={chmodOctal}
             onChange={(e) => void onChmodOctalChange(e.target.value)}
             helperText={
-              chmodSymbolic ? `符号: ${chmodSymbolic}` : "例如 755 或 4755"
+              chmodSymbolic ? tf("sftp.symbolic_prefix", chmodSymbolic) : t("sftp.chmod_example")
             }
           />
         </DialogContent>
@@ -1239,10 +1239,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
               setChmodTarget(null);
             }}
           >
-            取消
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => void confirmChmod()} variant="contained">
-            确定
+            {t("common.ok")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1254,10 +1254,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           setChownTarget(null);
         }}
       >
-        <DialogTitle>修改属主</DialogTitle>
+        <DialogTitle>{t("sftp.chown_title")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {chownTarget?.name}（需要足够权限）
+            {tf("sftp.chown_requires_privilege", chownTarget?.name ?? "")}
           </Typography>
           <TextField
             autoFocus
@@ -1284,10 +1284,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
               setChownTarget(null);
             }}
           >
-            取消
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => void confirmChown()} variant="contained">
-            确定
+            {t("common.ok")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1299,12 +1299,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           setNewFileName("");
         }}
       >
-        <DialogTitle>新建文件</DialogTitle>
+        <DialogTitle>{t("sftp.new_file")}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="文件名"
+            label={t("sftp.filename")}
             fullWidth
             value={newFileName}
             onChange={(e) => setNewFileName(e.target.value)}
@@ -1320,10 +1320,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
               setNewFileName("");
             }}
           >
-            取消
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => void handleCreateFileConfirm()} variant="contained">
-            创建
+            {t("sftp.create")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1335,12 +1335,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           setNewFileName("");
         }}
       >
-        <DialogTitle>新建文件夹</DialogTitle>
+        <DialogTitle>{t("sftp.new_folder")}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="文件夹名"
+            label={t("sftp.folder_name")}
             fullWidth
             value={newFileName}
             onChange={(e) => setNewFileName(e.target.value)}
@@ -1356,13 +1356,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
               setNewFileName("");
             }}
           >
-            取消
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={() => void handleCreateDirectoryConfirm()}
             variant="contained"
           >
-            创建
+            {t("sftp.create")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1375,12 +1375,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           setRenamingName("");
         }}
       >
-        <DialogTitle>重命名</DialogTitle>
+        <DialogTitle>{t("common.rename")}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="新名称"
+            label={t("sftp.new_name")}
             fullWidth
             value={renamingName}
             onChange={(e) => setRenamingName(e.target.value)}
@@ -1397,10 +1397,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
               setRenamingName("");
             }}
           >
-            取消
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => void handleRename()} variant="contained">
-            重命名
+            {t("common.rename")}
           </Button>
         </DialogActions>
       </Dialog>

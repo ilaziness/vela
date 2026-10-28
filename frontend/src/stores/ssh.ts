@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { SSHLinkInfo, SSHTab, ConnectionStatus } from "../types/ssh";
 import { genTabIndex } from "../func/service";
+import { isNewConnectionTabName, NEW_CONNECTION_TAB_ID } from "../i18n";
 import {
   tabWithConnectionStatus,
   tabWithSessionConnectionStatus,
@@ -44,7 +45,7 @@ export const useSSHTabsStore = create<SSHTabs>((set, get) => ({
   sshTabs: [
     {
       index: initialTabIndex,
-      name: "新建连接",
+      name: NEW_CONNECTION_TAB_ID,
     },
   ] as SSHTab[],
   currentTab: initialTabIndex,
@@ -81,7 +82,7 @@ export const useSSHTabsStore = create<SSHTabs>((set, get) => ({
         newSshTabs = [
           {
             index: `${genTabIndex()}`,
-            name: "新建连接",
+            name: NEW_CONNECTION_TAB_ID,
           },
         ];
         newTabValue = newSshTabs[0].index;
@@ -93,7 +94,9 @@ export const useSSHTabsStore = create<SSHTabs>((set, get) => ({
   setName: (index: string, name: string) =>
     set((state) => ({
       sshTabs: state.sshTabs.map((tab) =>
-        tab.index === index && tab.name == "" ? { ...tab, name } : tab,
+        tab.index === index && isNewConnectionTabName(tab.name)
+          ? { ...tab, name }
+          : tab,
       ),
     })),
   setCurrentTab: (index: string) => set({ currentTab: index }),

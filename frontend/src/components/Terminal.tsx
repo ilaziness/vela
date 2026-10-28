@@ -26,7 +26,7 @@ import TerminalCommandHints, {
   type HintAnchor,
 } from "./TerminalCommandHints";
 import { terminalInstances } from "../stores/terminalInstances";
-import { parseCallServiceError, sleep } from "../func/service";
+import { t, tf, useLanguage } from "../i18n";
 import {
   HINT_INDEX_NONE,
   SCREEN_SYNC_QUIET_MS,
@@ -54,6 +54,11 @@ import {
 import { useKeybindingsStore } from "../stores/keybindings";
 import type { CommandHistory } from "../types/command";
 import "./Terminal.module.css";
+import {
+  parseCallServiceError,
+  sleep,
+  translateServiceError,
+} from "../func/service";
 
 const EVENT_SESSION_LOG_STOPPED = "eventSSHSessionLogStopped";
 
@@ -156,6 +161,7 @@ function Terminal(props: {
   readonly onLoggingChange?: (logging: boolean) => void;
   readonly onReady?: () => void;
 }) {
+  useLanguage();
   const [isInitializing, setIsInitializing] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusNonce, setSearchFocusNonce] = useState(0);
@@ -377,9 +383,9 @@ function Terminal(props: {
         return;
       }
       setLoggingState(true);
-      successMessage(`会话日志已开始记录：${path}`);
+      successMessage(tf("terminal.log_started", path));
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -391,9 +397,9 @@ function Terminal(props: {
     try {
       await SSHService.StopSessionLog(props.linkID);
       setLoggingState(false);
-      successMessage("会话日志已停止记录");
+      successMessage(t("terminal.log_stopped"));
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -452,7 +458,7 @@ function Terminal(props: {
           if (raw.reason === "write_error") {
             useMessageStore
               .getState()
-              .errorMessage("会话日志写入失败，已停止记录");
+              .errorMessage(t("terminal.log_write_failed"));
           }
         }
       } catch (e) {

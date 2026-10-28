@@ -21,10 +21,11 @@ import {
   DeleteSweep,
 } from "@mui/icons-material";
 import { useTransferStore } from "../stores/transfer";
-import { formatFileSize, parseCallServiceError } from "../func/service";
 import { ProgressData } from "../../bindings/github.com/ilaziness/vela/services/models";
 import { SftpService } from "../../bindings/github.com/ilaziness/vela/services";
 import { useMessageStore } from "../stores/message";
+import { t, tf } from "../i18n";
+import { formatFileSize, translateServiceError } from "../func/service";
 
 interface TransferListProps {
   sessionID: string;
@@ -56,7 +57,7 @@ const TransferList: React.FC<TransferListProps> = ({
       try {
         await SftpService.DismissTransfer(id);
       } catch (err) {
-        errorMessage(parseCallServiceError(err));
+        errorMessage(translateServiceError(err));
         return;
       }
     }
@@ -81,7 +82,7 @@ const TransferList: React.FC<TransferListProps> = ({
       }
     }
     if (firstErr) {
-      errorMessage(parseCallServiceError(firstErr));
+      errorMessage(translateServiceError(firstErr));
     }
   };
 
@@ -89,7 +90,7 @@ const TransferList: React.FC<TransferListProps> = ({
     try {
       await SftpService.RetryTransfer(sessionID, transfer.id);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -130,20 +131,20 @@ const TransferList: React.FC<TransferListProps> = ({
             }}
           >
             <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
-              传输列表
+              {t("transfer.title")}
             </Typography>
             <Box sx={{ display: "flex", gap: 1 }}>
-              <Tooltip title="清除失败任务">
+              <Tooltip title={t("transfer.clear_failed")}>
                 <IconButton onClick={() => void handleClearFailed()} size="small">
                   <DeleteSweep fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="清空已成功任务">
+              <Tooltip title={t("transfer.clear_completed")}>
                 <IconButton onClick={handleClear} size="small">
                   <ClearAll fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="关闭">
+              <Tooltip title={t("common.close")}>
                 <IconButton onClick={onClose} size="small">
                   <Close fontSize="small" />
                 </IconButton>
@@ -153,9 +154,7 @@ const TransferList: React.FC<TransferListProps> = ({
           {transfersList.length === 0 ? (
             <Box sx={{ p: 2, textAlign: "center" }}>
               <Typography variant="body2" color="text.secondary">
-                {sftpReady
-                  ? "暂无传输任务"
-                  : "请先打开 SFTP 标签并连接成功后，可查看未完成的传输记录"}
+                {sftpReady ? t("transfer.empty") : t("transfer.empty_hint")}
               </Typography>
             </Box>
           ) : (
@@ -304,13 +303,13 @@ const TransferList: React.FC<TransferListProps> = ({
                           </Typography>
 
                           {!transfer.done ? (
-                            <Tooltip title="取消传输">
+                            <Tooltip title={t("transfer.cancel")}>
                               <IconButton
                                 size="small"
                                 onClick={() => {
                                   SftpService.CancelTransfer(transfer.id).catch(
                                     (err) =>
-                                      errorMessage(parseCallServiceError(err)),
+                                      errorMessage(translateServiceError(err)),
                                   );
                                 }}
                                 sx={{ flexShrink: 0 }}
@@ -321,7 +320,7 @@ const TransferList: React.FC<TransferListProps> = ({
                           ) : (
                             <>
                               {hasError && (
-                                <Tooltip title="重试">
+                                <Tooltip title={t("common.retry")}>
                                   <IconButton
                                     size="small"
                                     onClick={() => void handleRetry(transfer)}
@@ -331,7 +330,7 @@ const TransferList: React.FC<TransferListProps> = ({
                                   </IconButton>
                                 </Tooltip>
                               )}
-                              <Tooltip title="删除">
+                              <Tooltip title={t("common.delete")}>
                                 <IconButton
                                   size="small"
                                   onClick={() =>
@@ -355,7 +354,7 @@ const TransferList: React.FC<TransferListProps> = ({
                               wordBreak: "break-word",
                             }}
                           >
-                            错误: {transfer.error}
+                            {tf("transfer.error", transfer.error ?? "")}
                           </Typography>
                         )}
                       </Box>

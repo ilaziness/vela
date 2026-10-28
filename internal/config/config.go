@@ -12,6 +12,7 @@ import (
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/sync"
 	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const FileName = "config.toml"
@@ -46,6 +47,7 @@ type Config struct {
 type GeneralConfig struct {
 	UserDataDir string `toml:"user_data_dir"`
 	Theme       string `toml:"theme"`
+	Language    string `toml:"language"`
 	Frameless   bool   `toml:"frameless"`
 	Font        string `toml:"font"`
 	FontSize    int    `toml:"font_size"`
@@ -200,13 +202,13 @@ func (c *SSHConfig) ValidateProxy() error {
 	}
 	typ := strings.ToLower(strings.TrimSpace(c.ProxyType))
 	if typ != "http" && typ != "socks5" {
-		return fmt.Errorf("不支持的代理类型: %s", c.ProxyType)
+		return usererr.Coded("proxy.unsupported_type", "Unsupported proxy type: %s", c.ProxyType)
 	}
 	if strings.TrimSpace(c.ProxyHost) == "" {
-		return fmt.Errorf("代理主机不能为空")
+		return usererr.Coded("proxy.host_required", "Proxy host is required")
 	}
 	if c.ProxyPort < 1 || c.ProxyPort > 65535 {
-		return fmt.Errorf("代理端口必须在 1–65535 之间")
+		return usererr.Coded("proxy.port_range", "Proxy port must be between 1 and 65535")
 	}
 	return nil
 }

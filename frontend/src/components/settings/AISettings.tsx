@@ -38,56 +38,9 @@ import type {
 } from "../../../bindings/github.com/ilaziness/vela/internal/ai/models";
 import { useAIConfigStore } from "../../stores/aiConfig";
 import { useMessageStore } from "../../stores/message";
-import { parseCallServiceError } from "../../func/service";
 import FormRow from "../FormRow";
-
-const MSG_TITLE = "AI 助手设置";
-const MSG_TAB_GENERAL = "常规";
-const MSG_TAB_TOOLS = "工具";
-const MSG_SAVE_OK = "AI 配置保存成功";
-const MSG_SAVE_FAIL = "AI 配置保存失败";
-const MSG_RESET_OK = "已重置为默认配置";
-const MSG_RESET_TOOLS_OK = "已重置工具配置";
-const MSG_RESET_FAIL = "重置配置失败";
-const MSG_ENABLE_AI = "启用 AI 助手";
-const MSG_ENABLED = "已启用";
-const MSG_DISABLED = "已禁用";
-const MSG_PROVIDER = "提供商";
-const MSG_SELECT_PROVIDER = "选择提供商";
-const MSG_MODEL = "模型";
-const MSG_ENDPOINT = "API 端点";
-const MSG_MAX_TOKENS = "最大 Token 数";
-const MSG_MAX_TOKENS_HELP =
-  "限制单次回复的最大生成长度；数值越大可输出越长，但响应更慢、占用更多资源。";
-const MSG_ECHO = "命令回显到终端";
-const MSG_ECHO_HELP =
-  "将 AI 批准执行的命令注解显示到当前 SSH 终端（默认关闭；不会重复执行）";
-const MSG_RESET = "重置为默认";
-const MSG_RESET_TOOLS = "重置工具配置";
-const MSG_SAVE = "保存";
-const MSG_AVAILABLE = "可用";
-const MSG_UNAVAILABLE = "不可用";
-const MSG_OPEN_MCP = "打开 mcp.json";
-const MSG_REFRESH = "刷新";
-const MSG_MCP_EMPTY = "暂无 MCP 服务器，请编辑 mcp.json 后刷新。";
-const MSG_MCP_ON = "已启用 MCP";
-const MSG_MCP_OFF = "已禁用 MCP";
-const MSG_OPEN_SKILLS = "打开 skills 目录";
-const MSG_SKILLS_EMPTY = "暂无 Skill，请在 skills 目录添加后刷新。";
-const MSG_SKILL_ON = "已启用 Skill";
-const MSG_SKILL_OFF = "已禁用 Skill";
-const MSG_FS_TITLE = "本地文件系统";
-const MSG_FS_HELP =
-  "配置允许访问的目录后，AI 才可使用读写/列表工具；每次操作都需要批准。";
-const MSG_FS_EMPTY = "未配置允许目录时，本地文件工具不可用。";
-const MSG_FS_ADD = "添加";
-const MSG_FS_DIR = "允许目录";
-const MSG_FS_DIR_REQUIRED = "请先输入绝对路径的目录";
-const MSG_SEARCH_TITLE = "网络搜索";
-const MSG_SEARCH_HELP =
-  "选择提供商并填写 API Key 后启用 web_search；未配置则工具不可用";
-const MSG_SEARCH_PROVIDER = "搜索提供商";
-const MSG_SEARCH_NONE = "未配置（禁用）";
+import { t } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 /** MUI Select 对空字符串 value 支持不佳，用哨兵表示「未配置」。 */
 const SEARCH_PROVIDER_NONE = "__none__";
@@ -113,7 +66,7 @@ function SecretKeyField({
       type="password"
       autoComplete="new-password"
       value={display}
-      placeholder={hasSaved ? API_KEY_MASK : "API Key"}
+      placeholder={hasSaved ? API_KEY_MASK : t("settings.ai.api_key")}
       onFocus={(e) => {
         if (!value && hasSaved) {
           e.target.select();
@@ -179,9 +132,9 @@ const AISettings: React.FC = () => {
     setSaving(true);
     try {
       await saveConfig(config);
-      successMessage(MSG_SAVE_OK);
+      successMessage(t("settings.ai.save_success"));
     } catch (err) {
-      errorMessage(parseCallServiceError(err) || MSG_SAVE_FAIL);
+      errorMessage(translateServiceError(err) || t("settings.ai.save_failed"));
     } finally {
       setSaving(false);
     }
@@ -191,9 +144,9 @@ const AISettings: React.FC = () => {
     setResetting(true);
     try {
       await resetConfig();
-      successMessage(MSG_RESET_OK);
+      successMessage(t("settings.ai.reset_success"));
     } catch (err) {
-      errorMessage(parseCallServiceError(err) || MSG_RESET_FAIL);
+      errorMessage(translateServiceError(err) || t("settings.ai.reset_failed"));
     } finally {
       setResetting(false);
     }
@@ -203,9 +156,9 @@ const AISettings: React.FC = () => {
     setResetting(true);
     try {
       await resetToolsConfig();
-      successMessage(MSG_RESET_TOOLS_OK);
+      successMessage(t("settings.ai.reset_tools_success"));
     } catch (err) {
-      errorMessage(parseCallServiceError(err) || MSG_RESET_FAIL);
+      errorMessage(translateServiceError(err) || t("settings.ai.reset_failed"));
     } finally {
       setResetting(false);
     }
@@ -226,14 +179,14 @@ const AISettings: React.FC = () => {
   const addAllowedDir = async () => {
     const dir = newAllowDir.trim();
     if (!dir) {
-      errorMessage(MSG_FS_DIR_REQUIRED);
+      errorMessage(t("settings.ai.filesystem_dir_required"));
       return;
     }
     try {
       const abs = await AIService.ValidateAllowedDir(dir);
       const normalized = (abs || "").trim();
       if (!normalized) {
-        errorMessage(MSG_FS_DIR_REQUIRED);
+        errorMessage(t("settings.ai.filesystem_dir_required"));
         return;
       }
       const win = navigator.userAgent.includes("Windows");
@@ -247,7 +200,7 @@ const AISettings: React.FC = () => {
       setAllowedDirs([...allowedDirs, normalized]);
       setNewAllowDir("");
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -266,7 +219,7 @@ const AISettings: React.FC = () => {
   return (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ mb: 2, fontWeight: 600 }}>
-        {MSG_TITLE}
+        {t("settings.ai.title")}
       </Typography>
 
       <Paper elevation={1}>
@@ -275,8 +228,8 @@ const AISettings: React.FC = () => {
           onChange={(_, v: AISettingsTab) => setTab(v)}
           sx={{ px: 1, borderBottom: 1, borderColor: "divider" }}
         >
-          <Tab label={MSG_TAB_GENERAL} value={AISettingsTab.General} />
-          <Tab label={MSG_TAB_TOOLS} value={AISettingsTab.Tools} />
+          <Tab label={t("settings.ai.tab_general")} value={AISettingsTab.General} />
+          <Tab label={t("settings.ai.tab_tools")} value={AISettingsTab.Tools} />
           <Tab label="MCP" value={AISettingsTab.MCP} />
           <Tab label="Skills" value={AISettingsTab.Skills} />
         </Tabs>
@@ -291,7 +244,7 @@ const AISettings: React.FC = () => {
               )}
 
               <Stack spacing={2}>
-                <FormRow label={MSG_ENABLE_AI}>
+                <FormRow label={t("settings.ai.enable")}>
                   <FormControlLabel
                     control={
                       <Switch
@@ -301,18 +254,18 @@ const AISettings: React.FC = () => {
                         }
                       />
                     }
-                    label={config.enabled ? MSG_ENABLED : MSG_DISABLED}
+                    label={config.enabled ? t("settings.ai.enabled") : t("settings.ai.disabled")}
                   />
                 </FormRow>
 
                 <Divider sx={{ my: 1 }} />
 
-                <FormRow label={MSG_PROVIDER}>
+                <FormRow label={t("settings.ai.provider")}>
                   <FormControl fullWidth size="small">
-                    <InputLabel>{MSG_SELECT_PROVIDER}</InputLabel>
+                    <InputLabel>{t("settings.ai.select_provider")}</InputLabel>
                     <Select
                       value={config.provider}
-                      label={MSG_SELECT_PROVIDER}
+                      label={t("settings.ai.select_provider")}
                       onChange={(e) =>
                         updatePartialConfig({
                           provider: e.target.value as Provider,
@@ -329,7 +282,7 @@ const AISettings: React.FC = () => {
                   </FormControl>
                 </FormRow>
 
-                <FormRow label={MSG_MODEL}>
+                <FormRow label={t("settings.ai.model")}>
                   <TextField
                     fullWidth
                     size="small"
@@ -342,7 +295,7 @@ const AISettings: React.FC = () => {
                 </FormRow>
 
                 {currentProvider?.needs_endpoint && (
-                  <FormRow label={MSG_ENDPOINT}>
+                  <FormRow label={t("settings.ai.endpoint")}>
                     <TextField
                       fullWidth
                       size="small"
@@ -356,7 +309,7 @@ const AISettings: React.FC = () => {
                 )}
 
                 {currentProvider?.needs_api_key && (
-                  <FormRow label="API Key">
+                  <FormRow label={t("settings.ai.api_key")}>
                     <SecretKeyField
                       value={config.api_key}
                       encrypted={config.api_key_encrypted}
@@ -385,7 +338,7 @@ const AISettings: React.FC = () => {
                   </Box>
                 </FormRow>
 
-                <FormRow label={MSG_MAX_TOKENS}>
+                <FormRow label={t("settings.ai.max_tokens")}>
                   <TextField
                     fullWidth
                     size="small"
@@ -398,13 +351,13 @@ const AISettings: React.FC = () => {
                       });
                     }}
                     slotProps={{ htmlInput: { min: 100, max: 8192 } }}
-                    helperText={MSG_MAX_TOKENS_HELP}
+                    helperText={t("settings.ai.max_tokens_help")}
                   />
                 </FormRow>
 
                 <Divider />
 
-                <FormRow label={MSG_ECHO}>
+                <FormRow label={t("settings.ai.echo_commands")}>
                   <FormControlLabel
                     control={
                       <Switch
@@ -416,7 +369,7 @@ const AISettings: React.FC = () => {
                         }
                       />
                     }
-                    label={MSG_ECHO_HELP}
+                    label={t("settings.ai.echo_commands_help")}
                   />
                 </FormRow>
 
@@ -433,7 +386,7 @@ const AISettings: React.FC = () => {
                     onClick={handleReset}
                     loading={resetting}
                   >
-                    {MSG_RESET}
+                    {t("settings.ai.reset")}
                   </Button>
                   <Button
                     variant="contained"
@@ -441,7 +394,7 @@ const AISettings: React.FC = () => {
                     loading={saving}
                     disabled={!config}
                   >
-                    {MSG_SAVE}
+                    {t("common.save")}
                   </Button>
                 </Box>
               </Stack>
@@ -451,13 +404,13 @@ const AISettings: React.FC = () => {
           {tab === AISettingsTab.Tools && (
             <Stack spacing={2}>
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                {MSG_FS_TITLE}
+                {t("settings.ai.filesystem_title")}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {MSG_FS_HELP}
+                {t("settings.ai.filesystem_help")}
               </Typography>
               {allowedDirs.length === 0 && (
-                <Alert severity="info">{MSG_FS_EMPTY}</Alert>
+                <Alert severity="info">{t("settings.ai.filesystem_empty")}</Alert>
               )}
               {allowedDirs.length > 0 && (
                 <List dense disablePadding>
@@ -487,7 +440,7 @@ const AISettings: React.FC = () => {
               <Box sx={{ display: "flex", gap: 1, width: "100%" }}>
                 <TextField
                   size="small"
-                  label={MSG_FS_DIR}
+                  label={t("settings.ai.filesystem_dir")}
                   value={newAllowDir}
                   onChange={(e) => setNewAllowDir(e.target.value)}
                   onKeyDown={(e) => {
@@ -496,7 +449,7 @@ const AISettings: React.FC = () => {
                       addAllowedDir();
                     }
                   }}
-                  placeholder="绝对路径，如 D:\\work 或 /home/user/projects"
+                  placeholder={t("settings.ai.filesystem_dir_placeholder")}
                   sx={{ flex: 1, minWidth: 0 }}
                 />
                 <Button
@@ -510,29 +463,29 @@ const AISettings: React.FC = () => {
                     alignSelf: "center",
                   }}
                 >
-                  {MSG_FS_ADD}
+                  {t("settings.ai.filesystem_add")}
                 </Button>
               </Box>
 
               <Divider sx={{ my: 1 }} />
 
               <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                {MSG_SEARCH_TITLE}
+                {t("settings.ai.search_title")}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {MSG_SEARCH_HELP}
+                {t("settings.ai.search_help")}
               </Typography>
 
-              <FormRow label={MSG_SEARCH_PROVIDER}>
+              <FormRow label={t("settings.ai.search_provider")}>
                 <FormControl fullWidth size="small">
-                  <InputLabel>{MSG_SELECT_PROVIDER}</InputLabel>
+                  <InputLabel>{t("settings.ai.select_provider")}</InputLabel>
                   <Select
                     value={
                       config.web_search?.provider
                         ? String(config.web_search.provider)
                         : SEARCH_PROVIDER_NONE
                     }
-                    label={MSG_SELECT_PROVIDER}
+                    label={t("settings.ai.select_provider")}
                     onChange={(e) => {
                       const raw = String(e.target.value);
                       const provider =
@@ -550,7 +503,7 @@ const AISettings: React.FC = () => {
                     }}
                   >
                     <MenuItem value={SEARCH_PROVIDER_NONE}>
-                      {MSG_SEARCH_NONE}
+                      {t("settings.ai.search_none")}
                     </MenuItem>
                     {webSearchProviders.map((provider) => (
                       <MenuItem key={provider.name} value={provider.name}>
@@ -562,7 +515,7 @@ const AISettings: React.FC = () => {
               </FormRow>
 
               {currentSearchProvider && (
-                <FormRow label="API Key">
+                <FormRow label={t("settings.ai.api_key")}>
                   <SecretKeyField
                     value={config.web_search?.api_key}
                     encrypted={config.web_search?.api_key_encrypted}
@@ -595,7 +548,7 @@ const AISettings: React.FC = () => {
                   onClick={handleResetTools}
                   loading={resetting}
                 >
-                  {MSG_RESET_TOOLS}
+                  {t("settings.ai.reset_tools")}
                 </Button>
                 <Button
                   variant="contained"
@@ -603,7 +556,7 @@ const AISettings: React.FC = () => {
                   loading={saving}
                   disabled={!config}
                 >
-                  {MSG_SAVE}
+                  {t("common.save")}
                 </Button>
               </Box>
             </Stack>
@@ -640,7 +593,7 @@ function AvailabilityDot({
   // Unprobed cache hydrate: available=false and no error — hide the dot.
   if (!available && !error) return null;
   const color = available ? "success.main" : "error.main";
-  const tip = available ? MSG_AVAILABLE : error || MSG_UNAVAILABLE;
+  const tip = available ? t("settings.ai.available") : error || t("settings.ai.unavailable");
   return (
     <Tooltip title={tip}>
       <Box
@@ -678,7 +631,7 @@ function MCPSettingsPanel() {
         const list = await AIService.ListMCPServers();
         if (!cancelled) applyList(list);
       } catch (err) {
-        if (!cancelled) errorMessage(parseCallServiceError(err));
+        if (!cancelled) errorMessage(translateServiceError(err));
       } finally {
         if (!cancelled) setReady(true);
       }
@@ -694,7 +647,7 @@ function MCPSettingsPanel() {
       const list = await AIService.ReloadMCPServers();
       applyList(list);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setLoading(false);
     }
@@ -705,9 +658,9 @@ function MCPSettingsPanel() {
     try {
       const list = await AIService.SetMCPServerEnabled(name, enabled);
       applyList(list);
-      successMessage(enabled ? MSG_MCP_ON : MSG_MCP_OFF);
+      successMessage(enabled ? t("settings.ai.mcp_on") : t("settings.ai.mcp_off"));
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setBusyName("");
     }
@@ -717,7 +670,7 @@ function MCPSettingsPanel() {
     try {
       await AIService.OpenMCPConfig();
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -731,7 +684,7 @@ function MCPSettingsPanel() {
           variant="outlined"
           onClick={() => void onOpen()}
         >
-          {MSG_OPEN_MCP}
+          {t("settings.ai.open_mcp")}
         </Button>
         <Button
           startIcon={
@@ -745,11 +698,11 @@ function MCPSettingsPanel() {
           onClick={() => void onRefresh()}
           disabled={loading || toggling}
         >
-          {MSG_REFRESH}
+          {t("common.refresh")}
         </Button>
       </Box>
       {!ready ? null : servers.length === 0 ? (
-        <Typography color="text.secondary">{MSG_MCP_EMPTY}</Typography>
+        <Typography color="text.secondary">{t("settings.ai.mcp_empty")}</Typography>
       ) : (
         <List disablePadding>
           {servers.map((s) => (
@@ -795,7 +748,7 @@ function SkillsSettingsPanel() {
       const list = await AIService.ListSkills();
       setSkills((list || []).filter((s): s is SkillInfo => s != null));
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setLoading(false);
     }
@@ -811,9 +764,9 @@ function SkillsSettingsPanel() {
       await AIService.SetSkillEnabled(name, enabled);
       const list = await AIService.ListSkills();
       setSkills((list || []).filter((s): s is SkillInfo => s != null));
-      successMessage(enabled ? MSG_SKILL_ON : MSG_SKILL_OFF);
+      successMessage(enabled ? t("settings.ai.skill_on") : t("settings.ai.skill_off"));
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setBusyName("");
     }
@@ -823,7 +776,7 @@ function SkillsSettingsPanel() {
     try {
       await AIService.OpenSkillsDir();
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -831,7 +784,7 @@ function SkillsSettingsPanel() {
     try {
       await AIService.OpenSkillDir(name);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     }
   };
 
@@ -843,7 +796,7 @@ function SkillsSettingsPanel() {
           variant="outlined"
           onClick={() => void onOpenDir()}
         >
-          {MSG_OPEN_SKILLS}
+          {t("settings.ai.open_skills")}
         </Button>
         <Button
           startIcon={
@@ -857,7 +810,7 @@ function SkillsSettingsPanel() {
           onClick={() => void load()}
           disabled={loading || busyName !== ""}
         >
-          {MSG_REFRESH}
+          {t("common.refresh")}
         </Button>
       </Box>
       {loading && skills.length === 0 ? (
@@ -865,7 +818,7 @@ function SkillsSettingsPanel() {
           <CircularProgress size={28} />
         </Box>
       ) : skills.length === 0 ? (
-        <Typography color="text.secondary">{MSG_SKILLS_EMPTY}</Typography>
+        <Typography color="text.secondary">{t("settings.ai.skills_empty")}</Typography>
       ) : (
         <List disablePadding>
           {skills.map((s) => (

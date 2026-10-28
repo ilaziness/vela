@@ -34,6 +34,7 @@ var migrations = []Migration{
 	{Version: 15, Name: "add bookmark charset", Up: migrateAddBookmarkCharset},
 	{Version: 16, Name: "add ai_messages run_id", Up: migrateAddAIMessageRunID},
 	{Version: 17, Name: "add ai_sessions plan_json", Up: migrateAddAISessionPlanJSON},
+	{Version: 18, Name: "i18n persist ids", Up: migrateI18nPersistIDs},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -456,6 +457,31 @@ func migrateAddAISessionPlanJSON(db *sql.DB, logger *zap.Logger) error {
 	}
 	if err != nil {
 		return fmt.Errorf("check column ai_sessions.plan_json failed: %w", err)
+	}
+	return nil
+}
+
+// migrateI18nPersistIDs renames legacy Chinese stable labels to language-neutral ids.
+func migrateI18nPersistIDs(db *sql.DB, logger *zap.Logger) error {
+	const legacyGroup = "默认书签"
+	const defaultGroup = "__default__"
+	const legacySession = "新会话"
+	const newSession = "__new_session__"
+
+	res, err := db.Exec(`UPDATE bookmark_groups SET name = ? WHERE name = ?`, defaultGroup, legacyGroup)
+	if err != nil {
+		return fmt.Errorf("migrate default bookmark group name failed: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		logger.Debug("migration: renamed default bookmark group", zap.Int64("rows", n))
+	}
+
+	res, err = db.Exec(`UPDATE ai_sessions SET title = ? WHERE title = ? OR title = ''`, newSession, legacySession)
+	if err != nil {
+		return fmt.Errorf("migrate ai session titles failed: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		logger.Debug("migration: renamed new ai session titles", zap.Int64("rows", n))
 	}
 	return nil
 }

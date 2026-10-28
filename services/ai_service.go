@@ -18,6 +18,7 @@ import (
 	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const EventAIStreamChunk = "eventAIStreamChunk"
@@ -41,7 +42,7 @@ func init() {
 	application.RegisterEvent[AIStreamChunkData](EventAIStreamChunk)
 }
 
-var ErrAINotEnabled = errors.New("AI 助手尚未启用，请前往「设置 → AI」完成配置并启用后再试")
+var ErrAINotEnabled = usererr.Coded("ai.not_enabled", "AI assistant is not enabled. Open Settings → AI to configure and enable it.")
 var ErrGenerationStopped = errors.New("generation stopped")
 
 type AIMessage struct {
@@ -324,8 +325,19 @@ func (s *AIService) resolveWebSearchRuntime(cfg *AIConfig) (tool.WebSearchRuntim
 	}, nil
 }
 
+// NewSessionTitleID is the stable persisted title for an empty AI session.
+// UI displays via i18n key ai.session.new.
+const NewSessionTitleID = "__new_session__"
+
+const legacyNewSessionTitle = "新会话"
+
+func isNewSessionTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	return t == "" || t == NewSessionTitleID || t == legacyNewSessionTitle
+}
+
 func (s *AIService) CreateSession() (*AISession, error) {
-	session := &database.AISession{Title: "新会话"}
+	session := &database.AISession{Title: NewSessionTitleID}
 	if err := s.sessionRepo.CreateSession(context.Background(), session); err != nil {
 		return nil, err
 	}
@@ -485,14 +497,14 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	planJSON := ""
 	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
 		planJSON = session.PlanJSON
-		if len(messages) == 0 && (session.Title == "" || session.Title == "新会话") {
+		if len(messages) == 0 && isNewSessionTitle(session.Title) {
 			title := []rune(newMessage)
 			if len(title) > 20 {
 				title = title[:20]
 			}
 			session.Title = string(title)
 			if session.Title == "" {
-				session.Title = "新会话"
+				session.Title = NewSessionTitleID
 			}
 			_ = s.sessionRepo.UpdateSession(context.Background(), session)
 		}
@@ -1150,7 +1162,11 @@ func (s *AIService) resolveSSHContext(ctx *SSHContext) (linkID string, prompt *a
 }
 
 func toAISession(s *database.AISession) *AISession {
-	return &AISession{ID: s.ID, Title: s.Title, CreatedAt: s.CreatedAt.Unix(), UpdatedAt: s.UpdatedAt.Unix()}
+	title := s.Title
+	if isNewSessionTitle(title) {
+		title = NewSessionTitleID
+	}
+	return &AISession{ID: s.ID, Title: title, CreatedAt: s.CreatedAt.Unix(), UpdatedAt: s.UpdatedAt.Unix()}
 }
 func toAIMessage(m *database.AIMessage) *AIMessage {
 	return &AIMessage{

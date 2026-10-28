@@ -2,6 +2,7 @@ import React from "react";
 import { Box, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Paper, Typography, IconButton, Tooltip } from "@mui/material";
 import { Terminal, ClearAll } from "@mui/icons-material";
 import { CommandHistory } from "../types/command";
+import { formatDateTime, t } from "../i18n";
 
 interface CommandHistoryProps {
   history: CommandHistory[];
@@ -9,10 +10,7 @@ interface CommandHistoryProps {
   onClearHistory: () => void;
 }
 
-const formatTimestamp = (timestamp: number) => {
-  const date = new Date(timestamp);
-  return date.toLocaleString("zh-CN");
-};
+const formatTimestamp = (timestamp: number) => formatDateTime(timestamp);
 
 const CommandHistoryList: React.FC<CommandHistoryProps> = ({
   history,
@@ -40,9 +38,9 @@ const CommandHistoryList: React.FC<CommandHistoryProps> = ({
         }}
       >
         <Typography variant="subtitle2" color="text.secondary">
-          命令历史
+          {t("command.history")}
         </Typography>
-        <Tooltip title="清空所有历史记录">
+        <Tooltip title={t("command.clear_history")}>
           <IconButton size="small" onClick={onClearHistory}>
             <ClearAll />
           </IconButton>

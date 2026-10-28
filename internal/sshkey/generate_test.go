@@ -37,7 +37,7 @@ func TestGenerateAlgorithms(t *testing.T) {
 
 func TestGenerateRejectsUnknownAlgorithm(t *testing.T) {
 	_, _, err := Generate("dsa", "")
-	if err == nil || !strings.Contains(err.Error(), "不支持的密钥算法") {
+	if err == nil || !strings.Contains(err.Error(), "Unsupported key algorithm") {
 		t.Fatalf("err = %v", err)
 	}
 }

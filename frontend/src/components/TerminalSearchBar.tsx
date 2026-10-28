@@ -12,6 +12,7 @@ import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import AbcIcon from "@mui/icons-material/Abc";
 import CodeIcon from "@mui/icons-material/Code";
+import { t } from "../i18n";
 
 const searchDecorations: NonNullable<ISearchOptions["decorations"]> = {
   matchBackground: "#515C6A",
@@ -176,7 +177,7 @@ export default function TerminalSearchBar({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="查找"
+        placeholder={t("terminal.search_placeholder")}
         sx={{
           ml: 0.5,
           fontSize: 13,
@@ -195,7 +196,7 @@ export default function TerminalSearchBar({
       >
         {resultLabel}
       </Typography>
-      <Tooltip title="上一处">
+      <Tooltip title={t("terminal.search_prev")}>
         <IconButton
           size="small"
           onClick={() => runFind(query, "prev", false)}
@@ -204,7 +205,7 @@ export default function TerminalSearchBar({
           <KeyboardArrowUpIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="下一处">
+      <Tooltip title={t("terminal.search_next")}>
         <IconButton
           size="small"
           onClick={() => runFind(query, "next", false)}
@@ -213,7 +214,7 @@ export default function TerminalSearchBar({
           <KeyboardArrowDownIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="区分大小写">
+      <Tooltip title={t("terminal.search_case_sensitive")}>
         <IconButton
           size="small"
           aria-pressed={caseSensitive}
@@ -223,7 +224,7 @@ export default function TerminalSearchBar({
           <AbcIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="正则">
+      <Tooltip title={t("terminal.search_regex")}>
         <IconButton
           size="small"
           aria-pressed={regex}
@@ -233,7 +234,7 @@ export default function TerminalSearchBar({
           <CodeIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-      <Tooltip title="关闭">
+      <Tooltip title={t("common.close")}>
         <IconButton size="small" onClick={onClose}>
           <CloseIcon fontSize="small" />
         </IconButton>

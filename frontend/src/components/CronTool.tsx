@@ -15,7 +15,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { CronResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t, tf } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function CronTool() {
   const [expr, setExpr] = useState("*/5 * * * *");
@@ -26,7 +27,7 @@ export default function CronTool() {
 
   const handleParse = async () => {
     if (!expr.trim()) {
-      errorMessage("请输入 Cron 表达式");
+      errorMessage(t("tools.shared.input_required"));
       return;
     }
     setIsLoading(true);
@@ -35,7 +36,7 @@ export default function CronTool() {
       const res = await ToolService.ParseCron(expr.trim(), count);
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -44,24 +45,24 @@ export default function CronTool() {
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        Cron 表达式
+        {t("tools.cron.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        支持 5 段或带秒的 6 段，以及 @hourly / @daily 等描述符
+        {t("tools.cron.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <TextField
-            label="Cron 表达式"
-            placeholder="例如: */5 * * * * 或 0 */1 * * * *"
+            label={t("tools.cron.expression")}
+            placeholder={t("tools.cron.expression_placeholder")}
             value={expr}
             onChange={(e) => setExpr(e.target.value)}
             fullWidth
             slotProps={{ input: { style: { fontFamily: "monospace" } } }}
           />
           <TextField
-            label="接下来次数"
+            label={t("tools.cron.next_count")}
             type="number"
             value={count}
             onChange={(e) => setCount(Number(e.target.value) || 5)}
@@ -69,7 +70,7 @@ export default function CronTool() {
             fullWidth
           />
           <Button variant="contained" onClick={handleParse} disabled={isLoading} fullWidth>
-            {isLoading ? "解析中..." : "解析"}
+            {isLoading ? t("tools.shared.parsing") : t("tools.shared.parse")}
           </Button>
         </Stack>
       </Paper>
@@ -79,14 +80,18 @@ export default function CronTool() {
           {result.success ? (
             <>
               <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
-                <Typography variant="subtitle1">接下来执行时间</Typography>
-                <Chip label={`${result.nextTimes?.length ?? 0} 次`} size="small" color="success" />
+                <Typography variant="subtitle1">{t("tools.cron.next_times")}</Typography>
+                <Chip
+                  label={tf("tools.cron.times_n", result.nextTimes?.length ?? 0)}
+                  size="small"
+                  color="success"
+                />
               </Stack>
               <List dense>
-                {(result.nextTimes ?? []).map((t, index) => (
-                  <ListItem key={`${index}-${t}`} disablePadding>
+                {(result.nextTimes ?? []).map((timeStr, index) => (
+                  <ListItem key={`${index}-${timeStr}`} disablePadding>
                     <ListItemText
-                      primary={t}
+                      primary={timeStr}
                       slotProps={{ primary: { sx: { fontFamily: "monospace" } } }}
                     />
                   </ListItem>

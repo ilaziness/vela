@@ -2,6 +2,7 @@ import React from "react";
 import { Autocomplete, Box, TextField, Checkbox, IconButton } from "@mui/material";
 import { Refresh } from "@mui/icons-material";
 import { SSHTunnelSession } from "../types/command";
+import { t } from "../i18n";
 
 interface SessionSelectorProps {
   sessions: SSHTunnelSession[];
@@ -28,8 +29,8 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
         renderInput={(params) => (
           <TextField
             {...params}
-            label="选择要发送到的 SSH 会话"
-            placeholder="选择会话"
+            label={t("command.select_session_label")}
+            placeholder={t("command.select_session_placeholder")}
             size="small"
           />
         )}
@@ -49,7 +50,7 @@ const SessionSelector: React.FC<SessionSelectorProps> = ({
         <IconButton
           onClick={onRefresh}
           size="small"
-          title="刷新会话列表"
+          title={t("command.refresh_sessions")}
           sx={{ mt: 1 }}
         >
           <Refresh fontSize="small" />

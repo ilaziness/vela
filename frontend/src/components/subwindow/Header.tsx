@@ -10,35 +10,42 @@ import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
 import { RailMenuButton } from "../RailIconButton";
 import BookmarkConnectPanel from "../BookmarkConnectPanel";
 import { useUIStore } from "../../stores/ui";
+import { newConnectionTabName, t, useLanguage } from "../../i18n";
 
 export default function Header() {
+  const lang = useLanguage();
   const { sshTabs, pushTab } = useSSHTabsStore();
   const frameless = useFrameless();
   const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
-
   const handleAddTab = useCallback(() => {
     const number = sshTabs.length + 1;
     pushTab({
       index: `${genTabIndex()}`,
-      name: `新建连接 ${number}`,
+      name: newConnectionTabName(number),
     });
   }, [sshTabs.length, pushTab]);
 
-  const menuItems = useMemo(
-    () => [
-      { title: "新建空白标签", icon: <AddBoxIcon />, onClick: handleAddTab },
+  const menuItems = useMemo(() => {
+    void lang;
+    return [
       {
-        title: "书签",
+        id: "new_blank_tab",
+        title: t("header.new_blank_tab"),
+        icon: <AddBoxIcon />,
+        onClick: handleAddTab,
+      },
+      {
+        id: "bookmarks",
+        title: t("header.bookmarks"),
         icon: <BookmarkIcon />,
         onClick: toggleBookmarkConnect,
         active: bookmarkConnectOpen,
         shortcutAction: ShortcutAction.PanelBookmarkConnect,
       },
-    ],
-    [handleAddTab, toggleBookmarkConnect, bookmarkConnectOpen],
-  );
+    ];
+  }, [lang, handleAddTab, toggleBookmarkConnect, bookmarkConnectOpen]);
 
   return (
     <Box
@@ -80,7 +87,7 @@ export default function Header() {
 
           {menuItems.map((item) => (
             <RailMenuButton
-              key={item.title}
+              key={item.id}
               title={item.title}
               shortcutAction={item.shortcutAction}
               active={item.active}

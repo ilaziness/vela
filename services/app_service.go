@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +15,10 @@ import (
 
 	"github.com/ilaziness/vela/internal/buildinfo"
 	"github.com/ilaziness/vela/internal/httpproxy"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/system"
 	"github.com/ilaziness/vela/internal/termws"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -135,7 +136,7 @@ func (cs *AppService) MainWindowClose() {
 }
 
 func (cs *AppService) SelectDirectory() (string, error) {
-	return cs.app.Dialog.OpenFile().SetTitle("选择目录").
+	return cs.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_dir")).
 		CanChooseDirectories(true).
 		CanChooseFiles(false).
 		CanCreateDirectories(true).
@@ -143,7 +144,7 @@ func (cs *AppService) SelectDirectory() (string, error) {
 }
 
 func (cs *AppService) SelectFile() (string, error) {
-	return cs.app.Dialog.OpenFile().SetTitle("选择文件").
+	return cs.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_file")).
 		CanChooseDirectories(false).
 		CanChooseFiles(true).
 		PromptForSingleSelection()
@@ -168,14 +169,14 @@ func (cs *AppService) ListKeyBindings() []KeyBindingInfo {
 
 func (cs *AppService) SetKeyBinding(action, keys string) error {
 	if cs.keybindings == nil {
-		return fmt.Errorf("快捷键管理器未初始化")
+		return usererr.Coded("keybinding.manager_nil", "Shortcut manager is not initialized")
 	}
 	return cs.keybindings.Set(action, keys)
 }
 
 func (cs *AppService) ResetAllKeyBindings() error {
 	if cs.keybindings == nil {
-		return fmt.Errorf("快捷键管理器未初始化")
+		return usererr.Coded("keybinding.manager_nil", "Shortcut manager is not initialized")
 	}
 	return cs.keybindings.ResetAll()
 }
@@ -221,17 +222,17 @@ func (cs *AppService) InstallUpdate() error {
 		return err
 	}
 	if rel == nil {
-		err := fmt.Errorf("当前没有可用更新")
+		err := usererr.Coded("app.no_update", "No update available")
 		cs.logger.Error("install update failed", zap.Error(err))
 		return err
 	}
 	if err := cs.app.Updater.DownloadAndInstall(ctx); err != nil {
 		cs.logger.Error("download and install update failed", zap.Error(err))
-		return fmt.Errorf("下载或安装更新失败: %w", err)
+		return usererr.Coded("app.update_failed", "Failed to download or install update: %s", err.Error())
 	}
 	if err := cs.app.Updater.Restart(ctx); err != nil {
 		cs.logger.Error("restart after update failed", zap.Error(err))
-		return fmt.Errorf("重启应用失败: %w", err)
+		return usererr.Coded("app.restart_failed", "Failed to restart the app: %s", err.Error())
 	}
 	return nil
 }

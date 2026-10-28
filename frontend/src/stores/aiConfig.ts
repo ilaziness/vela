@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { AIConfig, AIService } from '../../bindings/github.com/ilaziness/vela/services';
 import { Provider } from "../../bindings/github.com/ilaziness/vela/internal/ai/models";
 import { SearchProvider } from "../../bindings/github.com/ilaziness/vela/internal/ai/tool/models";
-import { parseCallServiceError } from '../func/service';
+import { translateServiceError } from "../func/service";
 
 export interface SearchProviderRow {
   name: string;
@@ -15,9 +15,9 @@ export const DEFAULT_WEB_SEARCH_PROVIDERS: SearchProviderRow[] = [
   { name: SearchProvider.SearchBrave, label: "Brave Search" },
   { name: SearchProvider.SearchSerper, label: "Serper (Google)" },
   { name: SearchProvider.SearchDeepseek, label: "DeepSeek" },
-  { name: SearchProvider.SearchYuanbao, label: "元宝搜索" },
-  { name: SearchProvider.SearchBocha, label: "博查" },
-  { name: SearchProvider.SearchMetaso, label: "秘塔" },
+  { name: SearchProvider.SearchYuanbao, label: "Yuanbao" },
+  { name: SearchProvider.SearchBocha, label: "Bocha" },
+  { name: SearchProvider.SearchMetaso, label: "Metaso" },
 ];
 
 function knownSearchProvider(p: string | undefined): SearchProvider {
@@ -86,7 +86,7 @@ export const useAIConfigStore = create<AIConfigState>((set) => ({
       const config = await AIService.GetConfig();
       set({ config: normalizeLoadedConfig(config), isLoading: false });
     } catch (err) {
-      set({ error: parseCallServiceError(err), isLoading: false });
+      set({ error: translateServiceError(err), isLoading: false });
     }
   },
 

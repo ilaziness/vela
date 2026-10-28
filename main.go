@@ -2,12 +2,11 @@ package main
 
 import (
 	"embed"
-	_ "embed"
-	"fmt"
 	"log"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"github.com/ilaziness/vela/internal/command"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/system"
 	"github.com/ilaziness/vela/services"
@@ -16,18 +15,10 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed data/commands.json
-var commandsFile embed.FS
+//go:embed data/commands/*.json
+var commandsFS embed.FS
 
 func main() {
-	var commandsJSON []byte
-	data, err := commandsFile.ReadFile("data/commands.json")
-	if err != nil {
-		fmt.Printf("读取 commands.json 失败：%v\n", err)
-	} else {
-		commandsJSON = data
-	}
-
 	logService := services.NewLogService()
 	cfgStore, err := config.Load(logService.Logger())
 	if err != nil {
@@ -51,7 +42,8 @@ func main() {
 
 	mainWindow := app.Window.NewWithOptions(mainWindowOptions(cfgStore.Config.General.Frameless))
 
-	if err := services.RegisterServices(app, mainWindow, cfgStore, logService.Logger(), commandsJSON); err != nil {
+	commandsLoader := command.LoaderFromFS(commandsFS, "data/commands")
+	if err := services.RegisterServices(app, mainWindow, cfgStore, logService.Logger(), commandsLoader); err != nil {
 		log.Fatal(err)
 	}
 

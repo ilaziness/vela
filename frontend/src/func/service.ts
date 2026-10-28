@@ -1,45 +1,85 @@
-export const parseCallServiceError = (err: any): string => {
-  if (err && typeof err === "object") {
-    if ("message" in err && typeof err.message === "string") {
-      try {
-        const parsed = JSON.parse(err.message);
-        if (
-          parsed &&
-          typeof parsed === "object" &&
-          "message" in parsed &&
-          typeof parsed.message === "string"
-        ) {
-          return parsed.message;
-        }
-      } catch {
-        // 如果解析失败，继续使用原始消息
-      }
-      return err.message;
-    }
-    if ("error" in err && typeof err.error === "string") {
-      return err.error;
-    }
-  }
-  return String(err);
+import { t } from "../i18n";
+
+export type ServiceErrorPayload = {
+  code?: string;
+  params?: string[];
+  message?: string;
 };
 
-// 把 SSH 握手/认证失败转成可直接展示的短句。
+/** Extract Wails / RPC error text (may be JSON usererr payload). */
+export const parseCallServiceError = (err: unknown): string => {
+  if (err && typeof err === "object") {
+    const obj = err as Record<string, unknown>;
+    if ("message" in obj && typeof obj.message === "string") {
+      return obj.message;
+    }
+    if ("error" in obj && typeof obj.error === "string") {
+      return obj.error;
+    }
+  }
+  return String(err ?? "");
+};
+
+/** Parse RPC user-error JSON `{code,params,message}` from a string. */
+export const parseServiceErrorPayload = (
+  raw: string,
+): ServiceErrorPayload | null => {
+  const s = raw.trim();
+  if (!s.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(s) as ServiceErrorPayload;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (typeof parsed.code === "string" || typeof parsed.message === "string")
+    ) {
+      return parsed;
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+};
+
+/**
+ * Translate a service error via catalog when `code` is present; else show message / raw.
+ * Catalog is filled by GetI18nBootstrap (fe-runtime); until then falls back to English message.
+ */
+export const translateServiceError = (err: unknown): string => {
+  const raw = parseCallServiceError(err).trim();
+  const payload = parseServiceErrorPayload(raw);
+  if (payload?.code) {
+    const params = Array.isArray(payload.params) ? payload.params : [];
+    const translated = t(payload.code, ...params);
+    if (translated !== payload.code) {
+      return translated;
+    }
+    if (payload.message) {
+      return payload.message;
+    }
+    return payload.code;
+  }
+  if (payload?.message) {
+    return payload.message;
+  }
+  return raw;
+};
+
+/** SSH connect failures: prefer coded usererr; no locale substring heuristics. */
 export const formatSSHConnectError = (err: unknown): string => {
   const raw = parseCallServiceError(err).trim();
-  if (raw.includes("已取消")) {
-    return "已取消登录";
-  }
-  if (raw.includes("等待超时")) {
-    return "验证超时，请重试";
-  }
+  const payload = parseServiceErrorPayload(raw);
+  const code = payload?.code;
   if (
-    raw.includes("unable to authenticate") ||
-    raw.includes("no supported methods remain") ||
-    raw.includes("没有可用认证")
+    code === "ssh.auth_cancelled" ||
+    code === "ssh.auth_timeout" ||
+    code === "ssh.auth_failed" ||
+    code === "ssh.connect_failed"
   ) {
-    return "登录失败，请检查密码或验证码";
+    return translateServiceError(err);
   }
-  return raw || "连接失败";
+  const msg = translateServiceError(err).trim();
+  return msg || t("ssh.connect_failed");
 };
 
 // genTabIndex generate tab index ID

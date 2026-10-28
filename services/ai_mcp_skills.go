@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/ai"
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 func (s *AIService) userDataDir() string {
@@ -153,10 +154,10 @@ func (s *AIService) OpenSkillDir(name string) error {
 // PickChatAttachments opens a native multi-file dialog and returns absolute paths.
 func (s *AIService) PickChatAttachments() ([]string, error) {
 	dlg := s.app.Dialog.OpenFile().
-		SetTitle("选择附件").
+		SetTitle(i18n.T("dialog.select_attachment")).
 		CanChooseFiles(true).
 		CanChooseDirectories(false)
-	dlg.AddFilter("附件", "*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.txt;*.md;*.csv")
+	dlg.AddFilter(i18n.T("dialog.attachment_filter"), "*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.txt;*.md;*.csv")
 	paths, err := dlg.PromptForMultipleSelection()
 	if dialogCancelled(err) {
 		return nil, nil

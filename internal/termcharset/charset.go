@@ -2,7 +2,6 @@ package termcharset
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -10,6 +9,8 @@ import (
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 // Canonical charset names stored on bookmarks / endpoints.
@@ -29,7 +30,7 @@ func Normalize(name string) (string, error) {
 	case GB18030:
 		return GB18030, nil
 	default:
-		return "", fmt.Errorf("不支持的终端编码: %s", name)
+		return "", usererr.Coded("termcharset.unsupported", "Unsupported terminal charset: %s", name)
 	}
 }
 

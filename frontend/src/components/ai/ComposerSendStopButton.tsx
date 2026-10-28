@@ -2,8 +2,7 @@ import React from "react";
 import { IconButton, Tooltip, type IconButtonProps } from "@mui/material";
 import StopIcon from "@mui/icons-material/Stop";
 import { useChatActions, useChatComposer } from "@mui/x-chat/headless";
-
-const STOP_LABEL = "停止生成";
+import { t } from "../../i18n";
 
 const sendStopButtonSx: IconButtonProps["sx"] = {
   width: 36,
@@ -36,14 +35,15 @@ const ComposerSendStopButton = React.forwardRef<HTMLButtonElement, IconButtonPro
     const isEmpty = value.trim() === "";
 
     if (isSubmitting) {
+      const stopLabel = t("ai.chat.stop_generation");
       return (
-        <Tooltip title={STOP_LABEL}>
+        <Tooltip title={stopLabel}>
           <IconButton
             ref={ref}
             {...other}
             type="button"
             disabled={false}
-            aria-label={STOP_LABEL}
+            aria-label={stopLabel}
             onClick={(event) => {
               event.preventDefault();
               onClick?.(event);

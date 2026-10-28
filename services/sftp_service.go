@@ -4,6 +4,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/localfs"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/transfer"
@@ -53,7 +54,7 @@ func (s *SftpService) ListLocal(dir string, showHidden bool) (localfs.Listing, e
 	return localfs.List(dir, showHidden)
 }
 func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
-	localPath, err := s.app.Dialog.OpenFile().SetTitle("选择文件").PromptForSingleSelection()
+	localPath, err := s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_file")).PromptForSingleSelection()
 	if dialogCancelled(err) || localPath == "" {
 		return nil
 	}
@@ -63,7 +64,7 @@ func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	return s.mgr.UploadFile(sessionID, localPath, remotePath)
 }
 func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error {
-	localPathFile, err := promptSaveFile(s.app, "保存文件", remotePathFile)
+	localPathFile, err := promptSaveFile(s.app, i18n.T("dialog.save_file"), remotePathFile)
 	if dialogCancelled(err) || localPathFile == "" {
 		return nil
 	}
@@ -73,7 +74,7 @@ func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error
 	return s.mgr.DownloadFile(sessionID, localPathFile, remotePathFile)
 }
 func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error {
-	localPath, err := s.app.Dialog.OpenFile().SetTitle("选择目录").
+	localPath, err := s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_dir")).
 		CanChooseDirectories(true).CanChooseFiles(false).PromptForSingleSelection()
 	if dialogCancelled(err) || localPath == "" {
 		return nil
@@ -84,7 +85,7 @@ func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error 
 	return s.mgr.UploadDirectory(sessionID, localPath, remotePath)
 }
 func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) error {
-	dest, err := promptSaveFile(s.app, "保存目录", remotePath)
+	dest, err := promptSaveFile(s.app, i18n.T("dialog.save_dir"), remotePath)
 	if dialogCancelled(err) || dest == "" {
 		return nil
 	}
@@ -103,7 +104,7 @@ func (s *SftpService) DownloadPaths(sessionID, localDir string, remotePaths []st
 }
 
 func (s *SftpService) DownloadPathsDialog(sessionID string, remotePaths []string) error {
-	localDir, err := promptOpenDirectory(s.app, "选择保存目录")
+	localDir, err := promptOpenDirectory(s.app, i18n.T("dialog.select_dir"))
 	if dialogCancelled(err) || localDir == "" {
 		return nil
 	}

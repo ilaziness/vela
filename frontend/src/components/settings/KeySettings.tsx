@@ -28,7 +28,8 @@ import {
   SSHKeyInfo,
 } from "../../../bindings/github.com/ilaziness/vela/services";
 import { useMessageStore } from "../../stores/message";
-import { parseCallServiceError } from "../../func/service";
+import { formatDateTime, t, tf } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 enum KeyAlgorithm {
   Ed25519 = "ed25519",
@@ -75,7 +76,7 @@ const KeySettings: React.FC = () => {
       const list = await KeyService.List();
       setKeys((list ?? []).filter((item): item is SSHKeyInfo => item != null));
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     } finally {
       setLoading(false);
     }
@@ -102,9 +103,9 @@ const KeySettings: React.FC = () => {
   const copyPublicKey = async (publicKey: string) => {
     try {
       await navigator.clipboard.writeText(publicKey);
-      successMessage("公钥已复制");
+      successMessage(t("settings.keys.public_key_copied"));
     } catch (error) {
-      errorMessage("复制公钥失败");
+      errorMessage(t("settings.keys.copy_public_failed"));
       console.error(error);
     }
   };
@@ -115,7 +116,7 @@ const KeySettings: React.FC = () => {
       if (saveMode === KeySaveMode.Store) {
         const info = await KeyService.GenerateAndSave(name.trim(), algorithm, comment.trim());
         setGenerated({ publicKey: info.public_key, fingerprint: info.fingerprint });
-        successMessage("密钥已加密保存");
+        successMessage(t("settings.keys.saved_encrypted"));
         await loadKeys();
         return;
       }
@@ -124,9 +125,9 @@ const KeySettings: React.FC = () => {
         return;
       }
       setGenerated({ publicKey: info.public_key, fingerprint: info.fingerprint });
-      successMessage("私钥已导出");
+      successMessage(t("settings.keys.private_exported"));
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     } finally {
       setSaving(false);
     }
@@ -140,12 +141,12 @@ const KeySettings: React.FC = () => {
     try {
       const written = await KeyService.Export(exportTarget.id, exportPassphrase);
       if (written) {
-        successMessage("私钥已导出");
+        successMessage(t("settings.keys.private_exported"));
         setExportTarget(null);
         setExportPassphrase("");
       }
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     } finally {
       setExporting(false);
     }
@@ -158,11 +159,11 @@ const KeySettings: React.FC = () => {
     setDeleting(true);
     try {
       await KeyService.Delete(deleteTarget.id);
-      successMessage("密钥已删除");
+      successMessage(t("settings.keys.deleted"));
       setDeleteTarget(null);
       await loadKeys();
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     } finally {
       setDeleting(false);
     }
@@ -172,22 +173,22 @@ const KeySettings: React.FC = () => {
     <Box>
       <Stack direction="row" sx={{ mb: 3, alignItems: "center", justifyContent: "space-between" }}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          身份密钥
+          {t("settings.keys.title")}
         </Typography>
         <Button variant="contained" onClick={() => setGenerateOpen(true)}>
-          生成密钥
+          {t("settings.keys.generate")}
         </Button>
       </Stack>
       <Paper sx={{ p: 2 }} elevation={1}>
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>名称</TableCell>
-              <TableCell>算法</TableCell>
-              <TableCell>指纹</TableCell>
-              <TableCell>注释</TableCell>
-              <TableCell>创建时间</TableCell>
-              <TableCell align="right">操作</TableCell>
+              <TableCell>{t("settings.keys.col_name")}</TableCell>
+              <TableCell>{t("settings.keys.col_algorithm")}</TableCell>
+              <TableCell>{t("settings.keys.col_fingerprint")}</TableCell>
+              <TableCell>{t("settings.keys.col_comment")}</TableCell>
+              <TableCell>{t("settings.keys.col_created")}</TableCell>
+              <TableCell align="right">{t("settings.keys.col_actions")}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -195,7 +196,7 @@ const KeySettings: React.FC = () => {
               <TableRow>
                 <TableCell colSpan={6}>
                   <Typography variant="body2" color="text.secondary">
-                    {loading ? "加载中…" : "还没有密钥"}
+                    {loading ? t("common.loading") : t("settings.keys.empty")}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -206,9 +207,9 @@ const KeySettings: React.FC = () => {
                 <TableCell>{key.algorithm}</TableCell>
                 <TableCell>{key.fingerprint}</TableCell>
                 <TableCell>{key.comment}</TableCell>
-                <TableCell>{key.created_at}</TableCell>
+                <TableCell>{formatDateTime(key.created_at)}</TableCell>
                 <TableCell align="right">
-                  <Tooltip title="复制公钥">
+                  <Tooltip title={t("settings.keys.copy_public")}>
                     <IconButton
                       size="small"
                       onClick={() => copyPublicKey(key.public_key)}
@@ -216,7 +217,7 @@ const KeySettings: React.FC = () => {
                       <ContentCopy fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="导出">
+                  <Tooltip title={t("settings.keys.export")}>
                     <IconButton
                       size="small"
                       onClick={() => {
@@ -227,7 +228,7 @@ const KeySettings: React.FC = () => {
                       <FileDownload fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="删除">
+                  <Tooltip title={t("common.delete")}>
                     <IconButton
                       size="small"
                       color="error"
@@ -244,12 +245,16 @@ const KeySettings: React.FC = () => {
       </Paper>
 
       <Dialog open={generateOpen} onClose={closeGenerate} maxWidth="sm" fullWidth>
-        <DialogTitle>{generated ? "公钥" : "生成密钥"}</DialogTitle>
+        <DialogTitle>
+          {generated
+            ? t("settings.keys.dialog_public")
+            : t("settings.keys.dialog_generate")}
+        </DialogTitle>
         <DialogContent>
           {generated ? (
             <Stack spacing={2} sx={{ pt: 1 }}>
               <Typography variant="body2" color="text.secondary">
-                指纹 {generated.fingerprint}
+                {tf("settings.keys.fingerprint", generated.fingerprint)}
               </Typography>
               <TextField
                 value={generated.publicKey}
@@ -263,7 +268,7 @@ const KeySettings: React.FC = () => {
             <Stack spacing={2} sx={{ pt: 1 }}>
               <TextField
                 select
-                label="算法"
+                label={t("settings.keys.algorithm")}
                 value={algorithm}
                 onChange={(e) => setAlgorithm(e.target.value as KeyAlgorithm)}
                 fullWidth
@@ -275,36 +280,36 @@ const KeySettings: React.FC = () => {
                 ))}
               </TextField>
               <TextField
-                label="注释"
+                label={t("settings.keys.comment")}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 fullWidth
-                placeholder="写入公钥行末尾，例如 user@host"
+                placeholder={t("settings.keys.comment_placeholder")}
               />
               <RadioGroup
                 value={saveMode}
                 onChange={(e) => setSaveMode(e.target.value as KeySaveMode)}
               >
-                <FormControlLabel value={KeySaveMode.Store} control={<Radio />} label="加密保存到应用" />
-                <FormControlLabel value={KeySaveMode.Export} control={<Radio />} label="仅导出到文件" />
+                <FormControlLabel value={KeySaveMode.Store} control={<Radio />} label={t("settings.keys.save_store")} />
+                <FormControlLabel value={KeySaveMode.Export} control={<Radio />} label={t("settings.keys.save_export")} />
               </RadioGroup>
               {saveMode === KeySaveMode.Store && (
                 <TextField
-                  label="名称"
+                  label={t("settings.keys.name")}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   fullWidth
-                  placeholder="留空则按算法和时间命名"
+                  placeholder={t("settings.keys.name_placeholder")}
                 />
               )}
               {saveMode === KeySaveMode.Export && (
                 <TextField
-                  label="私钥口令"
+                  label={t("settings.keys.passphrase")}
                   type="password"
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.target.value)}
                   fullWidth
-                  placeholder="可选，留空则不加密文件"
+                  placeholder={t("settings.keys.passphrase_placeholder")}
                 />
               )}
             </Stack>
@@ -314,19 +319,19 @@ const KeySettings: React.FC = () => {
           {generated ? (
             <>
               <Button onClick={() => copyPublicKey(generated.publicKey)} startIcon={<ContentCopy />}>
-                复制公钥
+                {t("settings.keys.copy_public")}
               </Button>
               <Button variant="contained" onClick={closeGenerate}>
-                完成
+                {t("settings.keys.done")}
               </Button>
             </>
           ) : (
             <>
               <Button onClick={closeGenerate} variant="outlined">
-                取消
+                {t("common.cancel")}
               </Button>
               <Button variant="contained" onClick={handleGenerate} loading={saving}>
-                生成
+                {t("settings.keys.generate")}
               </Button>
             </>
           )}
@@ -342,41 +347,41 @@ const KeySettings: React.FC = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>导出私钥</DialogTitle>
+        <DialogTitle>{t("settings.keys.export_private_title")}</DialogTitle>
         <DialogContent>
           <TextField
-            label="私钥口令"
+            label={t("settings.keys.passphrase")}
             type="password"
             value={exportPassphrase}
             onChange={(e) => setExportPassphrase(e.target.value)}
             fullWidth
             sx={{ mt: 1 }}
-            placeholder="可选，留空则不加密文件"
+            placeholder={t("settings.keys.passphrase_placeholder")}
           />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setExportTarget(null)} variant="outlined">
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="contained" onClick={handleExport} loading={exporting}>
-            选择路径
+            {t("settings.keys.pick_path")}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={deleteTarget != null} onClose={() => setDeleteTarget(null)}>
-        <DialogTitle>删除密钥</DialogTitle>
+        <DialogTitle>{t("settings.keys.delete_title")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            删除「{deleteTarget?.name}」后无法恢复。正在被书签使用的密钥不能删除。
+            {tf("settings.keys.delete_body", deleteTarget?.name ?? "")}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)} variant="outlined">
-            取消
+            {t("common.cancel")}
           </Button>
           <Button color="error" variant="contained" onClick={handleDelete} loading={deleting}>
-            删除
+            {t("common.delete")}
           </Button>
         </DialogActions>
       </Dialog>

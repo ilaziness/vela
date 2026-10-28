@@ -44,7 +44,7 @@ func (m *Manager) Exec(ctx context.Context, linkID, command string, timeout time
 func (m *Manager) AnnotateSession(sessionID, notice string) error {
 	sess, err := m.GetSession(sessionID)
 	if err != nil {
-		return fmt.Errorf(ErrConnectionNotFound, sessionID)
+		return err
 	}
 	if notice == "" {
 		return nil

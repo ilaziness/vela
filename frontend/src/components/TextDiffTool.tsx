@@ -11,7 +11,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { DiffLineType, DiffResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function TextDiffTool() {
   const [left, setLeft] = useState("");
@@ -27,7 +28,7 @@ export default function TextDiffTool() {
       const res = await ToolService.DiffText(left, right);
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -58,17 +59,17 @@ export default function TextDiffTool() {
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        文本对比
+        {t("tools.text_diff.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        按行对比两段文本，标出增删行
+        {t("tools.text_diff.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
             <TextField
-              label="原文"
+              label={t("tools.text_diff.original")}
               value={left}
               onChange={(e) => setLeft(e.target.value)}
               multiline
@@ -77,7 +78,7 @@ export default function TextDiffTool() {
               slotProps={{ input: { style: { fontFamily: "monospace" } } }}
             />
             <TextField
-              label="新文"
+              label={t("tools.text_diff.revised")}
               value={right}
               onChange={(e) => setRight(e.target.value)}
               multiline
@@ -87,7 +88,7 @@ export default function TextDiffTool() {
             />
           </Stack>
           <Button variant="contained" onClick={handleDiff} disabled={isLoading} fullWidth>
-            {isLoading ? "对比中..." : "对比"}
+            {isLoading ? t("tools.shared.comparing") : t("tools.shared.compare")}
           </Button>
         </Stack>
       </Paper>
@@ -104,7 +105,7 @@ export default function TextDiffTool() {
               }}
             >
               {(result.lines ?? []).length === 0 ? (
-                <Alert severity="info">两边均为空</Alert>
+                <Alert severity="info">{t("tools.text_diff.both_empty")}</Alert>
               ) : (
                 (result.lines ?? []).map((line, index) => (
                   <Box

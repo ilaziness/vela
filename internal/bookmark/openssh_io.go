@@ -47,14 +47,14 @@ func (s *Service) ImportOpenSSH(path, groupName string) (ImportResult, error) {
 	}
 	if err != nil {
 		s.logger.Error("parse ssh_config failed", zap.String("path", path), zap.Error(err))
-		return res, fmt.Errorf("解析 ssh_config 失败: %w", err)
+		return res, fmt.Errorf("parse ssh_config failed: %w", err)
 	}
 	entries, resolveWarns := sshconfig.Resolve(blocks)
 	for _, w := range resolveWarns {
 		res.Warnings = append(res.Warnings, w.Message)
 	}
 	if len(entries) == 0 {
-		res.Warnings = append(res.Warnings, "未找到可导入的 Host")
+		res.Warnings = append(res.Warnings, "no importable Host entries found")
 		return res, nil
 	}
 
@@ -72,7 +72,7 @@ func (s *Service) ImportOpenSSH(path, groupName string) (ImportResult, error) {
 		if err != nil {
 			s.logger.Warn("import ssh_config host failed",
 				zap.String("alias", e.Alias), zap.Error(err))
-			res.Warnings = append(res.Warnings, fmt.Sprintf("Host %s 导入失败: %v", e.Alias, err))
+			res.Warnings = append(res.Warnings, fmt.Sprintf("Host %s import failed: %v", e.Alias, err))
 			continue
 		}
 		aliasToID[e.Alias] = id
@@ -110,7 +110,7 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 		}
 	}
 	if len(bookmarks) == 0 {
-		return "", []string{"没有可导出的书签"}, nil
+		return "", []string{"no bookmarks to export"}, nil
 	}
 
 	entries := make([]sshconfig.HostEntry, 0, len(bookmarks))
@@ -128,7 +128,7 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 		if b.PrivateKey != "" && b.SshKeyID == "" {
 			e.IdentityFiles = []string{b.PrivateKey}
 		} else if b.SshKeyID != "" {
-			warnings = append(warnings, fmt.Sprintf("%s: 使用应用内密钥，未导出 IdentityFile", b.Title))
+			warnings = append(warnings, fmt.Sprintf("%s: uses in-app key; IdentityFile not exported", b.Title))
 		}
 		if b.ForwardAgent {
 			yes := true
@@ -138,7 +138,7 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 			if chain := s.exportProxyJumpChain(b.ProxyJumpID, idToTitle); chain != "" {
 				e.ProxyJump = chain
 			} else {
-				warnings = append(warnings, fmt.Sprintf("%s: 跳板书签缺失，未导出 ProxyJump", b.Title))
+				warnings = append(warnings, fmt.Sprintf("%s: jump bookmark missing; ProxyJump not exported", b.Title))
 			}
 		}
 		if term := strings.TrimSpace(b.Term); term != "" {
@@ -275,7 +275,7 @@ func (s *Service) wireProxyJump(targetID, raw string, aliasToID map[string]strin
 		return 0, nil
 	}
 	if len(parts) > 5 {
-		warnings = append(warnings, fmt.Sprintf("书签 %s: ProxyJump 超过 5 跳，已截断", shortID(targetID)))
+		warnings = append(warnings, fmt.Sprintf("bookmark %s: ProxyJump exceeds 5 hops; truncated", shortID(targetID)))
 		parts = parts[:5]
 	}
 	// OpenSSH: a,b → client→a→b→target
@@ -286,7 +286,7 @@ func (s *Service) wireProxyJump(targetID, raw string, aliasToID map[string]strin
 			if warn != "" {
 				warnings = append(warnings, warn)
 			}
-			warnings = append(warnings, fmt.Sprintf("跳过书签 %s 的 ProxyJump 链", shortID(targetID)))
+			warnings = append(warnings, fmt.Sprintf("skipped ProxyJump chain for bookmark %s", shortID(targetID)))
 			return 0, warnings
 		}
 		ids = append(ids, id)
@@ -305,12 +305,12 @@ func (s *Service) wireProxyJump(targetID, raw string, aliasToID map[string]strin
 			if err == nil && existing.ProxyJumpID != "" && existing.ProxyJumpID != prev {
 				title := existing.Title
 				warnings = append(warnings, fmt.Sprintf(
-					"跳板 %q 已有不同 ProxyJump，多跳链未改写该跳板（书签 %s）", title, shortID(targetID)))
+					"jump %q already has a different ProxyJump; multi-hop chain left unchanged (bookmark %s)", title, shortID(targetID)))
 				continue
 			}
 		}
 		if err := s.setProxyJumpID(cur, prev); err != nil {
-			warnings = append(warnings, fmt.Sprintf("绑定 ProxyJump 失败 %s→%s: %v", shortID(cur), shortID(prev), err))
+			warnings = append(warnings, fmt.Sprintf("bind ProxyJump failed %s→%s: %v", shortID(cur), shortID(prev), err))
 			continue
 		}
 		updated++
@@ -339,7 +339,7 @@ func (s *Service) resolveJumpAlias(alias string, aliasToID map[string]string, gr
 	// Global unique title
 	all, err := s.db.BookmarkRepo.GetAllBookmarks()
 	if err != nil {
-		return "", fmt.Sprintf("查找跳板 %q 失败: %v", alias, err)
+		return "", fmt.Sprintf("lookup jump %q failed: %v", alias, err)
 	}
 	var matches []*database.BookmarkDB
 	for _, b := range all {
@@ -351,9 +351,9 @@ func (s *Service) resolveJumpAlias(alias string, aliasToID map[string]string, gr
 		return matches[0].ID, ""
 	}
 	if len(matches) > 1 {
-		return "", fmt.Sprintf("跳板别名 %q 匹配多个书签，未绑定", alias)
+		return "", fmt.Sprintf("jump alias %q matches multiple bookmarks; not bound", alias)
 	}
-	return "", fmt.Sprintf("未找到跳板别名 %q", alias)
+	return "", fmt.Sprintf("jump alias %q not found", alias)
 }
 
 func (s *Service) setProxyJumpID(bookmarkID, jumpID string) error {

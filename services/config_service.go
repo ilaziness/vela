@@ -1,7 +1,6 @@
 package services
 
 import (
-	"errors"
 	"sync"
 	"time"
 
@@ -9,8 +8,10 @@ import (
 
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
 	internalsync "github.com/ilaziness/vela/internal/sync"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -18,6 +19,7 @@ const (
 	EventInputPasswordClose = "eventInputPasswordClose"
 	EventAppearance         = "eventAppearance"
 	EventTerminal           = "eventTerminal"
+	EventLanguage           = "eventLanguage"
 )
 
 func init() {
@@ -25,6 +27,7 @@ func init() {
 	application.RegisterEvent[string](EventInputPasswordClose)
 	application.RegisterEvent[Appearance](EventAppearance)
 	application.RegisterEvent[TerminalConfig](EventTerminal)
+	application.RegisterEvent[string](EventLanguage)
 }
 
 // Appearance is the UI font broadcast after general settings are saved.
@@ -39,14 +42,21 @@ type TerminalConfig = config.TerminalConfig
 type SSHConfig = config.SSHConfig
 type AIConfig = ai.Config
 
+// I18nBootstrap is returned once per WebView to seed language + catalog.
+type I18nBootstrap struct {
+	Language string            `json:"language"`
+	Catalog  map[string]string `json:"catalog"`
+}
+
 type ConfigService struct {
-	app          *application.App
-	windows      *Windows
-	store        *config.Store
-	vault        *secret.Vault
-	passwordChan chan struct{}
-	chanMutex    sync.Mutex
-	onSSHSaved   func(config.SSHConfig)
+	app               *application.App
+	windows           *Windows
+	store             *config.Store
+	vault             *secret.Vault
+	passwordChan      chan struct{}
+	chanMutex         sync.Mutex
+	onSSHSaved        func(config.SSHConfig)
+	onLanguageChanged func(lang string)
 }
 
 func NewConfigService(app *application.App, windows *Windows, store *config.Store, vault *secret.Vault) *ConfigService {
@@ -74,6 +84,33 @@ func (cs *ConfigService) SetTheme(theme string) {
 	_ = cs.store.Save()
 }
 
+// GetI18nBootstrap returns the active language and flattened catalog for the frontend.
+func (cs *ConfigService) GetI18nBootstrap() I18nBootstrap {
+	lang := i18n.Language()
+	return I18nBootstrap{
+		Language: lang,
+		Catalog:  i18n.Catalog(lang),
+	}
+}
+
+// SetLanguage is the sole write path for General.Language.
+func (cs *ConfigService) SetLanguage(lang string) error {
+	lang = i18n.Normalize(lang)
+	cs.current().General.Language = lang
+	if err := cs.store.Save(); err != nil {
+		return err
+	}
+	i18n.SetLanguage(lang)
+	cs.windows.RefreshTitles()
+	if cs.onLanguageChanged != nil {
+		cs.onLanguageChanged(lang)
+	}
+	cs.app.Event.Emit(EventLanguage, lang)
+	// Keybinding labels/categories are resolved at List() time.
+	cs.app.Event.Emit(EventKeybindings, struct{}{})
+	return nil
+}
+
 func (cs *ConfigService) ReadConfig() (*Config, error) {
 	return cs.current(), nil
 }
@@ -82,6 +119,9 @@ func (cs *ConfigService) SaveConfig(cfg Config) error {
 	if err := cs.store.ApplyUserDataDir(cfg.General.UserDataDir); err != nil {
 		return err
 	}
+	// Theme / Language have dedicated write paths.
+	cfg.General.Theme = cs.current().General.Theme
+	cfg.General.Language = cs.current().General.Language
 	*cs.store.Config = cfg
 	return cs.store.Save()
 }
@@ -101,8 +141,9 @@ func (cs *ConfigService) SaveSyncConfig(syncConfig internalsync.SyncConfig) erro
 
 func (cs *ConfigService) SaveGeneralConfig(generalConfig GeneralConfig) error {
 	generalConfig.Normalize()
-	// 通用设置不编辑主题。沿用内存里的值，避免设置页打开后在主窗口改过的主题被旧快照覆盖。
+	// Theme / Language are owned by SetTheme / SetLanguage; keep in-memory values.
 	generalConfig.Theme = cs.current().General.Theme
+	generalConfig.Language = cs.current().General.Language
 	if err := cs.store.ApplyUserDataDir(generalConfig.UserDataDir); err != nil {
 		return err
 	}
@@ -123,8 +164,8 @@ func (cs *ConfigService) SaveGeneralConfig(generalConfig GeneralConfig) error {
 func (cs *ConfigService) showFramelessRestartDialog() {
 	dlg := cs.app.Dialog.Info().
 		SetTitle("Vela").
-		SetMessage("无边框模式已更改，需要重新启动应用后生效。")
-	ok := dlg.AddButton("确定")
+		SetMessage(i18n.T("dialog.frameless_restart"))
+	ok := dlg.AddButton(i18n.T("dialog.ok"))
 	dlg.SetDefaultButton(ok)
 	dlg.SetCancelButton(ok)
 	if cs.windows.Setting != nil {
@@ -192,7 +233,7 @@ func (cs *ConfigService) waitForPassword(reason string) error {
 	select {
 	case <-ch:
 		if _, err := cs.vault.Get(); err != nil {
-			return errors.New("password not entered")
+			return usererr.Coded("error.password_not_entered", "Password not entered")
 		}
 		cs.app.Event.Emit(EventInputPasswordClose, "")
 		return nil
@@ -203,7 +244,7 @@ func (cs *ConfigService) waitForPassword(reason string) error {
 			close(ch)
 		}
 		cs.chanMutex.Unlock()
-		return errors.New("password input timeout")
+		return usererr.Coded("error.password_timeout", "Password input timed out")
 	}
 }
 
@@ -238,9 +279,9 @@ func (cs *ConfigService) decryptValue(enc, reason string) (string, error) {
 }
 
 func (cs *ConfigService) encryptAPIKey(apiKey string) (string, error) {
-	return cs.encryptValue(apiKey, "需要密码来加密 API Key")
+	return cs.encryptValue(apiKey, i18n.T("password.encrypt_api_key"))
 }
 
 func (cs *ConfigService) decryptAPIKey(encrypted string) (string, error) {
-	return cs.decryptValue(encrypted, "需要密码来解密 API Key")
+	return cs.decryptValue(encrypted, i18n.T("password.decrypt_api_key"))
 }

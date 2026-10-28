@@ -1,9 +1,12 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // ChmodResult 权限计算结果
@@ -19,7 +22,7 @@ type ChmodResult struct {
 func (ts *Service) ConvertChmod(input string, direction string) ChmodResult {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return ChmodResult{Success: false, Error: "输入内容不能为空"}
+		return ChmodResult{Success: false, Error: i18n.T("tool.err.input_empty")}
 	}
 
 	switch strings.ToLower(direction) {
@@ -28,7 +31,7 @@ func (ts *Service) ConvertChmod(input string, direction string) ChmodResult {
 	case "tooctal", "to-octal", "octal":
 		return symbolicToOctal(input)
 	default:
-		return ChmodResult{Success: false, Error: "不支持的方向: " + direction}
+		return ChmodResult{Success: false, Error: i18n.Tf("tool.err.unsupported_direction", direction)}
 	}
 }
 
@@ -42,10 +45,10 @@ func formatChmodOctal(mode uint16) string {
 func octalToSymbolic(input string) ChmodResult {
 	n, err := strconv.ParseUint(input, 8, 16)
 	if err != nil {
-		return ChmodResult{Success: false, Error: "无效的八进制权限: " + err.Error()}
+		return ChmodResult{Success: false, Error: i18n.Tf("tool.err.invalid_octal", err.Error())}
 	}
 	if n > 0o7777 {
-		return ChmodResult{Success: false, Error: "权限值超出范围 (最大 7777)"}
+		return ChmodResult{Success: false, Error: i18n.T("tool.err.mode_range")}
 	}
 
 	mode := uint16(n)
@@ -90,7 +93,7 @@ func symbolicToOctal(input string) ChmodResult {
 		input = input[1:]
 	}
 	if len(input) != 9 {
-		return ChmodResult{Success: false, Error: "符号权限须为 9 位，例如 rwxr-xr-x"}
+		return ChmodResult{Success: false, Error: i18n.T("tool.err.symbolic_len")}
 	}
 
 	var mode uint16
@@ -102,7 +105,7 @@ func symbolicToOctal(input string) ChmodResult {
 		case '-':
 			return nil
 		default:
-			return fmt.Errorf("无效字符: %c（期望 %c/-）", ch, expect)
+			return errors.New(i18n.Tf("tool.err.invalid_char_rwx", ch, expect))
 		}
 	}
 	setExec := func(ch byte, bit uint16, specialBit uint16, lower byte, upper byte) error {
@@ -119,7 +122,7 @@ func symbolicToOctal(input string) ChmodResult {
 			mode |= specialBit
 			return nil
 		default:
-			return fmt.Errorf("无效字符: %c（期望 x/-/%c/%c）", ch, lower, upper)
+			return errors.New(i18n.Tf("tool.err.invalid_char_xst", ch, lower, upper))
 		}
 	}
 

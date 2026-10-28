@@ -20,7 +20,8 @@ import { Delete, Refresh } from "@mui/icons-material";
 import { SSHService } from "../../../bindings/github.com/ilaziness/vela/services";
 import type { KnownHostEntry } from "../../../bindings/github.com/ilaziness/vela/internal/ssh/models";
 import { useMessageStore } from "../../stores/message";
-import { parseCallServiceError } from "../../func/service";
+import { t, tf } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 const KnownHostsSettings: React.FC = () => {
   const { successMessage, errorMessage } = useMessageStore();
@@ -36,7 +37,7 @@ const KnownHostsSettings: React.FC = () => {
         (list ?? []).filter((item): item is KnownHostEntry => item != null),
       );
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     } finally {
       setLoading(false);
     }
@@ -54,11 +55,11 @@ const KnownHostsSettings: React.FC = () => {
         deleteTarget.host,
         deleteTarget.keyType,
       );
-      successMessage("已删除已知主机");
+      successMessage(t("settings.known_hosts.deleted"));
       setDeleteTarget(null);
       await loadEntries();
     } catch (error) {
-      errorMessage(parseCallServiceError(error));
+      errorMessage(translateServiceError(error));
     } finally {
       setDeleting(false);
     }
@@ -75,7 +76,7 @@ const KnownHostsSettings: React.FC = () => {
         }}
       >
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
-          已知主机
+          {t("settings.known_hosts.title")}
         </Typography>
         <Button
           startIcon={<Refresh />}
@@ -85,21 +86,21 @@ const KnownHostsSettings: React.FC = () => {
           }}
           disabled={loading}
         >
-          刷新
+          {t("common.refresh")}
         </Button>
       </Box>
       <Paper sx={{ p: 2 }} elevation={1}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          已信任的 SSH 服务器指纹（known_hosts）。删除后再次连接将重新确认。
+          {t("settings.known_hosts.hint")}
         </Typography>
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>主机</TableCell>
-              <TableCell>类型</TableCell>
-              <TableCell>指纹</TableCell>
+              <TableCell>{t("settings.known_hosts.col_host")}</TableCell>
+              <TableCell>{t("settings.known_hosts.col_type")}</TableCell>
+              <TableCell>{t("settings.known_hosts.col_fingerprint")}</TableCell>
               <TableCell align="right" width={80}>
-                操作
+                {t("settings.known_hosts.col_actions")}
               </TableCell>
             </TableRow>
           </TableHead>
@@ -107,7 +108,9 @@ const KnownHostsSettings: React.FC = () => {
             {entries.length === 0 && (
               <TableRow>
                 <TableCell colSpan={4} align="center">
-                  {loading ? "加载中…" : "暂无已知主机"}
+                  {loading
+                    ? t("common.loading")
+                    : t("settings.known_hosts.empty")}
                 </TableCell>
               </TableRow>
             )}
@@ -119,7 +122,7 @@ const KnownHostsSettings: React.FC = () => {
                   {entry.fingerprint || "—"}
                 </TableCell>
                 <TableCell align="right">
-                  <Tooltip title="删除">
+                  <Tooltip title={t("common.delete")}>
                     <IconButton
                       size="small"
                       color="error"
@@ -141,15 +144,19 @@ const KnownHostsSettings: React.FC = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>删除已知主机</DialogTitle>
+        <DialogTitle>{t("settings.known_hosts.delete_title")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            确定删除 {deleteTarget?.host}（{deleteTarget?.keyType}）的信任记录？
+            {tf(
+              "settings.known_hosts.delete_body",
+              deleteTarget?.host ?? "",
+              deleteTarget?.keyType ?? "",
+            )}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button
             color="error"
@@ -157,7 +164,7 @@ const KnownHostsSettings: React.FC = () => {
             onClick={() => void handleDelete()}
             loading={deleting}
           >
-            删除
+            {t("common.delete")}
           </Button>
         </DialogActions>
       </Dialog>

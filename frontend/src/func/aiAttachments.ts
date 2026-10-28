@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 /** Shared limits / MIME allowlists for AI chat attachments. */
 
 export const AI_ATTACH_MIME_TYPES = [
@@ -80,12 +82,15 @@ export function formatAttachmentRejectMessage(
   if (rejections.length === 0) return "";
   const reasons = new Set(rejections.map((r) => r.reason));
   if (reasons.has("file-count")) {
-    return `最多只能添加 ${AI_ATTACH_MAX_COUNT} 个附件`;
+    return t("ai.attach.max_count", AI_ATTACH_MAX_COUNT);
   }
   if (reasons.has("file-size")) {
-    return `单个附件不能超过 ${Math.round(AI_ATTACH_MAX_BYTES / (1024 * 1024))} MB`;
+    return t(
+      "ai.attach.max_size",
+      Math.round(AI_ATTACH_MAX_BYTES / (1024 * 1024)),
+    );
   }
-  return "不支持的文件类型";
+  return t("ai.attach.unsupported_type");
 }
 
 /** Collect image Files from a paste event. Prefer DataTransferItem.type (more reliable than File.type). */

@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"net"
 	"strings"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // CIDRResult 子网计算结果
@@ -27,12 +29,12 @@ type CIDRResult struct {
 func (ts *Service) CalculateCIDR(cidr string, checkIP string) CIDRResult {
 	cidr = strings.TrimSpace(cidr)
 	if cidr == "" {
-		return CIDRResult{Success: false, Error: "CIDR 不能为空"}
+		return CIDRResult{Success: false, Error: i18n.T("tool.err.cidr_empty")}
 	}
 
 	_, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return CIDRResult{Success: false, Error: "无效的 CIDR: " + err.Error()}
+		return CIDRResult{Success: false, Error: i18n.Tf("tool.err.invalid_cidr", err.Error())}
 	}
 
 	ones, bits := ipNet.Mask.Size()
@@ -87,13 +89,13 @@ func (ts *Service) CalculateCIDR(cidr string, checkIP string) CIDRResult {
 		parsed := net.ParseIP(checkIP)
 		if parsed == nil {
 			// 网段结果仍返回，错误说明检查 IP 无效
-			result.Error = "无效的检查 IP: " + checkIP
+			result.Error = "Invalid check IP: " + checkIP
 			return result
 		}
 		cidrIsV4 := network.To4() != nil
 		checkIsV4 := parsed.To4() != nil
 		if cidrIsV4 != checkIsV4 {
-			result.Error = "检查 IP 与 CIDR 地址族不一致"
+			result.Error = "Check IP address family does not match CIDR"
 			return result
 		}
 		contains := ipNet.Contains(parsed)

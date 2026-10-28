@@ -16,7 +16,8 @@ import {
 } from "@mui/material";
 import { useMessageStore } from "../stores/message";
 import { SSHTunnelService } from "../../bindings/github.com/ilaziness/vela/services";
-import { parseCallServiceError } from "../func/service";
+import { translateServiceError } from "../func/service";
+import { t, tf } from "../i18n";
 import {
   TunnelType,
   validateIpPort,
@@ -136,7 +137,9 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
           formData.localAddr,
           formData.remoteAddr,
         );
-        successMessage(`${getTunnelTypeName(tunnelType)}启动成功`);
+        successMessage(
+          tf("tunnel.start_success", getTunnelTypeName(tunnelType)),
+        );
       } else if (tunnelType === "remote") {
         const remotePort = Number.parseInt(formData.remotePort, 10);
         await SSHTunnelService.StartRemote(
@@ -144,10 +147,14 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
           remotePort,
           formData.localAddr,
         );
-        successMessage(`${getTunnelTypeName(tunnelType)}启动成功`);
+        successMessage(
+          tf("tunnel.start_success", getTunnelTypeName(tunnelType)),
+        );
       } else {
         await SSHTunnelService.StartDynamic(sessionID, formData.localAddr);
-        successMessage(`${getTunnelTypeName(tunnelType)}启动成功`);
+        successMessage(
+          tf("tunnel.start_success", getTunnelTypeName(tunnelType)),
+        );
       }
 
       onSuccess();
@@ -155,8 +162,16 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
       setFormData({ localAddr: "", remoteAddr: "", remotePort: "" });
     } catch (err) {
       const errorMsg =
-        err instanceof Error ? parseCallServiceError(err) : "启动隧道失败";
-      errorMessage(`${getTunnelTypeName(tunnelType)}失败: ${errorMsg}`);
+        err instanceof Error
+          ? translateServiceError(err)
+          : t("tunnel.start_tunnel_failed");
+      errorMessage(
+        tf(
+          "tunnel.start_failed",
+          getTunnelTypeName(tunnelType),
+          errorMsg,
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -167,20 +182,22 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
     return (
       <>
         <FormControl fullWidth required>
-          <InputLabel>隧道类型</InputLabel>
+          <InputLabel>{t("tunnel.type_label")}</InputLabel>
           <Select
             value={tunnelType}
             onChange={(e) => setTunnelType(e.target.value as TunnelType)}
-            label="隧道类型"
+            label={t("tunnel.type_label")}
           >
-            <MenuItem value="local">本地端口转发</MenuItem>
-            <MenuItem value="remote">远程端口转发</MenuItem>
-            <MenuItem value="dynamic">动态端口转发</MenuItem>
+            <MenuItem value="local">{t("validation.tunnel_local")}</MenuItem>
+            <MenuItem value="remote">{t("validation.tunnel_remote")}</MenuItem>
+            <MenuItem value="dynamic">
+              {t("validation.tunnel_dynamic")}
+            </MenuItem>
           </Select>
         </FormControl>
 
         <TextField
-          label="本地地址"
+          label={t("tunnel.local_address")}
           value={formData.localAddr}
           onChange={(e) => {
             setFormData({ ...formData, localAddr: e.target.value });
@@ -195,13 +212,13 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
 
         {tunnelType === "local" && (
           <TextField
-            label="远程地址"
+            label={t("tunnel.remote_address")}
             value={formData.remoteAddr}
             onChange={(e) => {
               setFormData({ ...formData, remoteAddr: e.target.value });
               validateAndUpdateField("remoteAddr", e.target.value);
             }}
-            placeholder="例如: 127.0.0.1:80 或 example.com:443"
+            placeholder={t("tunnel.example_remote_addr")}
             helperText={getRemoteAddrHelperText(errors.remoteAddr)}
             error={!!errors.remoteAddr}
             fullWidth
@@ -211,13 +228,13 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
 
         {tunnelType === "remote" && (
           <TextField
-            label="远程端口"
+            label={t("tunnel.remote_port")}
             value={formData.remotePort}
             onChange={(e) => {
               setFormData({ ...formData, remotePort: e.target.value });
               validateAndUpdateField("remotePort", e.target.value);
             }}
-            placeholder="例如: 9090"
+            placeholder={t("tunnel.example_remote_port")}
             type="number"
             slotProps={{
               htmlInput: {
@@ -235,7 +252,7 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
         {tunnelType === "dynamic" && (
           <Box sx={{ textAlign: "center", py: 1, color: "text.secondary" }}>
             <Typography variant="body2">
-              动态（SOCKS5）代理：本地监听 SOCKS5 请求并通过 SSH 隧道出站。
+              {t("tunnel.dynamic_description")}
             </Typography>
           </Box>
         )}
@@ -245,7 +262,7 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>创建 SSH 隧道</DialogTitle>
+      <DialogTitle>{t("tunnel.create_dialog_title")}</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
           {renderFormFields()}
@@ -253,7 +270,7 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={loading}>
-          取消
+          {t("common.cancel")}
         </Button>
         <Button
           onClick={handleSubmit}
@@ -261,7 +278,7 @@ const TunnelForm: React.FC<TunnelFormProps> = ({
           disabled={!isFormValid() || loading}
           startIcon={loading ? <CircularProgress size={16} /> : null}
         >
-          {loading ? "启动中..." : "启动隧道"}
+          {loading ? t("tunnel.starting") : t("tunnel.start")}
         </Button>
       </DialogActions>
     </Dialog>

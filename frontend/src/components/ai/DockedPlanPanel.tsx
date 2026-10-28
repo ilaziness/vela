@@ -10,6 +10,7 @@ import {
   localFilePath,
 } from '../../func/aiAttachments';
 import { useMessageStore } from '../../stores/message';
+import { t } from '../../i18n';
 
 const composerInnerSx: SxProps<Theme> = (theme) => ({
   display: 'flex',
@@ -126,7 +127,7 @@ export const ComposerPlanDockRoot = React.forwardRef<
       composer.addAttachment(file);
     }
     if (missingPath) {
-      useMessageStore.getState().errorMessage('无法获取文件路径，请使用附件按钮选择文件');
+      useMessageStore.getState().errorMessage(t('ai.plan.path_unavailable'));
     }
   };
 

@@ -115,10 +115,10 @@ func testBookmarkService(t *testing.T, keyPath, keyPass string) (*Service, strin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := db.BookmarkRepo.InsertGroup(&database.BookmarkGroupDB{Name: "默认书签"}); err != nil {
+	if err := db.BookmarkRepo.InsertGroup(&database.BookmarkGroupDB{Name: DefaultGroupName}); err != nil {
 		t.Fatal(err)
 	}
-	group, err := db.BookmarkRepo.GetGroupByName("默认书签")
+	group, err := db.BookmarkRepo.GetGroupByName(DefaultGroupName)
 	if err != nil {
 		t.Fatal(err)
 	}

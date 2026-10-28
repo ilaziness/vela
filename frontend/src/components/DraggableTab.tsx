@@ -3,6 +3,7 @@ import React from "react";
 import CloseIcon from "@mui/icons-material/Close";
 import { Draggable } from "@hello-pangea/dnd";
 import { ConnectionStatus } from "../types/ssh";
+import { displaySSHTabName, useLanguage } from "../i18n";
 
 export interface DraggableTabProps {
   item: {
@@ -25,6 +26,8 @@ export const DraggableTab = React.memo(function DraggableTab({
   onClose,
   onContextMenu,
 }: DraggableTabProps) {
+  useLanguage();
+  const label = displaySSHTabName(item.name);
   const getBackgroundColor = (isActive: boolean, isDragging: boolean) => {
     if (isActive) return "action.selected";
     if (isDragging) return "action.hover";
@@ -86,7 +89,7 @@ export const DraggableTab = React.memo(function DraggableTab({
               backgroundColor: connectionStatusColor,
             }}
           />
-          <Tooltip title={item.name}>
+          <Tooltip title={label}>
             <Box
               sx={{
                 flex: 1,
@@ -96,7 +99,7 @@ export const DraggableTab = React.memo(function DraggableTab({
                 whiteSpace: "nowrap",
               }}
             >
-              {item.name}
+              {label}
             </Box>
           </Tooltip>
           <Box

@@ -15,7 +15,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { RandomCharset, RandomKind, RandomResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function RandomTool() {
   const [kind, setKind] = useState<RandomKind>(RandomKind.UuidV4);
@@ -38,7 +39,7 @@ export default function RandomTool() {
       );
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -48,40 +49,40 @@ export default function RandomTool() {
     if (!result?.result) return;
     try {
       await navigator.clipboard.writeText(result.result);
-      successMessage("已复制到剪贴板");
+      successMessage(t("common.copied"));
     } catch {
-      errorMessage("复制失败");
+      errorMessage(t("common.copy_failed"));
     }
   };
 
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        随机生成
+        {t("tools.random.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        UUID v4 / v7，或指定长度与字符集的随机串
+        {t("tools.random.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <FormControl fullWidth>
-            <InputLabel>类型</InputLabel>
+            <InputLabel>{t("tools.random.kind")}</InputLabel>
             <Select
               value={kind}
-              label="类型"
+              label={t("tools.random.kind")}
               onChange={(e) => setKind(e.target.value as RandomKind)}
             >
               <MenuItem value={RandomKind.UuidV4}>UUID v4</MenuItem>
               <MenuItem value={RandomKind.UuidV7}>UUID v7</MenuItem>
-              <MenuItem value={RandomKind.String}>随机串</MenuItem>
+              <MenuItem value={RandomKind.String}>{t("tools.random.kind_string")}</MenuItem>
             </Select>
           </FormControl>
 
           {kind === RandomKind.String && (
             <>
               <TextField
-                label="长度"
+                label={t("tools.random.length")}
                 type="number"
                 value={length}
                 onChange={(e) => setLength(Number(e.target.value) || 16)}
@@ -89,23 +90,35 @@ export default function RandomTool() {
                 fullWidth
               />
               <FormControl fullWidth>
-                <InputLabel>字符集</InputLabel>
+                <InputLabel>{t("tools.random.charset")}</InputLabel>
                 <Select
                   value={charset}
-                  label="字符集"
+                  label={t("tools.random.charset")}
                   onChange={(e) => setCharset(e.target.value as RandomCharset)}
                 >
-                  <MenuItem value={RandomCharset.Alphanum}>字母+数字</MenuItem>
-                  <MenuItem value={RandomCharset.Alpha}>仅字母</MenuItem>
-                  <MenuItem value={RandomCharset.Numeric}>仅数字</MenuItem>
-                  <MenuItem value={RandomCharset.Hex}>十六进制</MenuItem>
-                  <MenuItem value={RandomCharset.Base64}>Base64 字符</MenuItem>
-                  <MenuItem value={RandomCharset.Custom}>自定义</MenuItem>
+                  <MenuItem value={RandomCharset.Alphanum}>
+                    {t("tools.random.charset_alphanum")}
+                  </MenuItem>
+                  <MenuItem value={RandomCharset.Alpha}>
+                    {t("tools.random.charset_alpha")}
+                  </MenuItem>
+                  <MenuItem value={RandomCharset.Numeric}>
+                    {t("tools.random.charset_numeric")}
+                  </MenuItem>
+                  <MenuItem value={RandomCharset.Hex}>
+                    {t("tools.random.charset_hex")}
+                  </MenuItem>
+                  <MenuItem value={RandomCharset.Base64}>
+                    {t("tools.random.charset_base64")}
+                  </MenuItem>
+                  <MenuItem value={RandomCharset.Custom}>
+                    {t("tools.random.charset_custom")}
+                  </MenuItem>
                 </Select>
               </FormControl>
               {charset === RandomCharset.Custom && (
                 <TextField
-                  label="自定义字符集"
+                  label={t("tools.random.custom_charset")}
                   value={customCharset}
                   onChange={(e) => setCustomCharset(e.target.value)}
                   fullWidth
@@ -115,7 +128,7 @@ export default function RandomTool() {
           )}
 
           <Button variant="contained" onClick={handleGenerate} disabled={isLoading} fullWidth>
-            {isLoading ? "生成中..." : "生成"}
+            {isLoading ? t("tools.shared.generating") : t("tools.shared.generate")}
           </Button>
         </Stack>
       </Paper>
@@ -125,14 +138,14 @@ export default function RandomTool() {
           {result.success ? (
             <>
               <TextField
-                label="结果"
+                label={t("tools.shared.result")}
                 value={result.result}
                 fullWidth
                 multiline
                 slotProps={{ input: { readOnly: true, style: { fontFamily: "monospace" } } }}
               />
               <Button variant="outlined" onClick={handleCopy} sx={{ mt: 2 }}>
-                复制结果
+                {t("tools.shared.copy_result")}
               </Button>
             </>
           ) : (

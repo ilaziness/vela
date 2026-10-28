@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+﻿import React, { useState, useEffect, useCallback } from "react";
 import {
   Box,
   Typography,
@@ -9,8 +9,10 @@ import {
   DialogActions,
   Button,
 } from "@mui/material";
+import { Events } from "@wailsio/runtime";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { translateServiceError } from "../func/service";
+import { t, tf } from "../i18n";
 import {
   CommandHistory,
   SSHTunnelSession,
@@ -73,7 +75,7 @@ const Command: React.FC = () => {
       const result = await CommandService.GetAllCommands();
       setCommandsByCategory(result as { [key: string]: CommandInfo[] });
     } catch (error) {
-      errorMessage(`加载命令失败：${parseCallServiceError(error)}`);
+      errorMessage(tf("command.load_failed", translateServiceError(error)));
     }
   }, [errorMessage]);
 
@@ -89,7 +91,7 @@ const Command: React.FC = () => {
         }),
       );
     } catch (error) {
-      errorMessage(`获取会话列表失败：${parseCallServiceError(error)}`);
+      errorMessage(tf("command.sessions_failed", translateServiceError(error)));
     }
   }, [errorMessage]);
 
@@ -98,16 +100,26 @@ const Command: React.FC = () => {
       const historyData = await CommandService.GetCommandHistory();
       setHistory(historyData as CommandHistory[]);
     } catch (error) {
-      errorMessage(`加载历史失败：${parseCallServiceError(error)}`);
+      errorMessage(tf("command.history_failed", translateServiceError(error)));
     }
   }, [errorMessage]);
 
-  // 加载命令和会话
   useEffect(() => {
     void loadCommands();
     void loadSessions();
     void loadHistory();
   }, [loadCommands, loadSessions, loadHistory]);
+
+  // Builtin command categories are language-specific; refetch after SetLanguage.
+  useEffect(() => {
+    const unsub = Events.On("eventLanguage", () => {
+      setExpandedCategories({});
+      void loadCommands();
+    });
+    return () => {
+      unsub();
+    };
+  }, [loadCommands]);
 
   // 刷新会话列表
   const handleRefreshSessions = () => {
@@ -130,12 +142,12 @@ const Command: React.FC = () => {
   // 发送命令
   const handleSendCommand = async () => {
     if (!inputCommand.trim()) {
-      errorMessage("命令不能为空");
+      errorMessage(t("command.empty"));
       return;
     }
 
     if (selectedSessions.length === 0) {
-      errorMessage("请选择至少一个 SSH 会话");
+      errorMessage(t("command.select_session"));
       return;
     }
 
@@ -154,10 +166,10 @@ const Command: React.FC = () => {
       };
       setHistory((prev) => [...prev, newHistory]);
 
-      successMessage("命令发送成功");
+      successMessage(t("command.send_success"));
       setInputCommand("");
     } catch (error) {
-      errorMessage(`发送命令失败：${parseCallServiceError(error)}`);
+      errorMessage(t("command.send_failed", translateServiceError(error)));
     }
   };
 
@@ -173,7 +185,7 @@ const Command: React.FC = () => {
   // 添加自定义命令
   const handleAddCommand = async () => {
     if (!newCategory.trim() || !newName.trim() || !newCommand.trim()) {
-      errorMessage("分类、名称和命令都不能为空");
+      errorMessage(t("command.fields_required"));
       return;
     }
 
@@ -193,9 +205,9 @@ const Command: React.FC = () => {
       setNewName("");
       setNewCommand("");
       setNewDescription("");
-      successMessage("命令添加成功");
+      successMessage(t("command.add_success"));
     } catch (error) {
-      errorMessage(`添加命令失败：${parseCallServiceError(error)}`);
+      errorMessage(t("command.add_failed", translateServiceError(error)));
     }
   };
 
@@ -214,9 +226,9 @@ const Command: React.FC = () => {
         commandToDelete.name,
       );
       await loadCommands();
-      successMessage("命令删除成功");
+      successMessage(t("command.delete_success"));
     } catch (error) {
-      errorMessage(`删除命令失败：${parseCallServiceError(error)}`);
+      errorMessage(t("command.delete_failed", translateServiceError(error)));
     } finally {
       setDeleteConfirmOpen(false);
       setCommandToDelete(null);
@@ -233,9 +245,11 @@ const Command: React.FC = () => {
     try {
       await CommandService.ClearCommandHistory();
       setHistory([]);
-      successMessage("历史已清空");
+      successMessage(t("command.clear_history_success"));
     } catch (error) {
-      errorMessage(`清空历史失败：${parseCallServiceError(error)}`);
+      errorMessage(
+        t("command.clear_history_failed", translateServiceError(error)),
+      );
     } finally {
       setClearHistoryConfirmOpen(false);
     }
@@ -279,7 +293,7 @@ const Command: React.FC = () => {
         >
           <Box sx={{ p: 2, pb: 1.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              命令库
+              {t("command.library")}
             </Typography>
           </Box>
           <CommandTree
@@ -329,16 +343,21 @@ const Command: React.FC = () => {
 
       {/* 删除用户命令确认对话框 */}
       <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t("command.confirm_delete_title")}</DialogTitle>
         <DialogContent>
           <Typography>
-            确定要删除命令 "{commandToDelete?.name}" 吗？此操作不可撤销。
+            {tf(
+              "command.confirm_delete_message",
+              commandToDelete?.name ?? "",
+            )}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteConfirmOpen(false)}>取消</Button>
+          <Button onClick={() => setDeleteConfirmOpen(false)}>
+            {t("common.cancel")}
+          </Button>
           <Button onClick={confirmDeleteCommand} color="error">
-            删除
+            {t("common.delete")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -348,16 +367,16 @@ const Command: React.FC = () => {
         open={clearHistoryConfirmOpen}
         onClose={() => setClearHistoryConfirmOpen(false)}
       >
-        <DialogTitle>确认清空</DialogTitle>
+        <DialogTitle>{t("command.confirm_clear_title")}</DialogTitle>
         <DialogContent>
-          <Typography>
-            确定要清空所有命令历史记录吗？此操作不可撤销。
-          </Typography>
+          <Typography>{t("command.confirm_clear_message")}</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setClearHistoryConfirmOpen(false)}>取消</Button>
+          <Button onClick={() => setClearHistoryConfirmOpen(false)}>
+            {t("common.cancel")}
+          </Button>
           <Button onClick={confirmClearHistory} color="error">
-            清空
+            {t("common.clear")}
           </Button>
         </DialogActions>
       </Dialog>

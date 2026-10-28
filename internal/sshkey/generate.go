@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	cryptossh "golang.org/x/crypto/ssh"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -38,11 +40,11 @@ func Generate(algorithm, comment string) (PublicResult, string, error) {
 	}
 	signer, err := cryptossh.NewSignerFromKey(key)
 	if err != nil {
-		return PublicResult{}, "", fmt.Errorf("创建签名器失败: %w", err)
+		return PublicResult{}, "", fmt.Errorf("create signer failed: %w", err)
 	}
 	block, err := cryptossh.MarshalPrivateKey(key, comment)
 	if err != nil {
-		return PublicResult{}, "", fmt.Errorf("编码私钥失败: %w", err)
+		return PublicResult{}, "", fmt.Errorf("encode private key failed: %w", err)
 	}
 	pub := PublicResult{
 		Algorithm:   algorithm,
@@ -58,23 +60,23 @@ func newPrivateKey(algorithm string) (any, error) {
 	case AlgoEd25519:
 		_, priv, err := ed25519.GenerateKey(rand.Reader)
 		if err != nil {
-			return nil, fmt.Errorf("生成 ed25519 密钥失败: %w", err)
+			return nil, fmt.Errorf("generate ed25519 key failed: %w", err)
 		}
 		return priv, nil
 	case AlgoEcdsaP256:
 		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
-			return nil, fmt.Errorf("生成 ecdsa 密钥失败: %w", err)
+			return nil, fmt.Errorf("generate ecdsa key failed: %w", err)
 		}
 		return priv, nil
 	case AlgoRsa4096:
 		priv, err := rsa.GenerateKey(rand.Reader, 4096)
 		if err != nil {
-			return nil, fmt.Errorf("生成 rsa 密钥失败: %w", err)
+			return nil, fmt.Errorf("generate rsa key failed: %w", err)
 		}
 		return priv, nil
 	default:
-		return nil, fmt.Errorf("不支持的密钥算法")
+		return nil, usererr.Coded("sshkey.unsupported_algo", "Unsupported key algorithm")
 	}
 }
 
@@ -97,7 +99,7 @@ func sanitizeComment(comment string) string {
 func FingerprintOfAuthorized(line string) (string, error) {
 	pub, _, _, _, err := cryptossh.ParseAuthorizedKey([]byte(line))
 	if err != nil {
-		return "", fmt.Errorf("解析公钥失败: %w", err)
+		return "", fmt.Errorf("parse public key failed: %w", err)
 	}
 	return cryptossh.FingerprintSHA256(pub), nil
 }
@@ -122,16 +124,16 @@ func WritePrivateKeyFile(path, privatePEM, comment, passphrase string) error {
 	if passphrase != "" {
 		raw, err := cryptossh.ParseRawPrivateKey(data)
 		if err != nil {
-			return fmt.Errorf("解析私钥失败: %w", err)
+			return fmt.Errorf("parse private key failed: %w", err)
 		}
 		block, err := cryptossh.MarshalPrivateKeyWithPassphrase(raw, sanitizeComment(comment), []byte(passphrase))
 		if err != nil {
-			return fmt.Errorf("加密私钥失败: %w", err)
+			return fmt.Errorf("encrypt private key failed: %w", err)
 		}
 		data = pem.EncodeToMemory(block)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("写入私钥失败: %w", err)
+		return fmt.Errorf("write private key failed: %w", err)
 	}
 	return nil
 }

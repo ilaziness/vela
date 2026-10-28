@@ -14,10 +14,10 @@ import {
 } from "@mui/material";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import { ChatBox, ChatMessageAvatar } from "@mui/x-chat";
-import type { ChatToolInvocationState } from "@mui/x-chat/headless";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
-import { GenkitAdapter, aiUser, currentUser } from "./GenkitAdapter";
+import { GenkitAdapter, getAiUser, getCurrentUser } from "./GenkitAdapter";
+import { buildChatLocaleText, t, useLanguage } from "../../i18n";
 import { AIChatFilePart } from "./AIChatFilePart";
 import ComposerSendStopButton from "./ComposerSendStopButton";
 import { ComposerAttachPathButton } from "./ComposerAttachPathButton";
@@ -45,33 +45,6 @@ import { useMessageStore } from "../../stores/message";
 
 const SIDEBAR_WIDTH_TRANSITION = "width 225ms ease";
 const SIDEBAR_WIDTH_TRANSITION_MS = 225;
-
-const chatLocaleText = {
-  messageToolApproveButtonLabel: "批准",
-  messageToolDenyButtonLabel: "拒绝",
-  messageToolInputLabel: "调用参数",
-  messageToolOutputLabel: "执行结果",
-  toolStateLabel: (state: ChatToolInvocationState) => {
-    switch (state) {
-      case "input-streaming":
-        return "准备中";
-      case "input-available":
-        return "待执行";
-      case "approval-requested":
-        return "待批准";
-      case "approval-responded":
-        return "执行中";
-      case "output-available":
-        return "已完成";
-      case "output-error":
-        return "失败";
-      case "output-denied":
-        return "已拒绝";
-      default:
-        return state;
-    }
-  },
-};
 
 /** Keep upsert_plan out of the message stream; DockedPlanPanel owns that UI. */
 function HiddenToolRoot() {
@@ -154,6 +127,8 @@ const AISideBar = () => {
   );
 
   const adapter = useMemo(() => new GenkitAdapter(), []);
+  useLanguage();
+  const chatLocaleText = buildChatLocaleText();
 
   const [chatContainer, setChatContainer] = useState<HTMLDivElement | null>(
     null,
@@ -316,8 +291,8 @@ const AISideBar = () => {
               <ChatBox
                 key={activeSessionId}
                 adapter={adapter}
-                currentUser={currentUser}
-                members={[currentUser, aiUser]}
+                currentUser={getCurrentUser()}
+                members={[getCurrentUser(), getAiUser()]}
                 activeConversationId={activeSessionId}
                 onActiveConversationChange={() => {}}
                 composerValue={composerValue}
@@ -355,7 +330,7 @@ const AISideBar = () => {
                   // still has flex:1 + maxHeight:200 which stretches the field in a column
                   // composer and shows a useless scrollbar — override those.
                   composerInput: {
-                    placeholder: "输入消息...",
+                    placeholder: t("ai.chat.placeholder"),
                     maxRows: 8,
                     sx: {
                       flex: "0 0 auto",
@@ -404,14 +379,14 @@ const AISideBar = () => {
                   color="text.secondary"
                   align="center"
                 >
-                  无法加载或创建会话
+                  {t("ai.chat.load_failed")}
                 </Typography>
                 <Button
                   size="small"
                   variant="outlined"
                   onClick={() => void loadSessions()}
                 >
-                  重试
+                  {t("common.retry")}
                 </Button>
               </Box>
             )}

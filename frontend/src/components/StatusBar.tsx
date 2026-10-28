@@ -8,7 +8,8 @@ import SSHTunnel from "./SSHTunnel";
 import HostResourcesPanel from "./HostResourcesPanel";
 import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
 import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal/ssh/models";
-import { parseCallServiceError } from "../func/service";
+import { parseServiceErrorPayload, parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
 
 const HOST_RESOURCES_POLL_MS = 5000;
 /** Wait after terminal WS ready so PTY welcome/MOTD is not stolen by metrics Exec. */
@@ -36,7 +37,7 @@ const formatMetricsLabel = (
   r: HostResources | null,
   pollStopped: boolean,
 ): string => {
-  if (pollStopped) return "无法获取";
+  if (pollStopped) return t("statusbar.unavailable");
   if (!r) return "CPU -- · Mem -- · Disk -- · --ms";
   const parts: string[] = [];
   if (r.has_cpu) {
@@ -62,8 +63,8 @@ const formatMetricsLabel = (
 };
 
 const isSessionGoneError = (err: unknown): boolean => {
-  const msg = parseCallServiceError(err).toLowerCase();
-  return msg.includes("ssh connection") && msg.includes("not found");
+  const payload = parseServiceErrorPayload(parseCallServiceError(err));
+  return payload?.code === "ssh.connection_not_found";
 };
 
 const StatusBar: React.FC<StatusBarProps> = ({
@@ -187,7 +188,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
         gap: 2,
       }}
     >
-      <Tooltip title="主机资源">
+      <Tooltip title={t("statusbar.host_resources")}>
         <Typography
           component="span"
           onClick={toggleResourcesOpen}
@@ -210,14 +211,14 @@ const StatusBar: React.FC<StatusBarProps> = ({
 
       <Stack direction="row" spacing={2} sx={{ flexShrink: 0 }}>
         {logging && (
-          <Tooltip title="会话日志录制中">
+          <Tooltip title={t("statusbar.session_log_recording")}>
             <FiberManualRecordIcon
               fontSize="small"
               sx={{ color: "error.main" }}
             />
           </Tooltip>
         )}
-        <Tooltip title="隧道">
+        <Tooltip title={t("statusbar.tunnel")}>
           <AltRouteIcon
             fontSize="small"
             onClick={toggleSshTunnelOpen}
@@ -230,7 +231,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
             }}
           />
         </Tooltip>
-        <Tooltip title="传输列表">
+        <Tooltip title={t("statusbar.transfer_list")}>
           <MobiledataOffIcon
             fontSize="small"
             onClick={toggleOpen}

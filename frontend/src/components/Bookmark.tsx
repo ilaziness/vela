@@ -21,10 +21,15 @@ import {
 import BookmarkTree from "./BookmarkTree";
 import BookmarkForm from "./BookmarkForm";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { translateServiceError } from "../func/service";
 import { ProxyMode, ProxyType } from "../types/proxy";
 import { collectTagSuggestions } from "../func/bookmarkMeta";
 import { BookmarkColor } from "../types/bookmark";
+import {
+  displayBookmarkGroupName,
+  t,
+  tf,
+} from "../i18n";
 
 const IMPORT_GROUP_DEFAULT = "Imported";
 const EXPORT_ALL = "";
@@ -66,7 +71,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       }
     } catch (error) {
       LogService.Warn(`Failed to load bookmarks:${error}`);
-      errorMessage("加载书签失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.load_failed", translateServiceError(error)));
     }
   }, [errorMessage]);
 
@@ -97,7 +102,9 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       );
     } catch (error) {
       LogService.Warn(`Failed to rename group: ${error}`);
-      errorMessage("重命名分组失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("bookmark.rename_group_failed", translateServiceError(error)),
+      );
     }
   };
 
@@ -107,7 +114,9 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       await loadBookmarks();
     } catch (error) {
       LogService.Warn(`Failed to update group icon: ${error}`);
-      errorMessage("更新分组图标失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("bookmark.update_group_icon_failed", translateServiceError(error)),
+      );
     }
   };
 
@@ -117,7 +126,9 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       await loadBookmarks();
     } catch (error) {
       LogService.Warn(`Failed to add group: ${error}`);
-      errorMessage("添加分组失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("bookmark.add_group_failed", translateServiceError(error)),
+      );
     }
   };
 
@@ -130,7 +141,9 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       }
     } catch (error) {
       LogService.Warn(`Failed to delete group: ${error}`);
-      errorMessage("删除分组失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("bookmark.delete_group_failed", translateServiceError(error)),
+      );
     }
   };
 
@@ -139,7 +152,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
     const bookmarkCount = group?.bookmarks?.length || 0;
     const newBookmark: SSHBookmark = {
       id: "",
-      title: `新书签 ${bookmarkCount + 1}`,
+      title: tf("bookmark.new", bookmarkCount + 1),
       group_name: groupName,
       host: "",
       port: 22,
@@ -189,14 +202,14 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       await loadBookmarks();
       const created = res?.created ?? 0;
       if (created > 0) {
-        successMessage(`已导入 ${created} 个书签`);
+        successMessage(tf("bookmark.import_success", created));
       } else {
-        successMessage("导入完成（未新建书签）");
+        successMessage(t("bookmark.import_none"));
       }
       showWarnings(res?.warnings);
     } catch (error) {
       LogService.Warn(`Import SSH config failed: ${error}`);
-      errorMessage("导入 ssh_config 失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.import_failed", translateServiceError(error)));
     } finally {
       setBusyIO(false);
     }
@@ -211,14 +224,14 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       }
       setExportOpen(false);
       if (res?.written) {
-        successMessage("已导出 OpenSSH 配置");
+        successMessage(t("bookmark.export_success"));
       } else if ((res?.warnings || []).length === 0) {
-        errorMessage("没有可导出的内容");
+        errorMessage(t("bookmark.export_empty"));
       }
       showWarnings(res?.warnings);
     } catch (error) {
       LogService.Warn(`Export SSH config failed: ${error}`);
-      errorMessage("导出 ssh_config 失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.export_failed", translateServiceError(error)));
     } finally {
       setBusyIO(false);
     }
@@ -231,10 +244,10 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       if (copied) {
         setSelectedBookmark(copied);
       }
-      successMessage("书签复制成功");
+      successMessage(t("bookmark.copy_success"));
     } catch (error) {
       LogService.Warn(`Failed to copy bookmark: ${error}`);
-      errorMessage("复制书签失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.copy_failed", translateServiceError(error)));
     }
   };
 
@@ -247,7 +260,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       }
     } catch (error) {
       LogService.Warn(`Failed to delete bookmark: ${error}`);
-      errorMessage("删除书签失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.delete_failed", translateServiceError(error)));
     }
   };
 
@@ -255,13 +268,13 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
     try {
       const bookmarkId = await BookmarkService.SaveBookmark(bookmark);
       const savedBookmark = { ...bookmark, id: bookmarkId };
-      successMessage("书签保存成功");
+      successMessage(t("bookmark.save_success"));
       await loadBookmarks();
       setSelectedBookmark(savedBookmark);
       return savedBookmark;
     } catch (error) {
       LogService.Warn(`Failed to save bookmark: ${error}`);
-      errorMessage("保存书签失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.save_failed", translateServiceError(error)));
       throw error;
     }
   };
@@ -269,10 +282,10 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
   const handleTestConnection = async (bookmark: SSHBookmark) => {
     try {
       await BookmarkService.TestConnection(bookmark);
-      successMessage("连接测试成功");
+      successMessage(t("bookmark.test_success"));
     } catch (error) {
       LogService.Warn(`Connection test failed: ${error}`);
-      errorMessage("连接测试失败: " + parseCallServiceError(error));
+      errorMessage(t("bookmark.test_failed", translateServiceError(error)));
     }
   };
 
@@ -280,14 +293,16 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
     try {
       const bookmarkId = await BookmarkService.SaveAndConnect(bookmark);
       const savedBookmark = { ...bookmark, id: bookmarkId };
-      successMessage("书签保存并连接成功");
+      successMessage(t("bookmark.save_connect_success"));
       await loadBookmarks();
       setSelectedBookmark(savedBookmark);
       onRequestClose?.();
       return savedBookmark;
     } catch (error) {
       LogService.Warn(`Failed to save and connect: ${error}`);
-      errorMessage("保存并连接失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("bookmark.save_connect_failed", translateServiceError(error)),
+      );
       throw error;
     }
   };
@@ -325,7 +340,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
               setImportOpen(true);
             }}
           >
-            导入配置
+            {t("bookmark.import_config")}
           </Button>
           <Button
             size="small"
@@ -335,7 +350,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
               setExportOpen(true);
             }}
           >
-            导出配置
+            {t("bookmark.export_config")}
           </Button>
         </Stack>
         <BookmarkTree
@@ -371,73 +386,75 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
       </Box>
 
       <Dialog open={importOpen} onClose={() => !busyIO && setImportOpen(false)}>
-        <DialogTitle>导入 OpenSSH 配置</DialogTitle>
+        <DialogTitle>{t("bookmark.import_dialog_title")}</DialogTitle>
         <DialogContent>
           <TextField
             select
             fullWidth
             size="small"
-            label="目标分组"
+            label={t("bookmark.import_target_group")}
             value={importGroup}
             onChange={(e) => setImportGroup(e.target.value)}
             sx={{ mt: 1, minWidth: 320 }}
           >
-            <MenuItem value={IMPORT_GROUP_DEFAULT}>{IMPORT_GROUP_DEFAULT}</MenuItem>
+            <MenuItem value={IMPORT_GROUP_DEFAULT}>
+              {t("bookmark.group.imported")}
+            </MenuItem>
             {bookmarks
               .map((g) => g.name)
               .filter((n) => n !== IMPORT_GROUP_DEFAULT)
               .map((name) => (
                 <MenuItem key={name} value={name}>
-                  {name}
+                  {displayBookmarkGroupName(name)}
                 </MenuItem>
               ))}
           </TextField>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-            将选择本机 ssh_config 文件，解析 Host 并生成书签。无法识别的指令会提示。
+            {t("bookmark.import_hint")}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setImportOpen(false)} disabled={busyIO}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="contained" onClick={handleImportSSHConfig} disabled={busyIO}>
-            选择文件并导入
+            {t("bookmark.import_select")}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={exportOpen} onClose={() => !busyIO && setExportOpen(false)}>
-        <DialogTitle>导出 OpenSSH 配置</DialogTitle>
+        <DialogTitle>{t("bookmark.export_dialog_title")}</DialogTitle>
         <DialogContent>
           <TextField
             select
             fullWidth
             size="small"
-            label="导出范围"
+            label={t("bookmark.export_scope")}
             value={exportGroup}
             onChange={(e) => setExportGroup(e.target.value)}
             sx={{ mt: 1, minWidth: 320 }}
           >
-            <MenuItem value={EXPORT_ALL}>全部书签</MenuItem>
+            <MenuItem value={EXPORT_ALL}>{t("bookmark.export_all")}</MenuItem>
             {bookmarks.map((g) => (
               <MenuItem key={g.name} value={g.name}>
-                {g.name}
+                {displayBookmarkGroupName(g.name)}
               </MenuItem>
             ))}
           </TextField>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setExportOpen(false)} disabled={busyIO}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="contained" onClick={handleExportSSHConfig} disabled={busyIO}>
-            导出
+            {t("common.export")}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={warningsOpen} onClose={() => setWarningsOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>导入/导出提示</DialogTitle>
+        <DialogTitle>{t("bookmark.warnings_title")}</DialogTitle>
         <DialogContent>
           <Box
             component="ul"
@@ -456,7 +473,7 @@ const Bookmark: React.FC<BookmarkProps> = ({ onRequestClose }) => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setWarningsOpen(false)}>关闭</Button>
+          <Button onClick={() => setWarningsOpen(false)}>{t("common.close")}</Button>
         </DialogActions>
       </Dialog>
     </Box>

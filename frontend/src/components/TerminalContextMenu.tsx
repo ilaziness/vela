@@ -16,6 +16,7 @@ import { terminalInstances } from "../stores/terminalInstances";
 import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useKeybindingsStore } from "../stores/keybindings";
 import { ShortcutAction, toShellCodeBlock } from "../func/shortcuts";
+import { t } from "../i18n";
 
 interface TerminalContextMenuProps {
   contextMenu: {
@@ -124,28 +125,28 @@ export default function TerminalContextMenu({
         <ListItemIcon>
           <ContentCopyIcon fontSize="small" />
         </ListItemIcon>
-        <ListItemText>复制</ListItemText>
+        <ListItemText>{t("common.copy")}</ListItemText>
         <ShortcutHint action={ShortcutAction.TerminalCopy} />
       </MenuItem>
       <MenuItem onClick={handlePaste}>
         <ListItemIcon>
           <ContentPasteIcon fontSize="small" />
         </ListItemIcon>
-        <ListItemText>粘贴</ListItemText>
+        <ListItemText>{t("terminal.paste")}</ListItemText>
         <ShortcutHint action={ShortcutAction.TerminalPaste} />
       </MenuItem>
       <MenuItem onClick={handleFind}>
         <ListItemIcon>
           <SearchIcon fontSize="small" />
         </ListItemIcon>
-        <ListItemText>查找</ListItemText>
+        <ListItemText>{t("terminal.find")}</ListItemText>
         <ShortcutHint action={ShortcutAction.TerminalFind} />
       </MenuItem>
       <MenuItem onClick={handleAddToChat} disabled={!hasSelection}>
         <ListItemIcon>
           <ChatIcon fontSize="small" />
         </ListItemIcon>
-        <ListItemText>添加到聊天</ListItemText>
+        <ListItemText>{t("terminal.add_to_chat")}</ListItemText>
         <ShortcutHint action={ShortcutAction.TerminalAddToChat} />
       </MenuItem>
       <MenuItem onClick={handleToggleLogging} disabled={!logging && !canLog}>
@@ -156,14 +157,16 @@ export default function TerminalContextMenu({
             <FiberManualRecordIcon fontSize="small" color="error" />
           )}
         </ListItemIcon>
-        <ListItemText>{logging ? "停止记录" : "开始记录"}</ListItemText>
+        <ListItemText>
+          {logging ? t("terminal.stop_logging") : t("terminal.start_logging")}
+        </ListItemText>
         <ShortcutHint action={ShortcutAction.TerminalToggleLog} />
       </MenuItem>
       <MenuItem onClick={handleClear}>
         <ListItemIcon>
           <ClearAllIcon fontSize="small" />
         </ListItemIcon>
-        <ListItemText>清屏</ListItemText>
+        <ListItemText>{t("terminal.clear_screen")}</ListItemText>
         <ShortcutHint action={ShortcutAction.TerminalClear} />
       </MenuItem>
     </Menu>

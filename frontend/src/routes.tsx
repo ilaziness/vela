@@ -4,10 +4,11 @@ import { createHashRouter, useRouteError, isRouteErrorResponse } from "react-rou
 import App from "./pages/App.tsx";
 import SubMainWindow from "./pages/SubMainWindow";
 import Loading from "./components/Loading";
+import { t } from "./i18n";
 
 /** Shown while a lazy route chunk is loading (e.g. setting/command/tools windows). */
 function RouteLoadingFallback() {
-  return <Loading message="Loading..." />;
+  return <Loading message={t("common.loading")} />;
 }
 
 function RouteErrorFallback() {
@@ -16,7 +17,7 @@ function RouteErrorFallback() {
     ? `${error.status} ${error.statusText}`
     : error instanceof Error
       ? error.message
-      : "页面加载失败";
+      : t("error.page_load_failed");
 
   return (
     <Box
@@ -30,12 +31,12 @@ function RouteErrorFallback() {
         p: 3,
       }}
     >
-      <Typography variant="h6">页面加载失败</Typography>
+      <Typography variant="h6">{t("error.page_load_failed")}</Typography>
       <Typography variant="body2" color="text.secondary">
         {message}
       </Typography>
       <Button variant="outlined" onClick={() => window.location.reload()}>
-        重新加载
+        {t("common.reload")}
       </Button>
     </Box>
   );

@@ -11,7 +11,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { JWTResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function JWTTool() {
   const [token, setToken] = useState("");
@@ -21,7 +22,7 @@ export default function JWTTool() {
 
   const handleDecode = async () => {
     if (!token.trim()) {
-      errorMessage("请输入 JWT");
+      errorMessage(t("tools.jwt.jwt_required"));
       return;
     }
     setIsLoading(true);
@@ -30,7 +31,7 @@ export default function JWTTool() {
       const res = await ToolService.DecodeJWT(token.trim());
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -40,19 +41,19 @@ export default function JWTTool() {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      successMessage("已复制到剪贴板");
+      successMessage(t("common.copied"));
     } catch {
-      errorMessage("复制失败");
+      errorMessage(t("common.copy_failed"));
     }
   };
 
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        JWT 解码
+        {t("tools.jwt.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        本地拆分 Header / Payload，不校验、不签发
+        {t("tools.jwt.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
@@ -68,7 +69,7 @@ export default function JWTTool() {
             slotProps={{ input: { style: { fontFamily: "monospace" } } }}
           />
           <Button variant="contained" onClick={handleDecode} disabled={isLoading} fullWidth>
-            {isLoading ? "解码中..." : "解码"}
+            {isLoading ? t("tools.shared.processing") : t("tools.shared.decode")}
           </Button>
         </Stack>
       </Paper>
@@ -86,7 +87,7 @@ export default function JWTTool() {
                 slotProps={{ input: { readOnly: true, style: { fontFamily: "monospace" } } }}
               />
               <Button variant="outlined" size="small" onClick={() => handleCopy(result.header)}>
-                复制 Header
+                {t("tools.jwt.copy_header")}
               </Button>
               <TextField
                 label="Payload"
@@ -97,10 +98,10 @@ export default function JWTTool() {
                 slotProps={{ input: { readOnly: true, style: { fontFamily: "monospace" } } }}
               />
               <Button variant="outlined" size="small" onClick={() => handleCopy(result.payload)}>
-                复制 Payload
+                {t("tools.jwt.copy_payload")}
               </Button>
               <TextField
-                label="Signature（原文）"
+                label={t("tools.jwt.signature")}
                 value={result.signature ?? ""}
                 fullWidth
                 multiline

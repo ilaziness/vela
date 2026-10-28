@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"strings"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // JWTResult JWT 解码结果
@@ -22,7 +24,7 @@ const bearerPrefix = "bearer "
 func (ts *Service) DecodeJWT(token string) JWTResult {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return JWTResult{Success: false, Error: "JWT 不能为空"}
+		return JWTResult{Success: false, Error: i18n.T("tool.err.jwt_empty")}
 	}
 
 	if len(token) >= len(bearerPrefix) && strings.EqualFold(token[:len(bearerPrefix)], bearerPrefix) {
@@ -31,19 +33,19 @@ func (ts *Service) DecodeJWT(token string) JWTResult {
 
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return JWTResult{Success: false, Error: "无效的 JWT：应为 header.payload.signature 三段"}
+		return JWTResult{Success: false, Error: i18n.T("tool.err.invalid_jwt_parts")}
 	}
 	if parts[0] == "" || parts[1] == "" || parts[2] == "" {
-		return JWTResult{Success: false, Error: "无效的 JWT：header / payload / signature 不能为空"}
+		return JWTResult{Success: false, Error: i18n.T("tool.err.jwt_part_empty")}
 	}
 
 	header, err := decodeJWTPart(parts[0])
 	if err != nil {
-		return JWTResult{Success: false, Error: "Header 解码失败: " + err.Error()}
+		return JWTResult{Success: false, Error: i18n.Tf("tool.err.jwt_header", err.Error())}
 	}
 	payload, err := decodeJWTPart(parts[1])
 	if err != nil {
-		return JWTResult{Success: false, Error: "Payload 解码失败: " + err.Error()}
+		return JWTResult{Success: false, Error: i18n.Tf("tool.err.jwt_payload", err.Error())}
 	}
 
 	return JWTResult{

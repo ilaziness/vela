@@ -28,6 +28,7 @@ declare module "@wailsio/runtime" {
             "eventKeybindings": {};
             "eventKeyboardInteractive": string;
             "eventKeyboardInteractiveClose": string;
+            "eventLanguage": string;
             "eventNewVersion": services$0.NewVersion;
             "eventProgress": services$0.ProgressData;
             "eventSSHSessionClosed": string;

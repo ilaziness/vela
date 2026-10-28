@@ -38,6 +38,11 @@ import {
   filterBookmarkGroups,
   isBookmarkInFilteredGroups,
 } from "../func/bookmarkMeta";
+import {
+  displayBookmarkGroupName,
+  isDefaultBookmarkGroup,
+  t,
+} from "../i18n";
 
 interface BookmarkTreeProps {
   bookmarks: BookmarkGroup[];
@@ -192,14 +197,14 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
         }}
       >
         <Typography variant="h6" sx={{ fontWeight: 600, fontSize: "1.1rem" }}>
-          书签
+          {t("bookmark.title")}
         </Typography>
         <TextField
           size="small"
           fullWidth
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="名称 / 主机 / 用户 / 标签"
+          placeholder={t("bookmark.search_placeholder")}
           sx={{ mt: 1.5 }}
           slotProps={{
             input: {
@@ -256,7 +261,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
             color="text.secondary"
             sx={{ display: "block", mt: 1 }}
           >
-            当前书签不在筛选结果中
+            {t("bookmark.not_in_filter")}
           </Typography>
         ) : null}
       </Box>
@@ -266,10 +271,10 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
           {filtering && visibleGroups.length === 0 ? (
             <Box sx={{ px: 2, py: 3, textAlign: "center" }}>
               <Typography variant="body2" color="text.secondary">
-                无匹配书签
+                {t("bookmark.no_match")}
               </Typography>
               <Chip
-                label="清除筛选"
+                label={t("bookmark.clear_filter")}
                 size="small"
                 onClick={clearFilters}
                 sx={{ mt: 1 }}
@@ -347,7 +352,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
                       />
                     ) : (
                       <ListItemText
-                        primary={group.name}
+                        primary={displayBookmarkGroupName(group.name)}
                         slotProps={{
                           primary: {
                             sx: {
@@ -359,40 +364,42 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
                         sx={{ flex: 1, minWidth: 0 }}
                       />
                     )}
-                    <Box
-                      sx={{
-                        display: "flex",
-                        gap: 0.25,
-                        visibility:
-                          hoveredGroup === group.name ? "visible" : "hidden",
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Tooltip title="重命名">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditingGroup(group.name, group.name);
-                          }}
-                          sx={{ padding: "4px" }}
-                        >
-                          <EditIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="删除分组">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onGroupDelete(group.name);
-                          }}
-                          sx={{ padding: "4px" }}
-                        >
-                          <DeleteIcon sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
+                    {!isDefaultBookmarkGroup(group.name) ? (
+                      <Box
+                        sx={{
+                          display: "flex",
+                          gap: 0.25,
+                          visibility:
+                            hoveredGroup === group.name ? "visible" : "hidden",
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Tooltip title={t("bookmark.rename_group")}>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditingGroup(group.name, group.name);
+                            }}
+                            sx={{ padding: "4px" }}
+                          >
+                            <EditIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title={t("bookmark.delete_group")}>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onGroupDelete(group.name);
+                            }}
+                            sx={{ padding: "4px" }}
+                          >
+                            <DeleteIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    ) : null}
                   </Box>
                 </ListItemButton>
               </ListItem>
@@ -481,7 +488,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
                                   : "hidden",
                             }}
                           >
-                            <Tooltip title="复制书签">
+                            <Tooltip title={t("bookmark.copy_bookmark")}>
                               <IconButton
                                 size="small"
                                 onClick={(e) => {
@@ -493,7 +500,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
                                 <ContentCopyIcon sx={{ fontSize: 16 }} />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="删除书签">
+                            <Tooltip title={t("bookmark.delete_bookmark")}>
                               <IconButton
                                 size="small"
                                 onClick={(e) => {
@@ -521,7 +528,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
                     >
                       <AddIcon sx={{ fontSize: 16, mr: 1.5 }} />
                       <ListItemText
-                        primary="添加书签"
+                        primary={t("bookmark.add")}
                         slotProps={{
                           primary: {
                             sx: {
@@ -547,7 +554,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
                   onBlur={handleAddNewGroup}
                   autoFocus
                   size="small"
-                  placeholder="分组名称"
+                  placeholder={t("bookmark.group_name_placeholder")}
                   fullWidth
                   sx={{
                     "& .MuiInputBase-root": {
@@ -567,7 +574,7 @@ const BookmarkTree: React.FC<BookmarkTreeProps> = ({
               >
                 <AddIcon sx={{ fontSize: 20, mr: 1 }} />
                 <ListItemText
-                  primary="添加分组"
+                  primary={t("bookmark.add_group")}
                   slotProps={{
                     primary: {
                       sx: {

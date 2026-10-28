@@ -44,7 +44,8 @@ import {
   SyncProgress,
   LogService,
 } from "../../../bindings/github.com/ilaziness/vela/services";
-import { parseCallServiceError } from "../../func/service";
+import { formatDateTime, t, tf } from "../../i18n";
+import { translateServiceError } from "../../func/service";
 
 type SyncConfig = Config["Sync"];
 
@@ -58,19 +59,6 @@ interface VersionInfo {
   file_size: number;
   created_at: string;
 }
-
-const stageLabels: Record<string, string> = {
-  preparing: "准备中...",
-  packing: "打包数据中...",
-  encrypting: "加密数据中...",
-  uploading: "上传数据中...",
-  downloading: "下载数据中...",
-  decrypting: "解密数据中...",
-  unpacking: "解压数据中...",
-  retrying: "重试中...",
-  completed: "完成",
-  error: "错误",
-};
 
 const SyncSettings: React.FC<SyncSettingsProps> = ({
   syncConfig,
@@ -112,15 +100,15 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
 
   const validateSyncConfig = (): boolean => {
     if (!localConfig.serverUrl.trim()) {
-      errorMessage("服务器地址不能为空");
+      errorMessage(t("settings.sync.server_url_required"));
       return false;
     }
     if (!localConfig.syncId.trim()) {
-      errorMessage("同步 ID 不能为空");
+      errorMessage(t("settings.sync.sync_id_required"));
       return false;
     }
     if (!localConfig.userKey.trim()) {
-      errorMessage("用户密钥不能为空");
+      errorMessage(t("settings.sync.user_key_required"));
       return false;
     }
     return true;
@@ -148,7 +136,9 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
       setVersions(result || []);
     } catch (error) {
       LogService.Error("Failed to load versions: " + String(error));
-      errorMessage("加载历史版本失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("settings.sync.load_history_failed", translateServiceError(error)),
+      );
     }
   };
 
@@ -193,7 +183,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
         serverUrl: localConfig.serverUrl,
       };
       onChange(configToSave);
-      successMessage("同步配置已保存");
+      successMessage(t("settings.sync.config_saved"));
       if (localConfig.serverUrl.trim() && localConfig.syncId.trim() && localConfig.userKey.trim()) {
         checkHealth();
         loadVersions();
@@ -213,11 +203,13 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
     setProgress(null);
     try {
       await UploadSync();
-      successMessage("数据上传成功");
+      successMessage(t("settings.sync.upload_success"));
       await loadVersions();
     } catch (error) {
       LogService.Error("Upload failed: " + String(error));
-      errorMessage("数据上传失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("settings.sync.upload_failed", translateServiceError(error)),
+      );
     } finally {
       setLoading(false);
     }
@@ -225,7 +217,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
 
   const handleDownload = async () => {
     if (!selectedVersion) {
-      errorMessage("请选择要恢复的版本");
+      errorMessage(t("settings.sync.pick_version"));
       return;
     }
     setLoading(true);
@@ -235,7 +227,9 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
       setRestartDialogOpen(true);
     } catch (error) {
       LogService.Error("Download failed: " + String(error));
-      setRestartDialogOpen(true);
+      errorMessage(
+        t("settings.sync.download_failed", translateServiceError(error)),
+      );
     } finally {
       setLoading(false);
       setRestoreDialogOpen(false);
@@ -263,7 +257,9 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
       setRestorePage(page);
     } catch (error) {
       LogService.Error("Failed to load restore versions: " + String(error));
-      errorMessage("加载版本列表失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("settings.sync.load_versions_failed", translateServiceError(error)),
+      );
     } finally {
       setRestoreLoading(false);
     }
@@ -291,7 +287,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
   const handleCancel = async () => {
     try {
       await CancelSync();
-      successMessage("同步已取消");
+      successMessage(t("settings.sync.cancelled"));
     } catch (error) {
       LogService.Debug("Cancel failed: " + String(error));
     }
@@ -301,11 +297,13 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
     if (!versionToDelete) return;
     try {
       await DeleteSyncVersion(versionToDelete);
-      successMessage("版本删除成功");
+      successMessage(t("settings.sync.delete_version_success"));
       await loadVersions();
     } catch (error) {
       LogService.Error("Delete version failed: " + String(error));
-      errorMessage("删除版本失败: " + parseCallServiceError(error));
+      errorMessage(
+        t("settings.sync.delete_version_failed", translateServiceError(error)),
+      );
     } finally {
       setDeleteDialogOpen(false);
       setVersionToDelete(null);
@@ -328,25 +326,27 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString("zh-CN");
+    return formatDateTime(dateStr);
   };
 
   const getStageLabel = (stage: string) => {
-    return stageLabels[stage] || stage;
+    const key = `settings.sync.stage.${stage}`;
+    const msg = t(key);
+    return msg === key ? stage : msg;
   };
 
   return (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
-        数据同步
+        {t("settings.sync.title")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }} elevation={1}>
         <Typography variant="h6" gutterBottom>
-          同步配置
+          {t("settings.sync.config_section")}
         </Typography>
         <Stack spacing={2}>
-          <FormRow label="服务器地址">
+          <FormRow label={t("settings.sync.server_url")}>
             <TextField
               fullWidth
               size="small"
@@ -357,10 +357,10 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                   serverUrl: e.target.value.trim(),
                 })
               }
-              placeholder="例如: http://localhost:8080 或 https://sync.example.com"
+              placeholder={t("settings.sync.server_url_placeholder")}
             />
           </FormRow>
-          <FormRow label="同步 ID">
+          <FormRow label={t("settings.sync.sync_id")}>
             <TextField
               fullWidth
               size="small"
@@ -371,10 +371,10 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                   syncId: e.target.value.trim(),
                 })
               }
-              placeholder="请输入同步 ID"
+              placeholder={t("settings.sync.sync_id_placeholder")}
             />
           </FormRow>
-          <FormRow label="用户密钥">
+          <FormRow label={t("settings.sync.user_key")}>
             <TextField
               fullWidth
               size="small"
@@ -386,7 +386,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                   userKey: e.target.value.trim(),
                 })
               }
-              placeholder="请输入用户密钥"
+              placeholder={t("settings.sync.user_key_placeholder")}
             />
           </FormRow>
           <Box sx={{ display: "flex", gap: 2, mt: 2, alignItems: "center", justifyContent: "flex-end" }}>
@@ -396,12 +396,16 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
               onClick={handleSaveConfig}
               loading={saving}
             >
-              保存
+              {t("common.save")}
             </Button>
             <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
               {healthStatus && (
                 <Chip
-                  label={healthStatus === "connected" ? "已连接" : "未连接"}
+                  label={
+                    healthStatus === "connected"
+                      ? t("settings.sync.connected")
+                      : t("settings.sync.disconnected")
+                  }
                   color={healthStatus === "connected" ? "success" : "error"}
                   size="small"
                 />
@@ -415,7 +419,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                   checkingHealth ? <CircularProgress size={16} /> : <Refresh />
                 }
               >
-                刷新
+                {t("common.refresh")}
               </Button>
             </Box>
           </Box>
@@ -425,7 +429,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
       {isConfigured && (
         <Paper sx={{ p: 3 }} elevation={1}>
           <Typography variant="h6" gutterBottom>
-            同步操作
+            {t("settings.sync.operations")}
           </Typography>
 
           {loading && progress && (
@@ -469,7 +473,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
               onClick={loadVersions}
               disabled={loading}
             >
-              刷新版本
+              {t("settings.sync.refresh_versions")}
             </Button>
             <Button
               variant="outlined"
@@ -479,7 +483,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
               onClick={handleOpenRestoreDialog}
               disabled={loading || versions.length === 0}
             >
-              恢复数据
+              {t("settings.sync.restore_data")}
             </Button>
             {loading && (
               <Button
@@ -488,7 +492,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                 startIcon={<Cancel />}
                 onClick={handleCancel}
               >
-                取消
+                {t("common.cancel")}
               </Button>
             )}
             <Button
@@ -499,17 +503,19 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
               onClick={handleUpload}
               disabled={loading}
             >
-              上传备份
+              {t("settings.sync.upload_backup")}
             </Button>
           </Box>
 
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="subtitle1" gutterBottom>
-            历史版本
+            {t("settings.sync.history")}
           </Typography>
           {versions.length === 0 ? (
-            <Typography color="text.secondary">暂无历史版本</Typography>
+            <Typography color="text.secondary">
+              {t("settings.sync.no_versions")}
+            </Typography>
           ) : (
             <List dense>
               {versions.map((version) => (
@@ -526,12 +532,15 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                         setDeleteDialogOpen(true);
                       }}
                     >
-                      删除
+                      {t("common.delete")}
                     </Button>
                   }
                 >
                   <ListItemText
-                    primary={`版本 ${version.version_number}`}
+                    primary={tf(
+                      "settings.sync.version_n",
+                      version.version_number,
+                    )}
                     secondary={`${formatFileSize(version.file_size)} • ${formatDate(
                       version.created_at,
                     )}`}
@@ -549,9 +558,11 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>恢复数据</DialogTitle>
+        <DialogTitle>{t("settings.sync.restore_dialog_title")}</DialogTitle>
         <DialogContent>
-          <Typography gutterBottom>请选择要恢复的版本:</Typography>
+          <Typography gutterBottom>
+            {t("settings.sync.restore_pick_version")}
+          </Typography>
           <Box
             sx={{
               maxHeight: 400,
@@ -567,7 +578,10 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                   onClick={() => setSelectedVersion(version.version_number)}
                 >
                   <ListItemText
-                    primary={`版本 ${version.version_number}`}
+                    primary={tf(
+                      "settings.sync.version_n",
+                      version.version_number,
+                    )}
                     secondary={`${formatFileSize(version.file_size)} • ${formatDate(
                       version.created_at,
                     )}`}
@@ -586,13 +600,15 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
                 color="text.secondary"
                 sx={{ display: "block", textAlign: "center", py: 1 }}
               >
-                已加载全部版本
+                {t("settings.sync.all_versions_loaded")}
               </Typography>
             )}
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRestoreDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setRestoreDialogOpen(false)}>
+            {t("common.cancel")}
+          </Button>
           <Button
             variant="contained"
             onClick={handleDownload}
@@ -601,7 +617,7 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
               loading ? <CircularProgress size={20} /> : <CloudDownload />
             }
           >
-            恢复
+            {t("settings.sync.restore")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -612,21 +628,21 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t("settings.sync.confirm_delete_title")}</DialogTitle>
         <DialogContent>
           <Typography>
-            确定要删除版本 {versionToDelete} 吗？此操作不可恢复。
+            {tf("settings.sync.confirm_delete_body", versionToDelete ?? 0)}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleDeleteCancel}>取消</Button>
+          <Button onClick={handleDeleteCancel}>{t("common.cancel")}</Button>
           <Button
             variant="contained"
             color="error"
             onClick={handleDeleteConfirm}
             disabled={loading}
           >
-            删除
+            {t("common.delete")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -637,13 +653,13 @@ const SyncSettings: React.FC<SyncSettingsProps> = ({
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>需要重启</DialogTitle>
+        <DialogTitle>{t("settings.sync.restart_title")}</DialogTitle>
         <DialogContent>
-          <Typography>数据恢复操作已完成，请重启应用。</Typography>
+          <Typography>{t("settings.sync.restart_body")}</Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleRestartDialogClose} variant="contained">
-            知道了
+            {t("common.ok")}
           </Button>
         </DialogActions>
       </Dialog>

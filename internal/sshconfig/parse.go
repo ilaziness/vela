@@ -64,20 +64,20 @@ func Parse(r io.Reader, baseDir, source string, depth int) ([]RawHostBlock, []Wa
 		}
 		key, value := splitKV(line)
 		if key == "" {
-			warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: 无法解析行", source, lineNo)})
+			warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: unable to parse line", source, lineNo)})
 			continue
 		}
 		lk := strings.ToLower(key)
 
 		if lk == "include" {
 			if depth >= maxIncludeDepth {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: Include 嵌套过深，已跳过 %s", source, lineNo, value)})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: Include nested too deep; skipped %s", source, lineNo, value)})
 				continue
 			}
 			incBlocks, incWarns, err := parseIncludes(value, baseDir, depth+1)
 			warnings = append(warnings, incWarns...)
 			if err != nil {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: Include 失败: %v", source, lineNo, err)})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: Include failed: %v", source, lineNo, err)})
 				continue
 			}
 			flush()
@@ -88,7 +88,7 @@ func Parse(r io.Reader, baseDir, source string, depth int) ([]RawHostBlock, []Wa
 		if lk == "host" || lk == "match" {
 			flush()
 			if lk == "match" {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: 跳过 Match 块", source, lineNo)})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s:%d: skipped Match block", source, lineNo)})
 				cur = &RawHostBlock{IsMatch: true, Keywords: map[string][]string{}, Source: source}
 				continue
 			}
@@ -106,9 +106,9 @@ func Parse(r io.Reader, baseDir, source string, depth int) ([]RawHostBlock, []Wa
 		}
 		if !mappedKeys[lk] {
 			if warnOnlyKeys[lk] {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: 指令 %s 未导入（Host %s）", source, key, strings.Join(cur.Patterns, " "))})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: directive %s not imported (Host %s)", source, key, strings.Join(cur.Patterns, " "))})
 			} else {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: 未知/未支持指令 %s（Host %s）", source, key, strings.Join(cur.Patterns, " "))})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: unknown/unsupported directive %s (Host %s)", source, key, strings.Join(cur.Patterns, " "))})
 			}
 			continue
 		}
@@ -127,7 +127,7 @@ func parseIncludes(pattern, baseDir string, depth int) ([]RawHostBlock, []Warnin
 	for _, p := range strings.Fields(pattern) {
 		expanded, err := ExpandPath(p)
 		if err != nil {
-			warnings = append(warnings, Warning{Message: fmt.Sprintf("Include 路径展开失败 %s: %v", p, err)})
+			warnings = append(warnings, Warning{Message: fmt.Sprintf("Include path expand failed %s: %v", p, err)})
 			expanded = p
 		}
 		if !filepath.IsAbs(expanded) {
@@ -138,14 +138,14 @@ func parseIncludes(pattern, baseDir string, depth int) ([]RawHostBlock, []Warnin
 			return all, warnings, err
 		}
 		if len(matches) == 0 {
-			warnings = append(warnings, Warning{Message: fmt.Sprintf("Include 无匹配: %s", expanded)})
+			warnings = append(warnings, Warning{Message: fmt.Sprintf("Include matched nothing: %s", expanded)})
 			continue
 		}
 		for _, m := range matches {
 			b, w, err := parseFileAtDepth(m, depth)
 			warnings = append(warnings, w...)
 			if err != nil {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("Include 读取失败 %s: %v", m, err)})
+				warnings = append(warnings, Warning{Message: fmt.Sprintf("Include read failed %s: %v", m, err)})
 				continue
 			}
 			all = append(all, b...)

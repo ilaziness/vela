@@ -63,7 +63,7 @@ func finalizeAuthMethods(methods []cryptossh.AuthMethod, keyboard cryptossh.Auth
 		methods = append(methods, keyboard)
 	}
 	if len(methods) == 0 {
-		return nil, fmt.Errorf("没有可用认证")
+		return nil, ErrNoAuthMethods
 	}
 	return methods, nil
 }

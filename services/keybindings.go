@@ -1,8 +1,6 @@
 package services
 
 import (
-	"errors"
-	"fmt"
 	"runtime"
 	"sort"
 	"strings"
@@ -13,6 +11,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -36,8 +36,8 @@ const (
 )
 
 const (
-	CategoryTerminal = "终端"
-	CategoryPanel    = "面板"
+	CategoryTerminal = "keybinding.category.terminal"
+	CategoryPanel    = "keybinding.category.panel"
 )
 
 type ShortcutEvent struct {
@@ -56,11 +56,11 @@ type KeyBindingInfo struct {
 }
 
 type bindingDef struct {
-	action   string
-	logical  string // CmdOrCtrl[+Shift]+Key 或 CmdOrCtrl+,
-	label    string
-	category string
-	toggle   func(*Windows) // 非空则 Go 侧 Toggle；空则向聚焦窗口派发 action
+	action      string
+	logical     string // CmdOrCtrl[+Shift]+Key 或 CmdOrCtrl+,
+	labelKey    string
+	categoryKey string
+	toggle      func(*Windows) // 非空则 Go 侧 Toggle；空则向聚焦窗口派发 action
 }
 
 func init() {
@@ -71,20 +71,20 @@ func init() {
 func builtinBindings() []bindingDef {
 	return []bindingDef{
 		// 终端：复制/粘贴沿用常见终端约定；查找/设置沿用编辑器约定。
-		{action: ShortcutTerminalFind, logical: "CmdOrCtrl+F", label: "查找", category: CategoryTerminal},
-		{action: ShortcutTerminalCopy, logical: "CmdOrCtrl+Shift+C", label: "复制", category: CategoryTerminal},
-		{action: ShortcutTerminalPaste, logical: "CmdOrCtrl+Shift+V", label: "粘贴", category: CategoryTerminal},
-		{action: ShortcutTerminalAddToChat, logical: "CmdOrCtrl+Shift+L", label: "添加到聊天", category: CategoryTerminal},
+		{action: ShortcutTerminalFind, logical: "CmdOrCtrl+F", labelKey: "keybinding.terminal.find", categoryKey: CategoryTerminal},
+		{action: ShortcutTerminalCopy, logical: "CmdOrCtrl+Shift+C", labelKey: "keybinding.terminal.copy", categoryKey: CategoryTerminal},
+		{action: ShortcutTerminalPaste, logical: "CmdOrCtrl+Shift+V", labelKey: "keybinding.terminal.paste", categoryKey: CategoryTerminal},
+		{action: ShortcutTerminalAddToChat, logical: "CmdOrCtrl+Shift+L", labelKey: "keybinding.terminal.addToChat", categoryKey: CategoryTerminal},
 		// 不用 Ctrl+Shift+R（浏览器强刷）；不用 Ctrl+Alt+*（欧陆键盘 AltGr=Ctrl+Alt）。
-		{action: ShortcutTerminalToggleLog, logical: "CmdOrCtrl+Shift+Y", label: "开始/停止记录", category: CategoryTerminal},
-		{action: ShortcutTerminalClear, logical: "CmdOrCtrl+Shift+K", label: "清屏", category: CategoryTerminal},
-		{action: ShortcutPanelAI, logical: "CmdOrCtrl+Shift+A", label: "打开/关闭 AI 助手", category: CategoryPanel},
-		{action: ShortcutPanelBookmarkConnect, logical: "CmdOrCtrl+B", label: "打开/关闭书签连接面板", category: CategoryPanel},
-		{action: ShortcutPanelBookmarks, logical: "CmdOrCtrl+Shift+B", label: "打开/关闭书签管理", category: CategoryPanel},
-		{action: ShortcutPanelCommand, logical: "CmdOrCtrl+Shift+P", label: "打开/关闭命令面板", category: CategoryPanel, toggle: (*Windows).ToggleCommand},
+		{action: ShortcutTerminalToggleLog, logical: "CmdOrCtrl+Shift+Y", labelKey: "keybinding.terminal.toggleLog", categoryKey: CategoryTerminal},
+		{action: ShortcutTerminalClear, logical: "CmdOrCtrl+Shift+K", labelKey: "keybinding.terminal.clear", categoryKey: CategoryTerminal},
+		{action: ShortcutPanelAI, logical: "CmdOrCtrl+Shift+A", labelKey: "keybinding.panel.ai", categoryKey: CategoryPanel},
+		{action: ShortcutPanelBookmarkConnect, logical: "CmdOrCtrl+B", labelKey: "keybinding.panel.bookmarkConnect", categoryKey: CategoryPanel},
+		{action: ShortcutPanelBookmarks, logical: "CmdOrCtrl+Shift+B", labelKey: "keybinding.panel.bookmarks", categoryKey: CategoryPanel},
+		{action: ShortcutPanelCommand, logical: "CmdOrCtrl+Shift+P", labelKey: "keybinding.panel.command", categoryKey: CategoryPanel, toggle: (*Windows).ToggleCommand},
 		// 不用 Ctrl+Shift+T：与浏览器「恢复关闭的标签」冲突。
-		{action: ShortcutPanelTools, logical: "CmdOrCtrl+Shift+U", label: "打开/关闭工具面板", category: CategoryPanel, toggle: (*Windows).ToggleTool},
-		{action: ShortcutPanelSettings, logical: "CmdOrCtrl+,", label: "打开/关闭设置", category: CategoryPanel, toggle: (*Windows).ToggleSetting},
+		{action: ShortcutPanelTools, logical: "CmdOrCtrl+Shift+U", labelKey: "keybinding.panel.tools", categoryKey: CategoryPanel, toggle: (*Windows).ToggleTool},
+		{action: ShortcutPanelSettings, logical: "CmdOrCtrl+,", labelKey: "keybinding.panel.settings", categoryKey: CategoryPanel, toggle: (*Windows).ToggleSetting},
 	}
 }
 
@@ -271,8 +271,8 @@ func (m *KeyBindingManager) List() []KeyBindingInfo {
 			Logical:     logical,
 			DefaultKeys: displayKeys(d.logical),
 			Custom:      custom,
-			Label:       d.label,
-			Category:    d.category,
+			Label:       i18n.T(d.labelKey),
+			Category:    i18n.T(d.categoryKey),
 		})
 	}
 	return out
@@ -296,7 +296,7 @@ func (m *KeyBindingManager) Set(action, logical string) error {
 
 	def, ok := m.defs[action]
 	if !ok {
-		return fmt.Errorf("未知快捷键操作: %s", action)
+		return usererr.Coded("keybinding.unknown_action", "Unknown shortcut action: %s", action)
 	}
 
 	logical = strings.TrimSpace(logical)
@@ -336,9 +336,9 @@ func (m *KeyBindingManager) Set(action, logical string) error {
 		if normalizeAccel(cur) == newNorm {
 			label := act
 			if d, ok := m.defs[act]; ok {
-				label = d.label
+				label = i18n.T(d.labelKey)
 			}
-			return fmt.Errorf("快捷键与「%s」冲突", label)
+			return usererr.Coded("keybinding.conflict", "Shortcut conflicts with \"%s\"", label)
 		}
 	}
 
@@ -373,7 +373,7 @@ func (m *KeyBindingManager) ResetAll() error {
 		m.store.Config.Keybindings = nil
 		if err := m.store.Save(); err != nil {
 			m.store.Config.Keybindings = prev
-			return fmt.Errorf("保存快捷键失败: %w", err)
+			return usererr.Coded("keybinding.save_failed", "Failed to save shortcuts: %s", err.Error())
 		}
 	}
 
@@ -415,7 +415,7 @@ func (m *KeyBindingManager) writeOverrideLocked(action, logical string) error {
 	if err := m.store.Save(); err != nil {
 		m.store.Config.Keybindings = prev
 		m.logger.Error("save keybindings failed", zap.Error(err))
-		return fmt.Errorf("保存快捷键失败: %w", err)
+		return usererr.Coded("keybinding.save_failed", "Failed to save shortcuts: %s", err.Error())
 	}
 	return nil
 }
@@ -560,15 +560,15 @@ func isNamedKey(key string) bool {
 func validateLogical(logical string) error {
 	logical = strings.TrimSpace(logical)
 	if logical == "" {
-		return errors.New("快捷键不能为空")
+		return usererr.Coded("keybinding.empty", "Shortcut cannot be empty")
 	}
 	parts := strings.Split(logical, "+")
 	if len(parts) == 0 {
-		return errors.New("无效的快捷键")
+		return usererr.Coded("keybinding.invalid", "Invalid shortcut")
 	}
 	key := strings.TrimSpace(parts[len(parts)-1])
 	if key == "" {
-		return errors.New("无效的快捷键")
+		return usererr.Coded("keybinding.invalid", "Invalid shortcut")
 	}
 	hasPrimary := false
 	hasAlt := false
@@ -581,7 +581,7 @@ func validateLogical(logical string) error {
 		case "shift":
 			// Shift alone is not enough; tracked only so the chord parses.
 		default:
-			return fmt.Errorf("不支持的修饰键: %s", p)
+			return usererr.Coded("keybinding.unsupported_modifier", "Unsupported modifier: %s", p)
 		}
 	}
 	isFunc := len(key) >= 2 && (key[0] == 'F' || key[0] == 'f')
@@ -601,11 +601,11 @@ func validateLogical(logical string) error {
 		}
 	}
 	if isNamedKey(key) && strings.EqualFold(key, "Escape") {
-		return errors.New("不能绑定 Escape")
+		return usererr.Coded("keybinding.no_escape", "Cannot bind Escape")
 	}
 	// 禁止仅 Shift+字母（会抢走普通输入）；需 Ctrl/Cmd、Alt 或功能键。
 	if !hasPrimary && !hasAlt && !isFunc {
-		return errors.New("快捷键需包含 Ctrl/Cmd 或 Alt，或为功能键")
+		return usererr.Coded("keybinding.need_modifier", "Shortcut must include Ctrl/Cmd or Alt, or be a function key")
 	}
 	if len(key) == 1 {
 		r := rune(key[0])
@@ -620,7 +620,7 @@ func validateLogical(logical string) error {
 	if (hasPrimary || hasAlt) && len(key) >= 1 {
 		return nil
 	}
-	return fmt.Errorf("不支持的按键: %s", key)
+	return usererr.Coded("keybinding.unsupported_key", "Unsupported key: %s", key)
 }
 
 // normalizeAccel 将逻辑加速键转为 KeyBinding.Add 可用的平台字符串。

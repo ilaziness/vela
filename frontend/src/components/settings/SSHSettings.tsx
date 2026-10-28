@@ -16,8 +16,9 @@ import {
   Config,
   ConfigService,
 } from "../../../bindings/github.com/ilaziness/vela/services";
-import { parseCallServiceError } from "../../func/service";
+import { translateServiceError } from "../../func/service";
 import { ProxyType } from "../../types/proxy";
+import { t } from "../../i18n";
 
 interface SSHSettingsProps {
   config: Config["SSH"];
@@ -58,18 +59,18 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
   const validateConfig = (): string[] => {
     const errors: string[] = [];
     if (localConfig.serverAliveInterval < 0) {
-      errors.push("心跳间隔不能为负数（0 表示关闭）");
+      errors.push(t("settings.ssh.keepalive_negative"));
     }
     if (!localConfig.dialTimeoutSec || localConfig.dialTimeoutSec < 1) {
-      errors.push("拨号超时必须大于等于 1 秒");
+      errors.push(t("settings.ssh.dial_timeout_min"));
     }
     if (proxyEnabled) {
       if (!localConfig.proxyHost?.trim()) {
-        errors.push("代理主机不能为空");
+        errors.push(t("settings.ssh.proxy_host_required"));
       }
       const port = localConfig.proxyPort ?? 0;
       if (port < 1 || port > 65535) {
-        errors.push("代理端口必须在 1–65535 之间");
+        errors.push(t("settings.ssh.proxy_port_range"));
       }
     }
     return errors;
@@ -92,23 +93,32 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
         toSave.proxyPassword = "";
       }
       await ConfigService.SaveSSHConfig(toSave);
-      successMessage("连接配置保存成功");
+      successMessage(t("settings.ssh.save_success"));
     } catch (error) {
       console.error("Failed to save SSH config:", error);
-      errorMessage(parseCallServiceError(error) || "连接配置保存失败");
+      errorMessage(
+        translateServiceError(error) || t("settings.ssh.save_failed"),
+      );
     } finally {
       setSaving(false);
     }
   };
 
+  const renderProxyType = (selected: unknown) => {
+    const v = String(selected ?? "");
+    if (v === ProxyType.Http) return "HTTP";
+    if (v === ProxyType.Socks5) return "SOCKS5";
+    return t("settings.ssh.proxy_off");
+  };
+
   return (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ mb: 3, fontWeight: 600 }}>
-        连接设置
+        {t("settings.ssh.title")}
       </Typography>
       <Paper sx={{ p: 2 }} elevation={1}>
         <Stack spacing={1.5}>
-          <FormRow label="心跳间隔（秒）">
+          <FormRow label={t("settings.ssh.keepalive_sec")}>
             <TextField
               fullWidth
               size="small"
@@ -127,10 +137,10 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
                   Number.isNaN(value) ? 0 : value,
                 );
               }}
-              helperText="对应 ServerAliveInterval，0 表示关闭保活"
+              helperText={t("settings.ssh.keepalive_helper")}
             />
           </FormRow>
-          <FormRow label="拨号超时（秒）">
+          <FormRow label={t("settings.ssh.dial_timeout_sec")}>
             <TextField
               fullWidth
               size="small"
@@ -151,7 +161,7 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
               }}
             />
           </FormRow>
-          <FormRow label="自动重连">
+          <FormRow label={t("settings.ssh.auto_reconnect")}>
             <FormControlLabel
               control={
                 <Switch
@@ -161,13 +171,17 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
                   }
                 />
               }
-              label={localConfig.autoReconnect ? "已开启" : "已关闭"}
+              label={
+                localConfig.autoReconnect
+                  ? t("common.enabled")
+                  : t("common.disabled")
+              }
             />
           </FormRow>
           <Typography variant="subtitle2" sx={{ pt: 1, fontWeight: 600 }}>
-            拨号代理
+            {t("settings.ssh.dial_proxy")}
           </Typography>
-          <FormRow label="代理类型">
+          <FormRow label={t("settings.ssh.proxy_type")}>
             <TextField
               select
               fullWidth
@@ -179,33 +193,30 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
               slotProps={{
                 select: {
                   displayEmpty: true,
-                  renderValue: (selected) => {
-                    const v = String(selected ?? "");
-                    if (v === ProxyType.Http) return "HTTP";
-                    if (v === ProxyType.Socks5) return "SOCKS5";
-                    return "关闭";
-                  },
+                  renderValue: renderProxyType,
                 },
               }}
-              helperText="仅用于 SSH 拨号，与系统代理无关"
+              helperText={t("settings.ssh.proxy_helper")}
             >
-              <MenuItem value={ProxyType.None}>关闭</MenuItem>
+              <MenuItem value={ProxyType.None}>
+                {t("settings.ssh.proxy_off")}
+              </MenuItem>
               <MenuItem value={ProxyType.Http}>HTTP</MenuItem>
               <MenuItem value={ProxyType.Socks5}>SOCKS5</MenuItem>
             </TextField>
           </FormRow>
           {proxyEnabled && (
             <>
-              <FormRow label="代理主机">
+              <FormRow label={t("settings.ssh.proxy_host")}>
                 <TextField
                   fullWidth
                   size="small"
                   value={localConfig.proxyHost ?? ""}
                   onChange={(e) => handleChange("proxyHost", e.target.value)}
-                  placeholder="例如: 127.0.0.1 或 proxy.example.com"
+                  placeholder={t("settings.ssh.proxy_host_placeholder")}
                 />
               </FormRow>
-              <FormRow label="代理端口">
+              <FormRow label={t("settings.ssh.proxy_port")}>
                 <TextField
                   fullWidth
                   size="small"
@@ -224,16 +235,16 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
                   }}
                 />
               </FormRow>
-              <FormRow label="用户名">
+              <FormRow label={t("settings.ssh.proxy_username")}>
                 <TextField
                   fullWidth
                   size="small"
                   value={localConfig.proxyUser ?? ""}
                   onChange={(e) => handleChange("proxyUser", e.target.value)}
-                  placeholder="可选"
+                  placeholder={t("common.optional")}
                 />
               </FormRow>
-              <FormRow label="密码">
+              <FormRow label={t("settings.ssh.proxy_password")}>
                 <TextField
                   fullWidth
                   size="small"
@@ -242,7 +253,7 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
                   onChange={(e) =>
                     handleChange("proxyPassword", e.target.value)
                   }
-                  placeholder="可选"
+                  placeholder={t("common.optional")}
                 />
               </FormRow>
             </>
@@ -250,7 +261,7 @@ const SSHSettings: React.FC<SSHSettingsProps> = ({ config }) => {
         </Stack>
         <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 3 }}>
           <Button variant="contained" onClick={handleSave} loading={saving}>
-            保存
+            {t("common.save")}
           </Button>
         </Box>
       </Paper>

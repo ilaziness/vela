@@ -29,7 +29,12 @@ import {
 } from "../../bindings/github.com/ilaziness/vela/internal/tunnel/models";
 import { SSHTunnelService } from "../../bindings/github.com/ilaziness/vela/services";
 import TunnelForm from "./TunnelForm";
-import { parseCallServiceError } from "../func/service";
+import { t, tf } from "../i18n";
+import {
+  getTunnelTypeName,
+  type TunnelType,
+} from "../func/validation";
+import { translateServiceError } from "../func/service";
 
 interface SSHTunnelProps {
   sessionID: string;
@@ -61,7 +66,7 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
       const groups = await SSHTunnelService.TunnelList();
       setTunnelGroups(groups ?? []);
     } catch (err) {
-      errorMessage("获取隧道列表失败");
+      errorMessage(t("tunnel.list_failed"));
       console.error("Failed to fetch tunnel list:", err);
     } finally {
       setLoading(false);
@@ -95,10 +100,10 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
     setStoppingIds((prev) => new Set(prev).add(tunnelId));
     try {
       await SSHTunnelService.StopByID(tunnelId);
-      successMessage("隧道停止成功");
+      successMessage(t("tunnel.stop_success"));
       fetchTunnelList();
     } catch (err) {
-      errorMessage(`停止隧道失败：${parseCallServiceError(err)}`);
+      errorMessage(t("tunnel.stop_failed", translateServiceError(err)));
       console.error("Failed to stop tunnel:", err);
     } finally {
       setStoppingIds((prev) => {
@@ -111,22 +116,23 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
 
   // 获取隧道类型显示信息
   const getTunnelTypeInfo = (type: string) => {
+    const tunnelType = type as TunnelType;
     switch (type) {
       case "local":
         return {
-          label: "本地端口转发",
+          label: getTunnelTypeName(tunnelType),
           icon: <Lan />,
           color: "primary" as const,
         };
       case "remote":
         return {
-          label: "远程端口转发",
+          label: getTunnelTypeName(tunnelType),
           icon: <SettingsEthernet />,
           color: "secondary" as const,
         };
       case "dynamic":
         return {
-          label: "动态端口转发",
+          label: getTunnelTypeName(tunnelType),
           icon: <Public />,
           color: "info" as const,
         };
@@ -174,15 +180,15 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
             />
             <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
               <Typography variant="body2" sx={{ fontWeight: "medium" }}>
-                本地地址: {tunnel.localAddr}
+                {tf("tunnel.local_addr", tunnel.localAddr)}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                远程地址: {tunnel.remoteAddr}
+                {tf("tunnel.remote_addr", tunnel.remoteAddr)}
               </Typography>
             </Box>
           </Box>
 
-          <Tooltip title="停止隧道">
+          <Tooltip title={t("tunnel.stop")}>
             <span>
               <IconButton
                 size="small"
@@ -215,10 +221,10 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
       return (
         <Box sx={{ p: 3, textAlign: "center" }}>
           <Typography variant="body2" color="text.secondary">
-            暂无隧道
+            {t("tunnel.no_tunnels")}
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
-            点击右上角 + 按钮创建隧道
+            {t("tunnel.create_hint")}
           </Typography>
         </Box>
       );
@@ -294,10 +300,10 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
               }}
             >
               <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
-                SSH 隧道管理
+                {t("tunnel.manage_title")}
               </Typography>
               <Box sx={{ display: "flex", gap: 1 }}>
-                <Tooltip title="创建隧道">
+                <Tooltip title={t("tunnel.create")}>
                   <IconButton
                     onClick={handleFormOpen}
                     size="small"
@@ -306,7 +312,7 @@ const SSHTunnel: React.FC<SSHTunnelProps> = ({
                     <Add fontSize="small" />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="关闭">
+                <Tooltip title={t("common.close")}>
                   <IconButton onClick={onClose} size="small">
                     <Close fontSize="small" />
                   </IconButton>

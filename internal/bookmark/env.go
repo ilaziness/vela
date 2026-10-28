@@ -2,8 +2,9 @@ package bookmark
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 // ParseEnvVars decodes a JSON object stored in bookmarks.env_vars.
@@ -15,7 +16,7 @@ func ParseEnvVars(raw string) (map[string]string, error) {
 	}
 	var m map[string]string
 	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		return nil, fmt.Errorf("环境变量 JSON 无效: %w", err)
+		return nil, usererr.Coded("bookmark.env_json_invalid", "Invalid environment variables JSON: %s", err.Error())
 	}
 	if m == nil {
 		return map[string]string{}, nil
@@ -49,7 +50,7 @@ func FormatEnvVars(m map[string]string) (string, error) {
 	}
 	b, err := json.Marshal(clean)
 	if err != nil {
-		return "", fmt.Errorf("环境变量编码失败: %w", err)
+		return "", usererr.Coded("bookmark.env_encode_failed", "Failed to encode environment variables: %s", err.Error())
 	}
 	return string(b), nil
 }

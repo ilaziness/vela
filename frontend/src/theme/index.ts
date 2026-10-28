@@ -8,6 +8,7 @@ import eyeCare from "./eyeCare";
 import { darkTokens, eyeCareTokens, lightTokens } from "./paletteTokens";
 import { CODE_FONT_FAMILY, CODE_TYPOGRAPHY } from "./typography";
 import { AppTheme } from "../types/ssh";
+import { AppLanguage, muiLocaleFor, t as translate } from "../i18n";
 
 declare module "@mui/material/styles" {
   interface ColorSchemeOverrides {
@@ -66,23 +67,28 @@ export interface ThemeOption {
 export const ThemeOptions: ThemeOption[] = [
   {
     value: "light",
-    label: "日间",
+    label: "theme.light",
     mode: "light",
     color: lightTokens.primary,
   },
   {
     value: "dark",
-    label: "夜间",
+    label: "theme.dark",
     mode: "dark",
     color: darkTokens.secondary,
   },
   {
     value: "eyeCare",
-    label: "护眼",
+    label: "theme.eyeCare",
     mode: "light",
     color: eyeCareTokens.primary,
   },
 ];
+
+/** Localized label for a ThemeOptions entry (label stores i18n key). */
+export function themeOptionLabel(option: ThemeOption): string {
+  return translate(option.label);
+}
 
 const SYSTEM_FONT_FAMILY = [
   "-apple-system",
@@ -135,91 +141,98 @@ function appScrollbarColors(theme: Theme) {
 /**
  * SSH GUI 客户端主题配置
  */
-export function createAppTheme(font = "", fontSize = 14) {
-  return createTheme({
-  colorSchemes: {
-    light,
-    dark: createColorScheme(dark),
-    eyeCare: createColorScheme(eyeCare),
-  },
+export function createAppTheme(
+  font = "",
+  fontSize = 14,
+  lang: AppLanguage = AppLanguage.En,
+) {
+  return createTheme(
+    {
+      colorSchemes: {
+        light,
+        dark: createColorScheme(dark),
+        eyeCare: createColorScheme(eyeCare),
+      },
 
-  components: {
-    MuiCssBaseline: {
-      styleOverrides: (theme: Theme) => {
-        const { thumb, track } = appScrollbarColors(theme);
-        return {
-          html: {
-            fontSize,
-            scrollbarWidth: "thin",
-            scrollbarColor: `${thumb} ${track}`,
+      components: {
+        MuiCssBaseline: {
+          styleOverrides: (theme: Theme) => {
+            const { thumb, track } = appScrollbarColors(theme);
+            return {
+              html: {
+                fontSize,
+                scrollbarWidth: "thin",
+                scrollbarColor: `${thumb} ${track}`,
+              },
+            };
           },
-        };
-      },
-    },
-    MuiChatMessageList: {
-      styleOverrides: {
-        scroller: ({ theme: t }) => {
-          const { thumb, track } = appScrollbarColors(t);
-          return {
-            scrollbarColor: `${thumb} ${track}`,
-          };
         },
-      },
-    },
-    MuiChatBox: {
-      styleOverrides: {
-        threadPane: ({ theme: t }) => ({
-          backgroundColor: t.palette.background.default,
-        }),
-      },
-    },
-    MuiChatCodeBlock: {
-      styleOverrides: {
-        languageLabel: {
-          fontFamily: CODE_FONT_FAMILY,
+        MuiChatMessageList: {
+          styleOverrides: {
+            scroller: ({ theme }) => {
+              const { thumb, track } = appScrollbarColors(theme);
+              return {
+                scrollbarColor: `${thumb} ${track}`,
+              };
+            },
+          },
         },
-        pre: {
-          fontFamily: CODE_FONT_FAMILY,
-          lineHeight: CODE_TYPOGRAPHY.lineHeight,
-        },
-        code: {
-          fontFamily: CODE_FONT_FAMILY,
-          fontSize: "0.8125rem",
-          lineHeight: CODE_TYPOGRAPHY.lineHeight,
-        },
-      },
-    },
-    MuiChatMessage: {
-      styleOverrides: {
-        bubble: ({ theme: t, ownerState }) => ({
-          borderRadius: 12,
-          ...(ownerState?.role === "assistant" &&
-            t.palette.background.default === eyeCareTokens.bgDefault && {
-              border: `1px solid ${eyeCareTokens.assistantBubbleBorder}`,
+        MuiChatBox: {
+          styleOverrides: {
+            threadPane: ({ theme }) => ({
+              backgroundColor: theme.palette.background.default,
             }),
-          "& a": chatMarkdownLinkStyles(t, ownerState?.role === "user"),
-          "& code": CODE_TYPOGRAPHY,
-          "& pre": {
-            fontFamily: CODE_FONT_FAMILY,
-            lineHeight: CODE_TYPOGRAPHY.lineHeight,
           },
-        }),
-        content: ({ theme: t }) => ({
-          "& a": chatMarkdownLinkStyles(t),
-          "& code": CODE_TYPOGRAPHY,
-          "& pre": {
-            fontFamily: CODE_FONT_FAMILY,
-            lineHeight: CODE_TYPOGRAPHY.lineHeight,
+        },
+        MuiChatCodeBlock: {
+          styleOverrides: {
+            languageLabel: {
+              fontFamily: CODE_FONT_FAMILY,
+            },
+            pre: {
+              fontFamily: CODE_FONT_FAMILY,
+              lineHeight: CODE_TYPOGRAPHY.lineHeight,
+            },
+            code: {
+              fontFamily: CODE_FONT_FAMILY,
+              fontSize: "0.8125rem",
+              lineHeight: CODE_TYPOGRAPHY.lineHeight,
+            },
           },
-        }),
+        },
+        MuiChatMessage: {
+          styleOverrides: {
+            bubble: ({ theme, ownerState }) => ({
+              borderRadius: 12,
+              ...(ownerState?.role === "assistant" &&
+                theme.palette.background.default === eyeCareTokens.bgDefault && {
+                  border: `1px solid ${eyeCareTokens.assistantBubbleBorder}`,
+                }),
+              "& a": chatMarkdownLinkStyles(theme, ownerState?.role === "user"),
+              "& code": CODE_TYPOGRAPHY,
+              "& pre": {
+                fontFamily: CODE_FONT_FAMILY,
+                lineHeight: CODE_TYPOGRAPHY.lineHeight,
+              },
+            }),
+            content: ({ theme }) => ({
+              "& a": chatMarkdownLinkStyles(theme),
+              "& code": CODE_TYPOGRAPHY,
+              "& pre": {
+                fontFamily: CODE_FONT_FAMILY,
+                lineHeight: CODE_TYPOGRAPHY.lineHeight,
+              },
+            }),
+          },
+        },
+      },
+
+      typography: {
+        fontFamily: appFontFamily(font),
+        fontSize,
+        htmlFontSize: fontSize,
       },
     },
-  },
-
-    typography: {
-      fontFamily: appFontFamily(font),
-      fontSize,
-      htmlFontSize: fontSize,
-    },
-  });
+    muiLocaleFor(lang),
+  );
 }

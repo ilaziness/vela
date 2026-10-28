@@ -50,6 +50,8 @@
 │   ├── sync/                 # 同步客户端
 │   ├── tools/                # 编解码/哈希/端口
 │   ├── database/             # SQLite
+│   ├── i18n/                 # 多语言 leaf（embed 三语 JSON；T/Tf/Catalog/SetLanguage）
+│   ├── usererr/              # RPC 用户错误契约（code+params）
 │   ├── buildinfo/            # ldflags 构建信息
 │   ├── system/               # 可执行目录、SafeGo
 │   └── utils/
@@ -68,7 +70,7 @@
 │   ├── specs/                # 功能规格定义
 │   └── changes/              # 变更提案（含 archive/ 归档）
 ├── docs/                     # 项目文档
-├── data/                     # 内置默认数据（如 commands.json）
+├── data/                     # 内置默认数据（如 commands/{en,zh-CN,zh-TW}.json）
 ├── frontend/                 # 前端 React 项目
 │   ├── bindings/             # Go 绑定（wails3 generate bindings -ts 生成）
 │   │   └── github.com/ilaziness/vela/services/  # 暴露给前端的函数、类型等
@@ -80,7 +82,7 @@
 │   │   │   └── subwindow/    # 子窗口组件
 │   │   ├── func/             # 功能函数（decode、service、validation 等）
 │   │   ├── hooks/            # 自定义 React Hooks
-│   │   ├── language/         # 多语言翻译文件
+│   │   ├── i18n/             # 前端 catalog 缓存与 t()/tf()（唯一源在 Go embed）
 │   │   ├── pages/            # 页面级组件（配合 React Router）
 │   │   ├── stores/           # 状态管理（zustand）
 │   │   ├── theme/            # 主题配色
@@ -112,6 +114,13 @@
 - 日志：组合根创建 `*zap.Logger` 并注入 `NewXxx(logger)`；前端仍用 `LogService`。
 - 可单独封装的包放在 `internal` 下；不为小函数膨胀 `utils`。
 - 和前端交互的导出方法放在 `services`，方法名保持稳定。
+
+### 0. 多语言（i18n）
+
+- 翻译唯一源：`internal/i18n/locales/{en,zh-CN,zh-TW}.json`（embed）；`internal/i18n` 为 leaf，禁止 import `config` / `services` / Wails。
+- 语言写入唯一路径：`ConfigService.SetLanguage`；`SaveGeneralConfig` 保留内存中的 `Language`（与 Theme 同理）。
+- 前端：`GetI18nBootstrap` 拉 catalog，本地 `t()`/`tf()` 查表；订阅 `eventLanguage` 再拉 bootstrap。禁止按 key 逐条 RPC。
+- 用户可见 RPC 错误：优先稳定 `code` + `params`（`internal/usererr`）；前端用 `translateServiceError`；原生对话框/窗体标题在 `services` 边界用 `i18n.T`。
 
 适当位置添加注释，不要太多。
 

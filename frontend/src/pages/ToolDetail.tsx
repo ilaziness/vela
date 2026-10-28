@@ -2,6 +2,7 @@ import React, { Suspense } from "react";
 import { useParams } from "react-router";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import ToolLayout from "../components/ToolLayout";
+import { tf } from "../i18n";
 
 const toolComponents: Record<
   string,
@@ -41,7 +42,7 @@ export default function ToolDetail() {
       ) : (
         <Box sx={{ textAlign: "center", mt: 8 }}>
           <Typography variant="h6" color="text.secondary">
-            未知工具: {toolId}
+            {tf("tools.unknown", toolId ?? "")}
           </Typography>
         </Box>
       )}

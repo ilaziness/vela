@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // FormatResult JSON/YAML 处理结果
@@ -19,7 +21,7 @@ type FormatResult struct {
 func (ts *Service) FormatJSONYAML(action string, input string) FormatResult {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return FormatResult{Success: false, Error: "输入内容不能为空"}
+		return FormatResult{Success: false, Error: i18n.T("tool.err.input_empty")}
 	}
 
 	switch strings.ToLower(action) {
@@ -34,18 +36,18 @@ func (ts *Service) FormatJSONYAML(action string, input string) FormatResult {
 	case "yaml2json":
 		return yamlToJSON(input)
 	default:
-		return FormatResult{Success: false, Error: "不支持的操作: " + action}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.unsupported_action", action)}
 	}
 }
 
 func formatJSON(input string) FormatResult {
 	var v any
 	if err := json.Unmarshal([]byte(input), &v); err != nil {
-		return FormatResult{Success: false, Error: "JSON 解析失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.json_parse", err.Error())}
 	}
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return FormatResult{Success: false, Error: "JSON 格式化失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.json_format", err.Error())}
 	}
 	return FormatResult{Success: true, Result: string(out)}
 }
@@ -53,7 +55,7 @@ func formatJSON(input string) FormatResult {
 func minifyJSON(input string) FormatResult {
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, []byte(input)); err != nil {
-		return FormatResult{Success: false, Error: "JSON 压缩失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.json_minify", err.Error())}
 	}
 	return FormatResult{Success: true, Result: buf.String()}
 }
@@ -61,19 +63,19 @@ func minifyJSON(input string) FormatResult {
 func validateJSON(input string) FormatResult {
 	var v any
 	if err := json.Unmarshal([]byte(input), &v); err != nil {
-		return FormatResult{Success: false, Error: "无效的 JSON: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.invalid_json", err.Error())}
 	}
-	return FormatResult{Success: true, Result: "JSON 有效"}
+	return FormatResult{Success: true, Result: "Valid JSON"}
 }
 
 func jsonToYAML(input string) FormatResult {
 	var v any
 	if err := json.Unmarshal([]byte(input), &v); err != nil {
-		return FormatResult{Success: false, Error: "JSON 解析失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.json_parse", err.Error())}
 	}
 	out, err := yaml.Marshal(v)
 	if err != nil {
-		return FormatResult{Success: false, Error: "YAML 转换失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.yaml_convert", err.Error())}
 	}
 	return FormatResult{Success: true, Result: string(out)}
 }
@@ -81,11 +83,11 @@ func jsonToYAML(input string) FormatResult {
 func yamlToJSON(input string) FormatResult {
 	var v any
 	if err := yaml.Unmarshal([]byte(input), &v); err != nil {
-		return FormatResult{Success: false, Error: "YAML 解析失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.yaml_parse", err.Error())}
 	}
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return FormatResult{Success: false, Error: "JSON 转换失败: " + err.Error()}
+		return FormatResult{Success: false, Error: i18n.Tf("tool.err.json_convert", err.Error())}
 	}
 	return FormatResult{Success: true, Result: string(out)}
 }

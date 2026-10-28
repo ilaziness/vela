@@ -3,12 +3,15 @@ package command
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 type BuiltinCommand struct {
@@ -43,22 +46,51 @@ type Info struct {
 	IsCustom    bool   `json:"is_custom"`
 }
 
+// LocaleLoader returns builtin command JSON for a language tag (en / zh-CN / zh-TW).
+type LocaleLoader func(lang string) ([]byte, error)
+
 type Service struct {
 	logger  *zap.Logger
 	db      *database.Database
+	loader  LocaleLoader
+	mu      sync.RWMutex
 	builtin map[string][]BuiltinCommand
 	sendFn  func(sessionID, cmd string) error
 }
 
-func New(logger *zap.Logger, db *database.Database, builtinJSON []byte, sendFn func(sessionID, cmd string) error) *Service {
+func New(logger *zap.Logger, db *database.Database, loader LocaleLoader, sendFn func(sessionID, cmd string) error) *Service {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	s := &Service{logger: logger, db: db, sendFn: sendFn, builtin: map[string][]BuiltinCommand{}}
-	if err := s.load(builtinJSON); err != nil {
+	s := &Service{logger: logger, db: db, loader: loader, sendFn: sendFn, builtin: map[string][]BuiltinCommand{}}
+	if err := s.ReloadBuiltin(i18n.Language()); err != nil {
 		logger.Error("load builtin commands failed", zap.Error(err))
 	}
 	return s
+}
+
+// LoaderFromFS reads data/commands/{lang}.json (or {lang}.json) from an embed FS.
+func LoaderFromFS(fsys fs.FS, dir string) LocaleLoader {
+	dir = strings.Trim(dir, "/")
+	return func(lang string) ([]byte, error) {
+		lang = i18n.Normalize(lang)
+		candidates := []string{
+			dir + "/" + lang + ".json",
+			lang + ".json",
+		}
+		var last error
+		for _, path := range candidates {
+			data, err := fs.ReadFile(fsys, path)
+			if err == nil {
+				return data, nil
+			}
+			last = err
+		}
+		if lang != i18n.LangEn {
+			return LoaderFromFS(fsys, dir)(i18n.LangEn)
+		}
+		return nil, last
+	}
 }
 
 func (s *Service) load(data []byte) error {
@@ -66,10 +98,26 @@ func (s *Service) load(data []byte) error {
 	if err := json.Unmarshal(data, &categories); err != nil {
 		return fmt.Errorf("unmarshal builtin commands: %w", err)
 	}
+	next := make(map[string][]BuiltinCommand, len(categories))
 	for _, cat := range categories {
-		s.builtin[cat.Category] = cat.Commands
+		next[cat.Category] = cat.Commands
 	}
+	s.mu.Lock()
+	s.builtin = next
+	s.mu.Unlock()
 	return nil
+}
+
+// ReloadBuiltin reloads display strings for the given language. Shell commands stay identical across locales.
+func (s *Service) ReloadBuiltin(lang string) error {
+	if s.loader == nil {
+		return fmt.Errorf("builtin command loader not configured")
+	}
+	data, err := s.loader(lang)
+	if err != nil {
+		return err
+	}
+	return s.load(data)
 }
 
 func (s *Service) UserCommands() []UserCommand {
@@ -144,11 +192,20 @@ func (s *Service) ClearHistory() error {
 }
 
 func (s *Service) Builtin() map[string][]BuiltinCommand {
-	return s.builtin
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string][]BuiltinCommand, len(s.builtin))
+	for k, v := range s.builtin {
+		cp := make([]BuiltinCommand, len(v))
+		copy(cp, v)
+		out[k] = cp
+	}
+	return out
 }
 
 func (s *Service) All() map[string][]Info {
 	result := make(map[string][]Info)
+	s.mu.RLock()
 	for category, cmds := range s.builtin {
 		for _, cmd := range cmds {
 			result[category] = append(result[category], Info{
@@ -156,6 +213,7 @@ func (s *Service) All() map[string][]Info {
 			})
 		}
 	}
+	s.mu.RUnlock()
 	for _, cmd := range s.UserCommands() {
 		replaced := false
 		for i, existing := range result[cmd.Category] {

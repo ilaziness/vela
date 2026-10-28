@@ -10,6 +10,7 @@ import OpBar from "./OpBar.tsx";
 import { DraggableTab } from "./DraggableTab.tsx";
 import { useSSHContextMenu } from "../hooks/useSSHContextMenu";
 import { genTabIndex } from "../func/service";
+import { t, tf } from "../i18n";
 import {
   ProgressData,
   TransferQueuedData,
@@ -70,8 +71,8 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
       if (!ownsSession) return;
       infoMessage(
         data.count > 1
-          ? `已添加 ${data.count} 项到传输列表`
-          : "已添加到传输列表",
+          ? tf("transfer.added_n", data.count)
+          : t("transfer.added"),
       );
     });
 
@@ -249,9 +250,9 @@ export default function SSHTabs({ onClose }: SSHTabsProps) {
           anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
           transformOrigin={{ vertical: "top", horizontal: "center" }}
         >
-          <MenuItem onClick={handleCloseTab}>关闭</MenuItem>
-          <MenuItem onClick={handleDuplicateTab}>复制</MenuItem>
-          <MenuItem onClick={handleRefreshTab}>刷新</MenuItem>
+          <MenuItem onClick={handleCloseTab}>{t("common.close")}</MenuItem>
+          <MenuItem onClick={handleDuplicateTab}>{t("common.copy")}</MenuItem>
+          <MenuItem onClick={handleRefreshTab}>{t("common.refresh")}</MenuItem>
         </Menu>
       </Box>
 

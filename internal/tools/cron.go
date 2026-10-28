@@ -1,11 +1,12 @@
 package tools
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 // CronResult Cron 解析结果
@@ -19,7 +20,7 @@ type CronResult struct {
 func (ts *Service) ParseCron(expr string, count int) CronResult {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
-		return CronResult{Success: false, Error: "Cron 表达式不能为空"}
+		return CronResult{Success: false, Error: i18n.T("tool.err.cron_empty")}
 	}
 	if count <= 0 {
 		count = 5
@@ -33,7 +34,7 @@ func (ts *Service) ParseCron(expr string, count int) CronResult {
 	if err != nil {
 		return CronResult{
 			Success: false,
-			Error:   fmt.Sprintf("Cron 表达式无效: %s（支持 5 段或带秒的 6 段，以及 @hourly / @daily 等）", err.Error()),
+			Error:   i18n.Tf("tool.err.cron_invalid", err.Error()),
 		}
 	}
 

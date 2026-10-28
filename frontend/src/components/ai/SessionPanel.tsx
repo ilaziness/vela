@@ -24,30 +24,22 @@ import {
   resolveSSHBindState,
 } from '../../func/aiContext';
 import { getSidebarContentWidth } from '../../func/aiSidebar';
+import { displaySessionTitle, formatDateTime, t } from '../../i18n';
 
 interface SessionPanelProps {
   drawerContainer: HTMLDivElement | null;
 }
 
-function pad2(n: number): string {
-  return n.toString().padStart(2, '0');
-}
-
-function formatAbsoluteTime(unixSeconds: number): string {
-  const d = new Date(unixSeconds * 1000);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-}
-
 function formatRelativeTime(unixSeconds: number): string {
   const diff = Date.now() - unixSeconds * 1000;
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1) return t('ai.session.time_just_now');
+  if (minutes < 60) return t('ai.session.time_minutes_ago', minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
+  if (hours < 24) return t('ai.session.time_hours_ago', hours);
   const days = Math.floor(hours / 24);
-  if (days <= 7) return `${days} 天前`;
-  return formatAbsoluteTime(unixSeconds);
+  if (days <= 7) return t('ai.session.time_days_ago', days);
+  return formatDateTime(unixSeconds * 1000);
 }
 
 function useCurrentSSHIndicator(): { line: string; hint: string; status: CurrentSSHBindStatus } {
@@ -57,24 +49,28 @@ function useCurrentSSHIndicator(): { line: string; hint: string; status: Current
 
   switch (bind.status) {
     case CurrentSSHBindStatus.Connected:
-      return { status: bind.status, line: `SSH：${bind.targetLabel}`, hint: '' };
+      return {
+        status: bind.status,
+        line: t('ai.session.ssh_connected', bind.targetLabel),
+        hint: '',
+      };
     case CurrentSSHBindStatus.Connecting:
       return {
         status: bind.status,
-        line: `SSH：连接中… ${bind.targetLabel}`,
+        line: t('ai.session.ssh_connecting', bind.targetLabel),
         hint: '',
       };
     case CurrentSSHBindStatus.Disconnected:
       return {
         status: bind.status,
-        line: `SSH：已断开 ${bind.targetLabel}`,
-        hint: '当前无法执行远程命令',
+        line: t('ai.session.ssh_disconnected', bind.targetLabel),
+        hint: t('ai.session.ssh_disconnected_hint'),
       };
     default:
       return {
         status: CurrentSSHBindStatus.None,
-        line: 'SSH：无连接',
-        hint: '连接 SSH 后可执行远程命令',
+        line: t('ai.session.ssh_none'),
+        hint: t('ai.session.ssh_none_hint'),
       };
   }
 }
@@ -128,13 +124,23 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
             gap: 0.5,
           }}
         >
-          <Tooltip title={historyDrawerOpen ? '关闭会话历史' : '会话历史'}>
+          <Tooltip
+            title={
+              historyDrawerOpen
+                ? t('ai.session.history_close')
+                : t('ai.session.history')
+            }
+          >
             <span>
               <IconButton
                 size="small"
                 disabled={isStreaming || !drawerContainer}
                 onClick={toggleHistoryDrawer}
-                aria-label={historyDrawerOpen ? '关闭会话历史' : '打开会话历史'}
+                aria-label={
+                  historyDrawerOpen
+                    ? t('ai.session.history_close')
+                    : t('ai.session.history_open')
+                }
                 aria-expanded={historyDrawerOpen}
               >
                 <Menu fontSize="small" />
@@ -146,25 +152,25 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
             noWrap
             sx={{ flex: 1, fontWeight: 500, minWidth: 0 }}
           >
-            {activeSession?.title || '新会话'}
+            {displaySessionTitle(activeSession?.title)}
           </Typography>
-          <Tooltip title="新建会话">
+          <Tooltip title={t('ai.session.new')}>
             <span>
               <IconButton
                 size="small"
                 disabled={isStreaming}
                 onClick={() => void createSession()}
-                aria-label="新建会话"
+                aria-label={t('ai.session.new')}
               >
                 <Add fontSize="small" />
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title="关闭 AI 助手">
+          <Tooltip title={t('ai.session.close_assistant')}>
             <IconButton
               size="small"
               onClick={() => setSidebarOpen(false)}
-              aria-label="关闭 AI 助手"
+              aria-label={t('ai.session.close_assistant')}
             >
               <Close fontSize="small" />
             </IconButton>
@@ -244,9 +250,9 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
                 justifyContent: 'space-between',
               }}
             >
-              <Typography variant="subtitle2">会话历史</Typography>
+              <Typography variant="subtitle2">{t('ai.session.history')}</Typography>
               <Button size="small" onClick={() => setHistoryDrawerOpen(false)}>
-                关闭
+                {t('common.close')}
               </Button>
             </Box>
             <List sx={{ flex: 1, overflow: 'auto', py: 0 }}>
@@ -259,7 +265,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
                       edge="end"
                       size="small"
                       disabled={isStreaming}
-                      aria-label="删除会话"
+                      aria-label={t('ai.session.delete_title')}
                       onClick={() => setDeleteTargetId(session.id)}
                     >
                       <Delete fontSize="small" />
@@ -272,7 +278,7 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
                     onClick={() => selectSession(session.id)}
                   >
                     <ListItemText
-                      primary={session.title}
+                      primary={displaySessionTitle(session.title)}
                       secondary={formatRelativeTime(session.updatedAt)}
                       slotProps={{
                         primary: { noWrap: true },
@@ -288,16 +294,19 @@ const SessionPanel: React.FC<SessionPanelProps> = ({ drawerContainer }) => {
       )}
 
       <Dialog open={deleteTargetId !== null} onClose={() => setDeleteTargetId(null)}>
-        <DialogTitle>删除会话</DialogTitle>
+        <DialogTitle>{t('ai.session.delete_title')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            确定删除会话「{deleteTarget?.title || '新会话'}」？此操作不可撤销。
+            {t(
+              'ai.session.delete_confirm',
+              displaySessionTitle(deleteTarget?.title),
+            )}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteTargetId(null)}>取消</Button>
+          <Button onClick={() => setDeleteTargetId(null)}>{t('common.cancel')}</Button>
           <Button color="error" onClick={() => void handleConfirmDelete()}>
-            删除
+            {t('common.delete')}
           </Button>
         </DialogActions>
       </Dialog>

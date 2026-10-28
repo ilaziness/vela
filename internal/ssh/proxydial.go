@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"golang.org/x/net/proxy"
+
+	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 // ProxyConfig is an already-resolved dial proxy (HTTP CONNECT or SOCKS5).
@@ -33,17 +36,17 @@ func (p ProxyConfig) Enabled() bool {
 // Validate checks type/host/port. label prefixes error text.
 func (p ProxyConfig) Validate(label string) error {
 	if label == "" {
-		label = "代理"
+		label = i18n.T("proxy.label_default")
 	}
 	if !p.Enabled() {
 		typ := strings.ToLower(strings.TrimSpace(p.Type))
 		if typ != "http" && typ != "socks5" {
-			return fmt.Errorf("%s类型无效", label)
+			return usererr.Coded("proxy.type_invalid", "%s type is invalid", label)
 		}
 		if strings.TrimSpace(p.Host) == "" {
-			return fmt.Errorf("%s主机不能为空", label)
+			return usererr.Coded("proxy.host_empty", "%s host is required", label)
 		}
-		return fmt.Errorf("%s端口必须在 1–65535 之间", label)
+		return usererr.Coded("proxy.port_invalid", "%s port must be between 1 and 65535", label)
 	}
 	return nil
 }

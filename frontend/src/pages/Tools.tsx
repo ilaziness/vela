@@ -7,11 +7,18 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate } from "react-router";
+import { Events } from "@wailsio/runtime";
 import { useToolStore } from "../stores/tool";
 import { Tool } from "../types/tool";
 import OpBar from "../components/OpBar";
 import { getToolIcon } from "../func/toolIcons";
 import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
+import { t } from "../i18n";
+import {
+  displayToolCategory,
+  displayToolDescription,
+  displayToolName,
+} from "../func/toolDisplay";
 
 interface ToolCardProps {
   readonly tool: Tool;
@@ -50,17 +57,17 @@ function ToolCard({ tool, onClick }: ToolCardProps) {
           <IconComponent sx={{ fontSize: 32, color: "white" }} />
         </Box>
         <Typography variant="h6" gutterBottom>
-          {tool.name}
+          {displayToolName(tool)}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {tool.description}
+          {displayToolDescription(tool)}
         </Typography>
         <Typography
           variant="caption"
           color="primary"
           sx={{ display: "block", mt: 1 }}
         >
-          {tool.category}
+          {displayToolCategory(tool.category)}
         </Typography>
       </CardContent>
     </Card>
@@ -73,7 +80,16 @@ export default function Tools() {
   const frameless = useFrameless();
 
   useEffect(() => {
-    fetchTools();
+    void fetchTools();
+  }, [fetchTools]);
+
+  useEffect(() => {
+    const unsub = Events.On("eventLanguage", () => {
+      void fetchTools();
+    });
+    return () => {
+      unsub();
+    };
   }, [fetchTools]);
 
   const handleToolClick = (toolId: string) => {
@@ -108,7 +124,7 @@ export default function Tools() {
         }}
       >
         <Typography variant="h5" component="h1">
-          运维工具箱
+          {t("tools.title")}
         </Typography>
       </Box>
 

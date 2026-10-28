@@ -11,7 +11,8 @@ import {
 import { ToolService } from "../../bindings/github.com/ilaziness/vela/services";
 import { BaseConvertResult } from "../types/tool";
 import { useMessageStore } from "../stores/message";
-import { parseCallServiceError } from "../func/service";
+import { t } from "../i18n";
+import { translateServiceError } from "../func/service";
 
 export default function BaseConvertTool() {
   const [input, setInput] = useState("");
@@ -23,7 +24,7 @@ export default function BaseConvertTool() {
 
   const handleConvert = async () => {
     if (!input.trim()) {
-      errorMessage("请输入数字");
+      errorMessage(t("tools.base_convert.input_required"));
       return;
     }
     setIsLoading(true);
@@ -32,7 +33,7 @@ export default function BaseConvertTool() {
       const res = await ToolService.ConvertBase(input.trim(), fromBase, toBase);
       setResult(res);
     } catch (err) {
-      errorMessage(parseCallServiceError(err));
+      errorMessage(translateServiceError(err));
     } finally {
       setIsLoading(false);
     }
@@ -42,9 +43,9 @@ export default function BaseConvertTool() {
     if (!result?.result) return;
     try {
       await navigator.clipboard.writeText(result.result);
-      successMessage("已复制到剪贴板");
+      successMessage(t("common.copied"));
     } catch {
-      errorMessage("复制失败");
+      errorMessage(t("common.copy_failed"));
     }
   };
 
@@ -60,16 +61,16 @@ export default function BaseConvertTool() {
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        进制转换
+        {t("tools.base_convert.title")}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        支持 2–36 进制，可处理较长数字
+        {t("tools.base_convert.desc")}
       </Typography>
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Stack spacing={3}>
           <TextField
-            label="输入"
+            label={t("tools.base_convert.input")}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             fullWidth
@@ -77,7 +78,7 @@ export default function BaseConvertTool() {
           />
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
-              label="源进制"
+              label={t("tools.base_convert.from_base")}
               type="number"
               value={fromBase}
               onChange={(e) => setFromBase(Number(e.target.value) || 10)}
@@ -85,7 +86,7 @@ export default function BaseConvertTool() {
               fullWidth
             />
             <TextField
-              label="目标进制"
+              label={t("tools.base_convert.to_base")}
               type="number"
               value={toBase}
               onChange={(e) => setToBase(Number(e.target.value) || 16)}
@@ -95,10 +96,12 @@ export default function BaseConvertTool() {
           </Stack>
           <Stack direction="row" spacing={2}>
             <Button variant="outlined" onClick={handleSwap} fullWidth>
-              交换进制
+              {t("tools.base_convert.swap")}
             </Button>
             <Button variant="contained" onClick={handleConvert} disabled={isLoading} fullWidth>
-              {isLoading ? "转换中..." : "转换"}
+              {isLoading
+                ? t("tools.base_convert.converting")
+                : t("tools.base_convert.convert")}
             </Button>
           </Stack>
         </Stack>
@@ -109,13 +112,13 @@ export default function BaseConvertTool() {
           {result.success ? (
             <>
               <TextField
-                label="结果"
+                label={t("tools.base_convert.result")}
                 value={result.result}
                 fullWidth
                 slotProps={{ input: { readOnly: true, style: { fontFamily: "monospace" } } }}
               />
               <Button variant="outlined" onClick={handleCopy} sx={{ mt: 2 }}>
-                复制结果
+                {t("tools.base_convert.copy_result")}
               </Button>
             </>
           ) : (

@@ -202,11 +202,11 @@ func (m *Manager) answerKeyboardChallenge(
 	select {
 	case result := <-ch:
 		if result.cancel {
-			return nil, fmt.Errorf("keyboard-interactive 已取消")
+			return nil, ErrAuthCancelled
 		}
 		return result.answers, nil
 	case <-timer.C:
-		return nil, fmt.Errorf("keyboard-interactive 等待超时")
+		return nil, ErrAuthTimeout
 	}
 }
 

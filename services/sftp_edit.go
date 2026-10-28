@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,8 +14,10 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/system"
 	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -161,7 +162,7 @@ func (b *editBook) takeClosingDone(sessionID string) []chan struct{} {
 func (s *SftpService) EditRemoteFile(sessionID, remotePath string) error {
 	remotePath = path.Clean(remotePath)
 	if sessionID == "" || remotePath == "" || remotePath == "." {
-		return fmt.Errorf("无效的远程路径")
+		return usererr.Coded("sftp.invalid_remote_path", "Invalid remote path")
 	}
 	info, err := s.mgr.Stat(sessionID, remotePath)
 	if err != nil {
@@ -169,7 +170,7 @@ func (s *SftpService) EditRemoteFile(sessionID, remotePath string) error {
 		return err
 	}
 	if info.IsDir {
-		return fmt.Errorf("不能编辑目录")
+		return usererr.Coded("sftp.cannot_edit_dir", "Cannot edit a directory")
 	}
 	local, err := editTempFile(sessionID, remotePath)
 	if err != nil {
@@ -337,14 +338,14 @@ func (s *SftpService) finishEditDownload(ctx context.Context, ed *remoteEdit, tr
 	if err != nil {
 		s.logger.Error("edit download failed", zap.String("sessionID", ed.sessionID), zap.String("path", ed.remote), zap.Error(err))
 		s.abandon(ed)
-		s.showEditError(fmt.Sprintf("下载 %s 失败：%v", path.Base(ed.remote), err))
+		s.showEditError(i18n.Tf("sftp.download_failed", path.Base(ed.remote), err.Error()))
 		return
 	}
 	st, err := os.Stat(ed.local)
 	if err != nil {
 		s.logger.Error("stat edit temp file failed", zap.String("path", ed.local), zap.Error(err))
 		s.abandon(ed)
-		s.showEditError(fmt.Sprintf("下载 %s 失败：%v", path.Base(ed.remote), err))
+		s.showEditError(i18n.Tf("sftp.download_failed", path.Base(ed.remote), err.Error()))
 		return
 	}
 	ed.mu.Lock()
@@ -358,7 +359,7 @@ func (s *SftpService) finishEditDownload(ctx context.Context, ed *remoteEdit, tr
 		ed.opened = false
 		ed.mu.Unlock()
 		s.abandon(ed)
-		s.showEditError(fmt.Sprintf("打开 %s 失败：%v", path.Base(ed.remote), err))
+		s.showEditError(i18n.Tf("sftp.open_failed", path.Base(ed.remote), err.Error()))
 		return
 	}
 	s.watchEdit(ctx, ed)
@@ -427,7 +428,7 @@ func (s *SftpService) promptEditUpload(ctx context.Context, ed *remoteEdit, trig
 	if err != nil {
 		s.logger.Error("edit upload failed", zap.String("sessionID", ed.sessionID), zap.String("path", ed.remote), zap.Error(err))
 		if !s.editStopped(ed) {
-			s.showEditError(fmt.Sprintf("上传 %s 失败：%v", path.Base(ed.remote), err))
+			s.showEditError(i18n.Tf("sftp.upload_failed", path.Base(ed.remote), err.Error()))
 		}
 	}
 }
@@ -458,7 +459,7 @@ func (s *SftpService) flushEdit(ed *remoteEdit) {
 	}
 	if _, err := s.uploadEdit(ed); err != nil {
 		s.logger.Error("edit upload on close failed", zap.String("sessionID", ed.sessionID), zap.String("path", ed.remote), zap.Error(err))
-		s.showEditError(fmt.Sprintf("上传 %s 失败：%v", path.Base(ed.remote), err))
+		s.showEditError(i18n.Tf("sftp.upload_failed", path.Base(ed.remote), err.Error()))
 	}
 }
 
@@ -547,9 +548,9 @@ func (s *SftpService) askEditYes(ctx context.Context, message string) editChoice
 		default:
 		}
 	}
-	dlg := s.app.Dialog.Question().SetTitle("Vela - 编辑").SetMessage(message)
-	yes := dlg.AddButton("Yes")
-	no := dlg.AddButton("No")
+	dlg := s.app.Dialog.Question().SetTitle(i18n.T("dialog.edit_title")).SetMessage(message)
+	yes := dlg.AddButton(i18n.T("dialog.yes"))
+	no := dlg.AddButton(i18n.T("dialog.no"))
 	yes.OnClick(func() { send(true) })
 	no.OnClick(func() { send(false) })
 	// Windows MessageBox is MB_YESNO. Title-bar close reports "Cancel", which is
@@ -557,7 +558,7 @@ func (s *SftpService) askEditYes(ctx context.Context, message string) editChoice
 	// Linux and macOS render every added button, and their Show returns before
 	// the click. GTK title-bar close does not run a button callback.
 	if runtime.GOOS == "windows" {
-		cancel := dlg.AddButton("Cancel")
+		cancel := dlg.AddButton(i18n.T("dialog.cancel"))
 		cancel.OnClick(func() { send(false) })
 	}
 	dlg.SetDefaultButton(no)
@@ -596,13 +597,13 @@ func (s *SftpService) showEditError(message string) {
 	if s.app == nil {
 		return
 	}
-	s.app.Dialog.Error().SetTitle("Vela - 编辑").SetMessage(message).Show()
+	s.app.Dialog.Error().SetTitle(i18n.T("dialog.edit_title")).SetMessage(message).Show()
 }
 
 func editConfirmMessage(remotePath string, remoteChanged bool) string {
-	msg := fmt.Sprintf("文件 %s 已在本地修改，是否上传并覆盖远程文件？", path.Base(remotePath))
+	msg := i18n.Tf("sftp.confirm_upload", path.Base(remotePath))
 	if remoteChanged {
-		msg += "\n远程文件的大小或修改时间与下载时不一致。"
+		msg += "\n" + i18n.T("sftp.confirm_remote_changed")
 	}
 	return msg
 }
@@ -642,7 +643,7 @@ func (g *mtimeGate) observe(now, mod, baseline time.Time, stable time.Duration) 
 func editTempFile(sessionID, remotePath string) (string, error) {
 	dir, ok := editSessionDir(sessionID)
 	if !ok {
-		return "", fmt.Errorf("无效的会话")
+		return "", usererr.Coded("sftp.invalid_session", "Invalid session")
 	}
 	sum := sha256.Sum256([]byte(remotePath))
 	digest := hex.EncodeToString(sum[:])

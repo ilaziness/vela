@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -12,6 +13,7 @@ import (
 	"github.com/ilaziness/vela/internal/command"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/ssh"
@@ -21,13 +23,46 @@ import (
 	"github.com/ilaziness/vela/internal/tunnel"
 )
 
-func RegisterServices(a *application.App, mainWindow *application.WebviewWindow, cfgStore *config.Store, log *zap.Logger, commandsJSON []byte) error {
+// BootstrapLanguage detects and persists language on first launch, then applies it.
+// Call after config.Load; not inside config.Load.
+func BootstrapLanguage(store *config.Store, log *zap.Logger) {
+	if store == nil || store.Config == nil {
+		return
+	}
+	if log == nil {
+		log = zap.NewNop()
+	}
+	stored := strings.TrimSpace(store.Config.General.Language)
+	detected := i18n.DetectSystem()
+	lang := stored
+	if lang == "" {
+		lang = detected
+	}
+	lang = i18n.Normalize(lang)
+	log.Debug("bootstrap language",
+		zap.String("stored", stored),
+		zap.String("detected", detected),
+		zap.String("applied", lang),
+	)
+	if lang != stored {
+		store.Config.General.Language = lang
+		if err := store.Save(); err != nil {
+			log.Error("persist language failed", zap.Error(err))
+		} else {
+			log.Debug("persisted language", zap.String("language", lang))
+		}
+	}
+	i18n.SetLanguage(lang)
+}
+
+func RegisterServices(a *application.App, mainWindow *application.WebviewWindow, cfgStore *config.Store, log *zap.Logger, commandsLoader command.LocaleLoader) error {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	if cfgStore == nil || cfgStore.Config == nil {
 		return fmt.Errorf("config store is nil")
 	}
+	BootstrapLanguage(cfgStore, log)
 	windows := NewWindows(a, mainWindow, cfgStore.Config.General.Frameless)
 	vault := secret.NewVault()
 	configService := NewConfigService(a, windows, cfgStore, vault)
@@ -79,13 +114,18 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	sshService.bind(termWS, bookmarks)
 	bookmarkService := NewBookmarkService(a, bookmarks, sshService)
 
-	commandSvc := command.New(log, db, commandsJSON, sshService.SendToSession)
+	commandSvc := command.New(log, db, commandsLoader, sshService.SendToSession)
 	termWS.SetOnCommand(func(cmd string) {
 		if err := commandSvc.AddHistory(cmd); err != nil {
 			log.Error("add shell command history failed", zap.Error(err))
 		}
 	})
 	commandService := NewCommandService(windows, commandSvc)
+	configService.onLanguageChanged = func(lang string) {
+		if err := commandSvc.ReloadBuiltin(lang); err != nil {
+			log.Error("reload builtin commands failed", zap.String("language", lang), zap.Error(err))
+		}
+	}
 	syncService := NewSyncService(configService, db, log)
 	toolService := NewToolService(windows)
 	aiService := NewAIService(a, log, configService, sshService, db)

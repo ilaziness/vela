@@ -1,14 +1,16 @@
 package sshkey
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
 )
 
@@ -106,7 +108,7 @@ func (s *Service) Get(id string) (Info, error) {
 
 func (s *Service) Delete(id string) error {
 	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("密钥不存在")
+		return usererr.Coded("sshkey.not_found", "SSH key not found")
 	}
 	count, err := s.db.BookmarkRepo.CountBySSHKeyID(id)
 	if err != nil {
@@ -114,7 +116,7 @@ func (s *Service) Delete(id string) error {
 		return err
 	}
 	if count > 0 {
-		return fmt.Errorf("有 %d 个书签正在使用此密钥，请先解除引用", count)
+		return usererr.Coded("sshkey.in_use", "%s bookmark(s) still reference this key; unlink them first", strconv.Itoa(count))
 	}
 	if err := s.db.SSHKeyRepo.Delete(id); err != nil {
 		s.logger.Error("delete ssh key failed", zap.String("id", id), zap.Error(err))
@@ -124,20 +126,20 @@ func (s *Service) Delete(id string) error {
 }
 
 func (s *Service) encrypt(plain string) (string, error) {
-	password, err := s.masterPassword("需要密码来加密 SSH 私钥")
+	password, err := s.masterPassword(i18n.T("password.encrypt_ssh_key"))
 	if err != nil {
 		return "", err
 	}
 	encrypted, err := secret.Encrypt(password, plain)
 	if err != nil {
 		s.logger.Error("encrypt ssh key failed", zap.Error(err))
-		return "", fmt.Errorf("加密私钥失败: %w", err)
+		return "", usererr.Coded("sshkey.encrypt_failed", "Failed to encrypt private key: %s", err.Error())
 	}
 	return encrypted, nil
 }
 
 func (s *Service) decrypt(encrypted string) (string, error) {
-	password, err := s.masterPassword("需要密码来解密 SSH 私钥")
+	password, err := s.masterPassword(i18n.T("password.decrypt_ssh_key"))
 	if err != nil {
 		return "", err
 	}
@@ -146,21 +148,21 @@ func (s *Service) decrypt(encrypted string) (string, error) {
 		if s.onBadPass != nil {
 			s.onBadPass()
 		}
-		return "", fmt.Errorf("解密私钥失败")
+		return "", usererr.Coded("sshkey.decrypt_failed", "Failed to decrypt private key")
 	}
 	return plain, nil
 }
 
 func (s *Service) masterPassword(reason string) (string, error) {
 	if s.password == nil {
-		return "", fmt.Errorf("password not entered")
+		return "", usererr.Coded("error.password_not_entered", "Password not entered")
 	}
 	password, err := s.password(reason)
 	if err != nil {
 		return "", err
 	}
 	if password == "" {
-		return "", fmt.Errorf("password not entered")
+		return "", usererr.Coded("error.password_not_entered", "Password not entered")
 	}
 	return password, nil
 }

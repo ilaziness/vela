@@ -37,11 +37,14 @@ func TestMtimeStablePrompts(t *testing.T) {
 
 func TestEditConfirmMentionsRemoteChange(t *testing.T) {
 	plain := editConfirmMessage("/var/a.txt", false)
-	if !strings.Contains(plain, "a.txt") || strings.Contains(plain, "不一致") {
+	if !strings.Contains(plain, "a.txt") {
 		t.Fatalf("plain message = %q", plain)
 	}
+	if strings.Contains(plain, "modification time") {
+		t.Fatalf("plain message should not mention remote change: %q", plain)
+	}
 	changed := editConfirmMessage("/var/a.txt", true)
-	if !strings.Contains(changed, "大小或修改时间") {
+	if !strings.Contains(changed, "modification time") {
 		t.Fatalf("changed message = %q", changed)
 	}
 }

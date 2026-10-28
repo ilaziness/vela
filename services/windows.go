@@ -3,6 +3,8 @@ package services
 import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	"github.com/ilaziness/vela/internal/i18n"
 )
 
 type Windows struct {
@@ -30,23 +32,36 @@ func (w *Windows) IsFrameless() bool {
 	return w.frameless
 }
 
+// RefreshTitles applies current-language titles to open sub-windows.
+func (w *Windows) RefreshTitles() {
+	if w.Setting != nil {
+		w.Setting.SetTitle(i18n.T("window.settings"))
+	}
+	if w.Command != nil {
+		w.Command.SetTitle(i18n.T("window.command"))
+	}
+	if w.Tool != nil {
+		w.Tool.SetTitle(i18n.T("window.tools"))
+	}
+}
+
 func (w *Windows) newSettingWindow() *application.WebviewWindow {
 	return w.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "设置", URL: "/#/setting", Width: 1200, Height: 800,
+		Title: i18n.T("window.settings"), URL: "/#/setting", Width: 1200, Height: 800,
 		MinWidth: 1200, MinHeight: 800, DefaultContextMenuDisabled: true, Hidden: true, Frameless: w.frameless,
 	})
 }
 
 func (w *Windows) newCommandWindow() *application.WebviewWindow {
 	return w.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "命令面板", URL: "/#/command", Width: 1600, Height: 900,
+		Title: i18n.T("window.command"), URL: "/#/command", Width: 1600, Height: 900,
 		MinWidth: 1600, MinHeight: 900, DefaultContextMenuDisabled: true, Hidden: true, Frameless: w.frameless,
 	})
 }
 
 func (w *Windows) newToolWindow() *application.WebviewWindow {
 	return w.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "运维工具", URL: "/#/tools", Width: 1200, Height: 800,
+		Title: i18n.T("window.tools"), URL: "/#/tools", Width: 1200, Height: 800,
 		MinWidth: 800, MinHeight: 600, DefaultContextMenuDisabled: true, Hidden: true, Frameless: w.frameless,
 	})
 }

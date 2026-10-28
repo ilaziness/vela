@@ -19,13 +19,18 @@ import {
   KeyBindingInfo,
   LogService,
 } from "../../../bindings/github.com/ilaziness/vela/services";
-import { parseCallServiceError } from "../../func/service";
+import {
+  parseCallServiceError,
+  translateServiceError,
+} from "../../func/service";
+import { t, useLanguage } from "../../i18n";
 import { keyboardEventToLogical } from "../../func/shortcuts";
 import { useMessageStore } from "../../stores/message";
 import { useKeybindingsStore } from "../../stores/keybindings";
 import { CODE_FONT_FAMILY } from "../../theme/typography";
 
 const KeybindingsSettings: React.FC = () => {
+  const lang = useLanguage();
   const bindings = useKeybindingsStore((s) => s.bindings);
   const reload = useKeybindingsStore((s) => s.reload);
   const [loading, setLoading] = useState(true);
@@ -60,7 +65,10 @@ const KeybindingsSettings: React.FC = () => {
         if (!cancelled) {
           useMessageStore
             .getState()
-            .errorMessage(parseCallServiceError(err) || "加载快捷键失败");
+            .errorMessage(
+              translateServiceError(err) ||
+                t("settings.keybindings.load_failed"),
+            );
         }
       } finally {
         if (!cancelled) {
@@ -113,7 +121,10 @@ const KeybindingsSettings: React.FC = () => {
         if (mountedRef.current) {
           useMessageStore
             .getState()
-            .errorMessage(parseCallServiceError(err) || "无法开始录制快捷键");
+            .errorMessage(
+              translateServiceError(err) ||
+                t("settings.keybindings.record_failed"),
+            );
         }
       } finally {
         startingRef.current = false;
@@ -150,12 +161,15 @@ const KeybindingsSettings: React.FC = () => {
             return;
           }
           await reload();
-          useMessageStore.getState().successMessage("快捷键已更新");
+          useMessageStore.getState().successMessage(t("settings.keybindings.updated"));
         } catch (err) {
           if (mountedRef.current) {
             useMessageStore
               .getState()
-              .errorMessage(parseCallServiceError(err) || "设置快捷键失败");
+              .errorMessage(
+                translateServiceError(err) ||
+                  t("settings.keybindings.set_failed"),
+              );
           }
         } finally {
           submittingRef.current = false;
@@ -184,11 +198,14 @@ const KeybindingsSettings: React.FC = () => {
       try {
         await AppService.SetKeyBinding(action, "");
         await reload();
-        useMessageStore.getState().successMessage("已恢复默认");
+        useMessageStore.getState().successMessage(t("settings.keybindings.reset_one_ok"));
       } catch (err) {
         useMessageStore
           .getState()
-          .errorMessage(parseCallServiceError(err) || "恢复默认失败");
+          .errorMessage(
+            translateServiceError(err) ||
+              t("settings.keybindings.reset_one_failed"),
+          );
       } finally {
         setBusy(false);
       }
@@ -204,26 +221,30 @@ const KeybindingsSettings: React.FC = () => {
     try {
       await AppService.ResetAllKeyBindings();
       await reload();
-      useMessageStore.getState().successMessage("已全部恢复默认");
+      useMessageStore.getState().successMessage(t("settings.keybindings.reset_all_ok"));
     } catch (err) {
       useMessageStore
         .getState()
-        .errorMessage(parseCallServiceError(err) || "全部恢复失败");
+        .errorMessage(
+          translateServiceError(err) ||
+            t("settings.keybindings.reset_all_failed"),
+        );
     } finally {
       setBusy(false);
     }
   }, [busy, recordingAction, reload]);
 
   const groups = useMemo(() => {
+    void lang;
     const map = new Map<string, KeyBindingInfo[]>();
     for (const item of bindings) {
-      const cat = item.category || "其他";
+      const cat = item.category || t("settings.keybindings.category_other");
       const list = map.get(cat) ?? [];
       list.push(item);
       map.set(cat, list);
     }
     return Array.from(map.entries());
-  }, [bindings]);
+  }, [bindings, lang]);
 
   if (loading) {
     return (
@@ -241,8 +262,7 @@ const KeybindingsSettings: React.FC = () => {
         sx={{ mb: 2, alignItems: "center", justifyContent: "space-between" }}
       >
         <Typography variant="body2" color="text.secondary">
-          点击快捷键列进行录制，立即生效。Esc
-          取消录制。macOS 使用 ⌘，Windows / Linux 使用 Ctrl。
+          {t("settings.keybindings.hint")}
         </Typography>
         <Button
           size="small"
@@ -250,7 +270,7 @@ const KeybindingsSettings: React.FC = () => {
           disabled={busy || !!recordingAction}
           onClick={() => void handleResetAll()}
         >
-          全部恢复默认
+          {t("settings.keybindings.reset_all")}
         </Button>
       </Stack>
       {groups.map(([category, items]) => (
@@ -262,10 +282,10 @@ const KeybindingsSettings: React.FC = () => {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>操作</TableCell>
-                  <TableCell>快捷键</TableCell>
+                  <TableCell>{t("settings.keybindings.col_action")}</TableCell>
+                  <TableCell>{t("settings.keybindings.col_shortcut")}</TableCell>
                   <TableCell align="right" width={120}>
-                    重置
+                    {t("settings.keybindings.col_reset")}
                   </TableCell>
                 </TableRow>
               </TableHead>
@@ -278,7 +298,7 @@ const KeybindingsSettings: React.FC = () => {
                         {item.label}
                         {item.custom ? (
                           <Chip
-                            label="已自定义"
+                            label={t("settings.keybindings.customized")}
                             size="small"
                             sx={{ ml: 1 }}
                             color="primary"
@@ -304,7 +324,9 @@ const KeybindingsSettings: React.FC = () => {
                           userSelect: "none",
                         }}
                       >
-                        {recording ? "按下快捷键…" : item.keys || "—"}
+                        {recording
+                          ? t("settings.keybindings.press_shortcut")
+                          : item.keys || "—"}
                       </TableCell>
                       <TableCell align="right">
                         <Button
@@ -314,7 +336,7 @@ const KeybindingsSettings: React.FC = () => {
                           }
                           onClick={() => void handleResetOne(item.action)}
                         >
-                          恢复默认
+                          {t("settings.keybindings.reset_one")}
                         </Button>
                       </TableCell>
                     </TableRow>

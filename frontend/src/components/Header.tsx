@@ -36,7 +36,7 @@ import { ReadConfig } from "../../bindings/github.com/ilaziness/vela/services/co
 import { useSSHTabsStore } from "../stores/ssh";
 import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useUIStore } from "../stores/ui";
-import { genTabIndex, parseCallServiceError } from "../func/service";
+import { genTabIndex, translateServiceError } from "../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
 import { ShortcutAction } from "../func/shortcuts";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -48,6 +48,7 @@ import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import BookmarkManager from "./Bookmark";
 import BookmarkConnectPanel from "./BookmarkConnectPanel";
 import Loading from "./Loading";
+import { newConnectionTabName, t, useLanguage } from "../i18n";
 
 const UpdateAvailableDialog = React.lazy(
   () => import("./UpdateAvailableDialog"),
@@ -63,10 +64,10 @@ export default function Header() {
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
   const frameless = useFrameless();
-
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newVersion, setNewVersion] = useState<NewVersion | null>(null);
+  const lang = useLanguage();
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateDialogMounted, setUpdateDialogMounted] = useState(false);
 
@@ -80,7 +81,7 @@ export default function Header() {
     const number = sshTabs.length + 1;
     pushTab({
       index: `${genTabIndex()}`,
-      name: `新建连接 ${number}`,
+      name: newConnectionTabName(number),
     });
   }, [sshTabs.length, pushTab]);
 
@@ -93,70 +94,83 @@ export default function Header() {
         !syncConfig?.syncId ||
         !syncConfig?.userKey
       ) {
-        errorMessage("请先前往设置页面配置同步参数");
+        errorMessage(t("header.sync_config_required"));
         return;
       }
       setConfirmDialogOpen(true);
     } catch (error) {
       LogService.Error("Failed to read config: " + String(error));
-      errorMessage("读取配置失败");
+      errorMessage(t("header.read_config_failed"));
     }
   }, [errorMessage]);
 
-  const menuItems = useMemo(
-    () => [
-      { title: "新建空白标签", icon: <AddBoxIcon />, onClick: handleAddTab },
+  const menuItems = useMemo(() => {
+    void lang;
+    return [
       {
-        title: "新建窗口",
+        id: "new_blank_tab",
+        title: t("header.new_blank_tab"),
+        icon: <AddBoxIcon />,
+        onClick: handleAddTab,
+      },
+      {
+        id: "new_window",
+        title: t("header.new_window"),
         icon: <AddToQueueIcon />,
         onClick: () => AppService.NewMainWindow(),
       },
       {
-        title: "书签",
+        id: "bookmarks",
+        title: t("header.bookmarks"),
         icon: <BookmarkIcon />,
         onClick: toggleBookmarkConnect,
         active: bookmarkConnectOpen,
         shortcutAction: ShortcutAction.PanelBookmarkConnect,
       },
       {
-        title: "书签管理",
+        id: "bookmark_manager",
+        title: t("header.bookmark_manager"),
         icon: <BookmarksIcon />,
         onClick: () => setBookmarkManageOpen(true),
         shortcutAction: ShortcutAction.PanelBookmarks,
       },
       {
-        title: "命令面板",
+        id: "command_palette",
+        title: t("header.command_palette"),
         icon: <TerminalIcon />,
         onClick: () => CommandService.ShowWindow(),
         shortcutAction: ShortcutAction.PanelCommand,
       },
       {
-        title: "AI助手",
+        id: "ai_assistant",
+        title: t("header.ai_assistant"),
         icon: <AutoAwesomeIcon />,
         onClick: () => toggleSidebarOpen(),
         shortcutAction: ShortcutAction.PanelAI,
       },
       {
-        title: "上传备份",
+        id: "upload_backup",
+        title: t("header.upload_backup"),
         icon: <CloudUploadIcon />,
         onClick: () => void handleBackupClick(),
       },
       {
-        title: "工具",
+        id: "tools",
+        title: t("header.tools"),
         icon: <HandymanIcon />,
         onClick: () => ToolService.ShowWindow(),
         shortcutAction: ShortcutAction.PanelTools,
       },
-    ],
-    [
-      handleAddTab,
-      toggleBookmarkConnect,
-      bookmarkConnectOpen,
-      handleBackupClick,
-      toggleSidebarOpen,
-      setBookmarkManageOpen,
-    ],
-  );
+    ];
+  }, [
+    lang,
+    handleAddTab,
+    toggleBookmarkConnect,
+    bookmarkConnectOpen,
+    handleBackupClick,
+    toggleSidebarOpen,
+    setBookmarkManageOpen,
+  ]);
 
   useEffect(() => {
     const unsubscribeUpdate = Events.On("eventNewVersion", (event: any) => {
@@ -175,10 +189,10 @@ export default function Header() {
     setUploading(true);
     try {
       await UploadSync();
-      successMessage("数据上传成功");
+      successMessage(t("header.upload_success"));
     } catch (error) {
       LogService.Error("Upload failed: " + String(error));
-      errorMessage("数据上传失败: " + parseCallServiceError(error));
+      errorMessage(t("header.upload_failed", translateServiceError(error)));
     } finally {
       setUploading(false);
     }
@@ -224,7 +238,7 @@ export default function Header() {
 
           {menuItems.map((item) => (
             <RailMenuButton
-              key={item.title}
+              key={item.id}
               title={item.title}
               shortcutAction={item.shortcutAction}
               active={item.active}
@@ -240,7 +254,7 @@ export default function Header() {
 
           {newVersion ? (
             <RailMenuButton
-              title="发现新版本"
+              title={t("header.update_available")}
               active
               onClick={() => setUpdateDialogOpen(true)}
             >
@@ -249,7 +263,7 @@ export default function Header() {
           ) : null}
 
           <RailMenuButton
-            title="设置"
+            title={t("header.settings")}
             shortcutAction={ShortcutAction.PanelSettings}
             onClick={() => ConfigService.ShowWindow()}
           >
@@ -293,7 +307,7 @@ export default function Header() {
               <CloseIcon />
             </IconButton>
             <Typography sx={{ ml: 1 }} variant="h6">
-              书签管理
+              {t("header.bookmark_manager")}
             </Typography>
           </Toolbar>
         </AppBar>
@@ -310,12 +324,14 @@ export default function Header() {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>确认上传</DialogTitle>
+        <DialogTitle>{t("header.confirm_upload_title")}</DialogTitle>
         <DialogContent>
-          <Typography>确定要上传备份吗？</Typography>
+          <Typography>{t("header.confirm_upload_message")}</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setConfirmDialogOpen(false)}>
+            {t("common.cancel")}
+          </Button>
           <Button
             variant="contained"
             onClick={() => {
@@ -323,7 +339,7 @@ export default function Header() {
               void handleUpload();
             }}
           >
-            确定
+            {t("common.ok")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -335,7 +351,7 @@ export default function Header() {
           backgroundColor: "rgba(0, 0, 0, 0.5)",
         })}
       >
-        <Loading message="正在上传备份..." size={60} />
+        <Loading message={t("header.uploading_backup")} size={60} />
       </Backdrop>
     </Box>
   );
