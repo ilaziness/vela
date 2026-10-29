@@ -24,6 +24,7 @@ const EventKeyboardInteractive = "eventKeyboardInteractive"
 const EventKeyboardInteractiveClose = "eventKeyboardInteractiveClose"
 const EventSSHSessionClosed = "eventSSHSessionClosed"
 const EventSSHSessionLogStopped = "eventSSHSessionLogStopped"
+const EventTerminalCwd = "eventTerminalCwd"
 
 func init() {
 	application.RegisterEvent[string](EventHostKeyPrompt)
@@ -31,6 +32,7 @@ func init() {
 	application.RegisterEvent[string](EventKeyboardInteractiveClose)
 	application.RegisterEvent[string](EventSSHSessionClosed)
 	application.RegisterEvent[string](EventSSHSessionLogStopped)
+	application.RegisterEvent[string](EventTerminalCwd)
 }
 
 type hostKeyPrompter struct {
@@ -123,7 +125,27 @@ func (s *SSHService) setSFTPCloseHooks(onSession, onSessionCleanup func(sessionI
 func NewSSHService(app *application.App, mgr *ssh.Manager, sftpMgr *sftp.Manager, tunnels *tunnel.Manager) *SSHService {
 	s := &SSHService{app: app, mgr: mgr, sftp: sftpMgr, tunnels: tunnels}
 	mgr.SetOnSessionLogStopped(s.onSessionLogStopped)
+	mgr.SetOnCwd(s.onTerminalCwd)
 	return s
+}
+
+func (s *SSHService) onTerminalCwd(id, path string) {
+	if s.app == nil || id == "" || path == "" {
+		return
+	}
+	data, err := json.Marshal(map[string]string{
+		"id":   id,
+		"path": path,
+	})
+	if err != nil {
+		return
+	}
+	s.app.Event.Emit(EventTerminalCwd, string(data))
+}
+
+// TerminalCwd returns the last reported interactive-shell cwd for the session, or "".
+func (s *SSHService) TerminalCwd(id string) string {
+	return s.mgr.Cwd(id)
 }
 
 func (s *SSHService) onSessionLogStopped(id, reason string) {

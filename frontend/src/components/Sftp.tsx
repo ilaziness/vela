@@ -96,6 +96,9 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const [localShowHidden, setLocalShowHidden] = useState(false);
   const [localSelected, setLocalSelected] = useState<Set<string>>(new Set());
   const initStartedRef = useRef(false);
+  // Gate terminal-cwd follow until StartSftp + first listing finished.
+  const remoteReadyRef = useRef(false);
+  const pendingCwdRef = useRef<string | null>(null);
   const { errorMessage: showMessageError } = useMessageStore();
   const addProgress = useTransferStore((s) => s.addProgress);
 
@@ -247,21 +250,57 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     }
   };
 
+  const followTerminalCwd = useEffectEvent(async (path: string) => {
+    if (!path) return;
+    if (!remoteReadyRef.current) {
+      pendingCwdRef.current = path;
+      return;
+    }
+    if (path === currentPathRef.current) return;
+    try {
+      const applied = await refreshFileListRef.current(path);
+      if (!applied) return;
+      currentPathRef.current = path;
+      setCurrentPath(path);
+      setSelectedNames(new Set());
+    } catch {
+      // Keep current listing; refreshFileList already surfaced the error.
+    }
+  });
+
   const initSftp = useEffectEvent(async () => {
     if (initStartedRef.current || sftpLoaded) return;
     initStartedRef.current = true;
+    remoteReadyRef.current = false;
+    pendingCwdRef.current = null;
     try {
       await SSHService.StartSftp(linkID, ownerKey);
       LogService.Debug("SFTP connection established");
-      const homePath = await SftpService.GetWd(linkID);
-      currentPathRef.current = homePath;
-      setCurrentPath(homePath);
-      await refreshFileList(homePath);
+      let startPath = "";
+      try {
+        startPath = (await SSHService.TerminalCwd(linkID)) || "";
+      } catch (err) {
+        LogService.Error(`TerminalCwd: ${err}`);
+      }
+      if (!startPath) {
+        startPath = await SftpService.GetWd(linkID);
+      }
+      currentPathRef.current = startPath;
+      setCurrentPath(startPath);
+      await refreshFileList(startPath);
       await loadPending();
       setSftpLoaded(true);
+      remoteReadyRef.current = true;
       onReady?.();
+      // Apply cwd reported while StartSftp / first listing ran (no-op if unchanged).
+      const pending = pendingCwdRef.current;
+      pendingCwdRef.current = null;
+      if (pending) {
+        void followTerminalCwd(pending);
+      }
     } catch (err: any) {
       initStartedRef.current = false;
+      remoteReadyRef.current = false;
       showMessageError(translateServiceError(err));
       LogService.Error(`Failed to initialize SFTP: ${err.message || err}`);
     }
@@ -270,6 +309,24 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   useEffect(() => {
     void initSftp();
     void refreshLocalRef.current("");
+  }, [linkID]);
+
+  useEffect(() => {
+    const unsubCwd = Events.On("eventTerminalCwd", (event: any) => {
+      try {
+        const raw =
+          typeof event.data === "string"
+            ? JSON.parse(event.data)
+            : event.data;
+        const id = raw?.id as string | undefined;
+        const path = raw?.path as string | undefined;
+        if (!id || id !== linkID || !path) return;
+        void followTerminalCwd(path);
+      } catch (e) {
+        console.error("Invalid terminal cwd payload", e);
+      }
+    });
+    return unsubCwd;
   }, [linkID]);
 
   useEffect(() => {

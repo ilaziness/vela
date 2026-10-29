@@ -115,6 +115,9 @@ type Session struct {
 	logMu          sync.Mutex
 	logFile        *os.File
 	zmFilter       *zmodem.Filter
+	cwdParser      cwdParser
+	cwdMu          sync.Mutex
+	cwd            string
 }
 
 type hopClient struct {
@@ -160,6 +163,7 @@ type Manager struct {
 	prompter              HostKeyPrompter
 	keyboardPrompter      KeyboardInteractivePrompter
 	onClose               func(sessionID string, reason CloseReason)
+	onCwd                 func(sessionID, path string)
 	onSessionLogStopped   func(sessionID, reason string)
 	clients               *sync.Map
 	sessions              *sync.Map
@@ -230,6 +234,21 @@ func (m *Manager) aliveInterval() time.Duration {
 
 func (m *Manager) SetOnClose(fn func(sessionID string, reason CloseReason)) {
 	m.onClose = fn
+}
+
+// SetOnCwd registers a callback when the interactive shell reports a new cwd.
+// The callback must not block; it runs on the PTY stdout reader.
+func (m *Manager) SetOnCwd(fn func(sessionID, path string)) {
+	m.onCwd = fn
+}
+
+// Cwd returns the last reported interactive-shell working directory, or "".
+func (m *Manager) Cwd(sessionID string) string {
+	sess, err := m.GetSession(sessionID)
+	if err != nil {
+		return ""
+	}
+	return sess.getCwd()
 }
 
 func (m *Manager) GetSession(id string) (*Session, error) {
@@ -524,7 +543,8 @@ func (sc *Session) Start(cols, rows int) error {
 	if err = sc.startOutput(); err != nil {
 		return sc.failStart(err)
 	}
-	if err = sc.session.Shell(); err != nil {
+	// exec + env (not Shell): cwd OSC without stdin inject / history / AcceptEnv.
+	if err = sc.session.Start(shellStartCommand()); err != nil {
 		return sc.failStart(err)
 	}
 	if payload := buildStdinBootstrap(sc.env, sc.startupCmd); payload != "" {
@@ -634,6 +654,9 @@ func (sc *Session) readFromPipe(pipe io.Reader, pipeName string) func() {
 				}
 				if decoder != nil && len(data) > 0 {
 					data = decoder.Bytes(data)
+				}
+				if pipeName == "stdout" && len(data) > 0 {
+					sc.feedCwd(data)
 				}
 				if !emit(data) {
 					return

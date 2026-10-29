@@ -36,6 +36,7 @@ declare module "@wailsio/runtime" {
             "eventSftpFilesDropped": services$0.SftpFilesDroppedData;
             "eventShortcut": services$0.ShortcutEvent;
             "eventTerminal": services$0.TerminalConfig;
+            "eventTerminalCwd": string;
             "eventTransferQueued": services$0.TransferQueuedData;
         }
     }
