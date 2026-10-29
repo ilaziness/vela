@@ -36,10 +36,6 @@ export function getDefaultSidebarWidth(): number {
   );
 }
 
-export function getSidebarContentWidth(sidebarWidth: number): number {
-  return Math.max(SIDEBAR_WIDTH.MIN - SIDEBAR_RESIZE_HANDLE_WIDTH, sidebarWidth - SIDEBAR_RESIZE_HANDLE_WIDTH);
-}
-
 export function loadStoredSidebarWidth(): number {
   try {
     let stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);

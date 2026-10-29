@@ -27,7 +27,6 @@ interface AIAssistantState {
   sidebarWidth: number;
   sessions: AISessionItem[];
   activeSessionId: string;
-  historyDrawerOpen: boolean;
   loadingSessions: boolean;
   isStreaming: boolean;
   composerValue: string;
@@ -35,7 +34,6 @@ interface AIAssistantState {
   toggleSidebarOpen: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number, persist?: boolean) => void;
-  setHistoryDrawerOpen: (open: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setComposerValue: (value: string) => void;
   appendToComposer: (text: string) => void;
@@ -51,7 +49,6 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
   sidebarWidth: loadStoredSidebarWidth(),
   sessions: [],
   activeSessionId: '',
-  historyDrawerOpen: false,
   loadingSessions: false,
   isStreaming: false,
   composerValue: '',
@@ -67,8 +64,6 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
     }
     set({ sidebarWidth: clamped });
   },
-
-  setHistoryDrawerOpen: (open) => set({ historyDrawerOpen: open }),
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
 
@@ -115,7 +110,7 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
 
   selectSession: (id) => {
     if (get().isStreaming) return;
-    set({ activeSessionId: id, historyDrawerOpen: false });
+    set({ activeSessionId: id });
   },
 
   createSession: async (): Promise<boolean> => {
@@ -130,7 +125,6 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
       set((state) => ({
         sessions: [item, ...state.sessions.filter((s) => s.id !== item.id)],
         activeSessionId: item.id,
-        historyDrawerOpen: false,
       }));
       return true;
     } catch (err) {

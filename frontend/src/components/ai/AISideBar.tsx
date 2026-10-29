@@ -1,10 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-} from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Box,
   Avatar,
@@ -12,17 +6,23 @@ import {
   Button,
   Typography,
 } from "@mui/material";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import { ChatBox, ChatMessageAvatar } from "@mui/x-chat";
+import type { ChatConversation, ChatMessage } from "@mui/x-chat/headless";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { LogService } from "../../../bindings/github.com/ilaziness/vela/services/index";
 import { GenkitAdapter, getAiUser, getCurrentUser } from "./GenkitAdapter";
-import { buildChatLocaleText, t, useLanguage } from "../../i18n";
+import { buildChatLocaleText, displaySessionTitle, t, useLanguage } from "../../i18n";
 import { AIChatFilePart } from "./AIChatFilePart";
 import ComposerSendStopButton from "./ComposerSendStopButton";
 import { ComposerAttachPathButton } from "./ComposerAttachPathButton";
 import { ComposerPlanDockRoot } from "./DockedPlanPanel";
-import SessionPanel from "./SessionPanel";
+import {
+  SessionHeaderActions,
+  SessionListAvatar,
+  SSHBindSubtitle,
+} from "./SessionChrome";
 import SSHToolState from "./SSHToolState";
 import {
   RUN_SSH_COMMAND_TOOL,
@@ -111,13 +111,26 @@ const CustomMessageAvatar = React.forwardRef<HTMLDivElement, any>(
   },
 );
 
+const COPY_ICON = <ContentCopyIcon fontSize="inherit" />;
+
+function messagePlainText(message: ChatMessage | null | undefined): string {
+  if (!message?.parts?.length) return "";
+  return message.parts
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .trim();
+}
+
 const AISideBar = () => {
   const sidebarOpen = useAIAssistantStore((state) => state.sidebarOpen);
   const sidebarWidth = useAIAssistantStore((state) => state.sidebarWidth);
+  const sessions = useAIAssistantStore((state) => state.sessions);
   const activeSessionId = useAIAssistantStore((state) => state.activeSessionId);
   const loadingSessions = useAIAssistantStore((state) => state.loadingSessions);
   const composerValue = useAIAssistantStore((state) => state.composerValue);
   const loadSessions = useAIAssistantStore((state) => state.loadSessions);
+  const selectSession = useAIAssistantStore((state) => state.selectSession);
   const refreshActiveSessionTitle = useAIAssistantStore(
     (state) => state.refreshActiveSessionTitle,
   );
@@ -130,13 +143,11 @@ const AISideBar = () => {
   useLanguage();
   const chatLocaleText = buildChatLocaleText();
 
-  const [chatContainer, setChatContainer] = useState<HTMLDivElement | null>(
-    null,
-  );
-
-  const setChatRef = useCallback((node: HTMLDivElement | null) => {
-    setChatContainer(node);
-  }, []);
+  const conversations: ChatConversation[] = sessions.map((session) => ({
+    id: session.id,
+    title: displaySessionTitle(session.title),
+    lastMessageAt: new Date(session.updatedAt * 1000).toISOString(),
+  }));
 
   const [isResizing, setIsResizing] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
@@ -146,10 +157,7 @@ const AISideBar = () => {
   const openRef = useRef(false);
 
   useEffect(() => {
-    if (!sidebarOpen) {
-      useAIAssistantStore.getState().setHistoryDrawerOpen(false);
-      return;
-    }
+    if (!sidebarOpen) return;
     void loadSessions();
   }, [sidebarOpen, loadSessions]);
 
@@ -273,124 +281,147 @@ const AISideBar = () => {
             minWidth: 0,
             overflow: "hidden",
             position: "relative",
+            bgcolor: "background.default",
           }}
         >
-          <SessionPanel drawerContainer={chatContainer} />
-          <Box
-            ref={setChatRef}
-            sx={{
-              flex: 1,
-              minHeight: 0,
-              display: "flex",
-              flexDirection: "column",
-              position: "relative",
-              bgcolor: "background.default",
-            }}
-          >
-            {showChat ? (
-              <ChatBox
-                key={activeSessionId}
-                adapter={adapter}
-                currentUser={getCurrentUser()}
-                members={[getCurrentUser(), getAiUser()]}
-                activeConversationId={activeSessionId}
-                onActiveConversationChange={() => {}}
-                composerValue={composerValue}
-                onComposerValueChange={setComposerValue}
-                localeText={chatLocaleText}
-                features={{
-                  attachments: {
-                    acceptedMimeTypes: [...AI_ATTACH_MIME_TYPES],
-                    maxFileCount: AI_ATTACH_MAX_COUNT,
-                    maxFileSize: AI_ATTACH_MAX_BYTES,
-                    onAttachmentReject: (rejections) => {
-                      const msg = formatAttachmentRejectMessage(rejections);
-                      if (msg) useMessageStore.getState().errorMessage(msg);
-                    },
+          {showChat ? (
+            <ChatBox
+              adapter={adapter}
+              currentUser={getCurrentUser()}
+              members={[getCurrentUser(), getAiUser()]}
+              conversations={conversations}
+              activeConversationId={activeSessionId || undefined}
+              onActiveConversationChange={(id) => {
+                if (id) selectSession(id);
+              }}
+              composerValue={composerValue}
+              onComposerValueChange={setComposerValue}
+              localeText={chatLocaleText}
+              density="compact"
+              layoutMode="overlay"
+              features={{
+                conversationList: true,
+                conversationHeader: true,
+                helperText: false,
+                attachments: {
+                  acceptedMimeTypes: [...AI_ATTACH_MIME_TYPES],
+                  maxFileCount: AI_ATTACH_MAX_COUNT,
+                  maxFileSize: AI_ATTACH_MAX_BYTES,
+                  onAttachmentReject: (rejections) => {
+                    const msg = formatAttachmentRejectMessage(rejections);
+                    if (msg) useMessageStore.getState().errorMessage(msg);
                   },
-                  conversationHeader: false,
-                  autoScroll: { buffer: 2000 },
-                }}
-                onFinish={() => void refreshActiveSessionTitle()}
-                onError={(err: any) => {
-                  useAIAssistantStore.getState().setStreaming(false);
-                  LogService.Error(`[AI Chat] ${err.source}: ${err.message}`);
-                }}
-                partRenderers={{
-                  file: AIChatFilePart,
-                }}
-                slots={{
-                  messageAvatar: CustomMessageAvatar,
-                  composerSendButton: ComposerSendStopButton,
-                  composerRoot: ComposerPlanDockRoot,
-                  composerAttachButton: ComposerAttachPathButton,
-                }}
-                slotProps={{
-                  // maxRows enables MUI auto-grow (rows=1 + height sync). Default TextArea CSS
-                  // still has flex:1 + maxHeight:200 which stretches the field in a column
-                  // composer and shows a useless scrollbar — override those.
-                  composerInput: {
-                    placeholder: t("ai.chat.placeholder"),
-                    maxRows: 8,
-                    sx: {
-                      flex: "0 0 auto",
-                      alignSelf: "stretch",
-                      width: "100%",
-                      minHeight: "unset",
-                      // ~8× body2 line box + padding; scroll only after the cap.
-                      maxHeight: "calc(1.25rem * 8 + 8px)",
-                      overflowY: "auto",
-                    },
+                },
+                autoScroll: { buffer: 2000 },
+              }}
+              onFinish={() => void refreshActiveSessionTitle()}
+              onError={(err: any) => {
+                useAIAssistantStore.getState().setStreaming(false);
+                LogService.Error(`[AI Chat] ${err.source}: ${err.message}`);
+              }}
+              partRenderers={{
+                file: AIChatFilePart,
+              }}
+              slots={{
+                messageAvatar: CustomMessageAvatar,
+                composerSendButton: ComposerSendStopButton,
+                composerRoot: ComposerPlanDockRoot,
+                composerAttachButton: ComposerAttachPathButton,
+                conversationSubtitle: SSHBindSubtitle,
+                conversationHeaderActions: SessionHeaderActions,
+              }}
+              slotProps={{
+                conversationList: {
+                  slots: { itemAvatar: SessionListAvatar },
+                },
+                // maxRows enables MUI auto-grow (rows=1 + height sync). Default TextArea CSS
+                // still has flex:1 + maxHeight:200 which stretches the field in a column
+                // composer and shows a useless scrollbar — override those.
+                composerInput: {
+                  maxRows: 8,
+                  sx: {
+                    flex: "0 0 auto",
+                    alignSelf: "stretch",
+                    width: "100%",
+                    minHeight: "unset",
+                    // ~8× body2 line box + padding; scroll only after the cap.
+                    maxHeight: "calc(1.25rem * 8 + 8px)",
+                    overflowY: "auto",
                   },
-                  messageContent: {
-                    partProps: {
-                      tool: toolPartProps,
-                      "dynamic-tool": toolPartProps,
-                    },
+                },
+                messageContent: {
+                  partProps: {
+                    tool: toolPartProps,
+                    "dynamic-tool": toolPartProps,
                   },
-                }}
-                sx={{ flex: 1, minHeight: 0 }}
-              />
-            ) : loadingSessions ? (
-              <Box
-                sx={{
-                  flex: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+                },
+                messageActions: ({ message }) => {
+                  const text = messagePlainText(message);
+                  return {
+                    extraActions: [
+                      {
+                        id: "copy",
+                        label: t("common.copy"),
+                        icon: COPY_ICON,
+                        disabled:
+                          message?.status === "streaming" || !text,
+                        onClick: async (_event, { message: msg }) => {
+                          const body = messagePlainText(msg);
+                          if (!body) return;
+                          try {
+                            await navigator.clipboard.writeText(body);
+                          } catch {
+                            useMessageStore
+                              .getState()
+                              .errorMessage(t("common.copy_failed"));
+                          }
+                        },
+                      },
+                    ],
+                  };
+                },
+              }}
+              sx={{ flex: 1, minHeight: 0, height: "100%" }}
+            />
+          ) : loadingSessions ? (
+            <Box
+              sx={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <CircularProgress size={24} />
+            </Box>
+          ) : (
+            <Box
+              sx={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 1,
+                px: 2,
+              }}
+            >
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                align="center"
               >
-                <CircularProgress size={24} />
-              </Box>
-            ) : (
-              <Box
-                sx={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 1,
-                  px: 2,
-                }}
+                {t("ai.chat.load_failed")}
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => void loadSessions()}
               >
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  align="center"
-                >
-                  {t("ai.chat.load_failed")}
-                </Typography>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => void loadSessions()}
-                >
-                  {t("common.retry")}
-                </Button>
-              </Box>
-            )}
-          </Box>
+                {t("common.retry")}
+              </Button>
+            </Box>
+          )}
         </Box>
       </Box>
     </Box>

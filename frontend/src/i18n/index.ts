@@ -201,6 +201,14 @@ export function buildChatLocaleText(translate: TranslateFn = t) {
     messageToolDenyButtonLabel: translate("ai.chat.deny"),
     messageToolInputLabel: translate("ai.chat.tool_input"),
     messageToolOutputLabel: translate("ai.chat.tool_output"),
+    messageCopyButtonLabel: translate("common.copy"),
+    messageAuthorUserLabel: translate("ai.chat.user_you"),
+    messageAuthorAssistantLabel: translate("ai.chat.user_assistant"),
+    conversationHeaderMenuLabel: translate("ai.session.history"),
+    conversationHeaderCloseLabel: translate("common.close"),
+    conversationHeaderNewChatLabel: translate("ai.session.new"),
+    conversationListLandmarkLabel: translate("ai.session.history"),
+    composerInputPlaceholder: translate("ai.chat.placeholder"),
     toolStateLabel: (state: ChatToolInvocationState) => {
       switch (state) {
         case "input-streaming":
