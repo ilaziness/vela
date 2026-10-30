@@ -9,7 +9,8 @@
     "build": "node ./node_modules/@typescript/native/bin/tsc && vite build --mode production",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "install:mirror": "npm ci --registry=https://registry.npmmirror.com/"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
