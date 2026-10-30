@@ -100,3 +100,17 @@ func TestBuildSystemPromptEmptyOrInvalidPlanSkipped(t *testing.T) {
 		t.Fatal("empty tasks must omit section")
 	}
 }
+
+func TestBuildSystemPromptSecurityBansSecrets(t *testing.T) {
+	got := BuildSystemPromptOpts(PromptOptions{})
+	for _, want := range []string{
+		"禁止为获取凭据而探测或读取",
+		"勿经工具输出将凭据送入模型上下文",
+		"禁止使用凭据代登录",
+		"找密码 / 登录",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected security wording %q in prompt:\n%s", want, got)
+		}
+	}
+}

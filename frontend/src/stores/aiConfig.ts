@@ -67,7 +67,7 @@ const defaultConfig: AIConfig = {
   temperature: 0.7,
   max_tokens: 2048,
   echo_ssh_commands: false,
-  max_agent_turns: 30,
+  max_agent_turns: 50,
   filesystem: { allowed_dirs: [] },
   web_search: { provider: SearchProvider.$zero },
 };

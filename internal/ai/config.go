@@ -16,7 +16,7 @@ var (
 
 const (
 	// DefaultMaxAgentTurns 单次请求中模型↔工具交互的最大轮次，超出后终止生成。
-	DefaultMaxAgentTurns = 30
+	DefaultMaxAgentTurns = 50
 )
 
 // FileSystemConfig gates local file tools via an allowlist.
@@ -47,9 +47,9 @@ type Config struct {
 	WebSearch       WebSearchConfig  `json:"web_search" toml:"web_search"`
 }
 
-// EffectiveMaxAgentTurns returns configured turns or default.
+// EffectiveMaxAgentTurns 返回生效轮次：未配置或低于默认时用 DefaultMaxAgentTurns，允许配置更大值。
 func (c *Config) EffectiveMaxAgentTurns() int {
-	if c == nil || c.MaxAgentTurns <= 0 {
+	if c == nil || c.MaxAgentTurns < DefaultMaxAgentTurns {
 		return DefaultMaxAgentTurns
 	}
 	return c.MaxAgentTurns
