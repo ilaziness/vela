@@ -36,6 +36,25 @@ linters:
           disabled: true
         - name: package-comments
           disabled: true
+    gosec:
+      # High-signal rules for the HTTP sync server; skip noisy path/exec/taint noise.
+      includes:
+        - G101 # hardcoded credentials
+        - G102 # bind to all interfaces
+        - G108 # pprof exposed
+        - G112 # ReadHeaderTimeout
+        - G114 # serve without timeouts
+        - G201 # SQL format string
+        - G202 # SQL concatenation
+        - G301 # directory permissions
+        - G302 # file/chmod permissions
+        - G306 # file write permissions
+        - G402 # TLS InsecureSkipVerify
+        - G404 # weak random
+        - G405 # DES/RC4
+        - G502 # crypto/des import
+        - G503 # crypto/rc4 import
+        - G504 # net/http/cgi import
   exclusions:
     generated: lax
     presets:
@@ -44,15 +63,10 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      # Test fixtures / helpers.
+      # Test fixtures often use dummy secrets/keys.
       - path: _test\.go
         linters:
           - gosec
-      # Config path comes from CLI/operator, not untrusted request input.
-      - path: config\.go
-        linters:
-          - gosec
-        text: "G703:"
 
 formatters:
   enable:

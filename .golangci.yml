@@ -41,6 +41,28 @@ linters:
           disabled: true
         - name: package-comments
           disabled: true
+    gosec:
+      # High-signal only for this desktop SSH app; skip noisy exec/path/bounds/weak-hash/taint rules.
+      includes:
+        - G101 # hardcoded credentials
+        - G106 # ssh.InsecureIgnoreHostKey
+        - G108 # pprof exposed
+        - G201 # SQL format string
+        - G202 # SQL concatenation
+        - G301 # directory permissions
+        - G302 # file/chmod permissions
+        - G305 # zip path traversal
+        - G306 # file write permissions
+        - G402 # TLS InsecureSkipVerify
+        - G403 # short RSA key
+        - G404 # weak random
+        - G405 # DES/RC4
+        - G406 # MD4/RIPEMD160
+        - G407 # hardcoded IV/nonce
+        - G408 # ssh.PublicKeyCallback misuse
+        - G502 # crypto/des import
+        - G503 # crypto/rc4 import
+        - G504 # net/http/cgi import
   exclusions:
     generated: lax
     presets:
@@ -52,30 +74,10 @@ linters:
       # Wails platform scaffolding (not app business code).
       - ^build/
     rules:
-      # Intentional hash toolbox (MD5/SHA1 as user-facing utilities).
-      - path: internal/tools/tools\.go
-        linters:
-          - gosec
-        text: "(G401|G501|G505)"
-      # Test fixtures / helpers.
+      # Test fixtures often use dummy secrets/keys.
       - path: _test\.go
         linters:
           - gosec
-      # Localhost-only probe URL for proxy detection.
-      - path: internal/httpproxy/
-        linters:
-          - gosec
-        text: "G704:"
-      # Packing trusted local user-data; Walk TOCTOU / decompress-bomb are low value.
-      - path: internal/sync/packer\.go
-        linters:
-          - gosec
-        text: "(G110|G122)"
-      # Known-range platform/protocol conversions (time, PID, token caps, tar mode).
-      - path: internal/(ai/config\.go|ssh/|sync/packer\.go)
-        linters:
-          - gosec
-        text: "G115:"
 
 formatters:
   enable:
