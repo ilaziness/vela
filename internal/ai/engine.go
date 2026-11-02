@@ -194,6 +194,8 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEve
 		}
 	}
 
+	// Soft MCP / invalid-arg paths use tool.Fail (soft-answers without SoftToolErrors).
+	// SoftToolErrors would also soft-answer MCP transport failures and burn MaxAgentTurns.
 	middleware := []genkitAI.Middleware{toolStreamMiddleware{}}
 	if skillDirs, err := EnabledSkillPaths(userDataDir); err == nil && len(skillDirs) > 0 {
 		middleware = append(middleware, skillsMiddleware{SkillDirs: skillDirs})
@@ -270,9 +272,9 @@ func (e *AIEngine) consumeStream(
 			continue
 		}
 
+		// A single chunk may carry both reasoning and text (compat_oai).
 		if reasoning := result.Chunk.Reasoning(); reasoning != "" {
 			_ = onEvent(StreamEvent{Type: EventReasoningDelta, ID: reasoningID, Delta: reasoning})
-			continue
 		}
 		if text := result.Chunk.Text(); text != "" {
 			streamed.WriteString(text)

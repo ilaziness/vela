@@ -2,13 +2,17 @@ package ai
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
+	genkitTool "github.com/firebase/genkit/go/ai/tool"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -244,7 +248,9 @@ func connectMCPClient(ctx context.Context, entry MCPServerEntry) (*mcpclient.Cli
 	if err != nil {
 		return nil, err
 	}
-	client := mcpclient.NewClient(tr)
+	// Manual round-trips so input_required results reach mcpToolCallOutput
+	// (tool.Fail) instead of auto-failing on missing elicitation handlers.
+	client := mcpclient.NewClient(tr, mcpclient.WithManualInputRoundTrips())
 	if err := client.Start(ctx); err != nil {
 		_ = client.Close()
 		return nil, fmt.Errorf("start transport: %w", err)
@@ -291,17 +297,30 @@ func buildMCPTools(serverName string, client *mcpclient.Client, mcpTools []mcp.T
 		if err != nil {
 			return nil, err
 		}
-		if tool != nil {
-			out = append(out, tool)
-		}
+		out = append(out, tool)
 	}
 	return out, nil
 }
 
+// maxMCPToolNameLen matches Google GenAI tool-name limits (≤64 chars).
+const maxMCPToolNameLen = 64
+
 // mcpNamespacedToolName follows Claude Code / Codex: mcp__{server}__{tool}.
 // Parts are sanitized to [A-Za-z0-9_-] so OpenAI-style tool name validation passes.
+// Names longer than maxMCPToolNameLen are truncated with a stable hash suffix
+// so Gemini registration does not reject them.
 func mcpNamespacedToolName(serverName, toolName string) string {
-	return "mcp__" + sanitizeMCPNamePart(serverName) + "__" + sanitizeMCPNamePart(toolName)
+	name := "mcp__" + sanitizeMCPNamePart(serverName) + "__" + sanitizeMCPNamePart(toolName)
+	if len(name) <= maxMCPToolNameLen {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := hex.EncodeToString(sum[:4]) // 8 hex chars
+	keep := maxMCPToolNameLen - 1 - len(suffix)
+	if keep < 1 {
+		keep = 1
+	}
+	return name[:keep] + "_" + suffix
 }
 
 func sanitizeMCPNamePart(s string) string {
@@ -326,41 +345,121 @@ func buildMCPTool(serverName string, client *mcpclient.Client, mcpTool mcp.Tool)
 	inputSchema := mcpInputSchemaMap(mcpTool)
 	rawToolName := mcpTool.Name
 	fn := func(toolCtx *genkitAI.ToolContext, args any) (any, error) {
-		callArgs, err := prepareMCPToolArgs(mcpTool, args)
-		if err != nil {
-			return nil, err
-		}
 		ctx := context.Background()
 		if toolCtx != nil && toolCtx.Context != nil {
 			ctx = toolCtx.Context
+		}
+		callArgs, err := prepareMCPToolArgs(mcpTool, args)
+		if err != nil {
+			// Let the model correct missing/invalid args.
+			return nil, genkitTool.Fail(ctx, err)
 		}
 		var callReq mcp.CallToolRequest
 		callReq.Params.Name = rawToolName
 		callReq.Params.Arguments = callArgs
 		result, err := client.CallTool(ctx, callReq)
 		if err != nil {
+			// Transport/protocol failures are hard errors (model cannot fix them).
 			return nil, fmt.Errorf("mcp tool %s: %w", namespaced, err)
 		}
-		return result, nil
+		out, err := mcpToolCallOutput(ctx, result)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 
-	if len(inputSchema) > 0 {
-		return genkitAI.NewTool(namespaced, mcpTool.Description, fn, genkitAI.WithInputSchema(inputSchema)), nil
-	}
-	return genkitAI.NewTool(namespaced, mcpTool.Description, fn), nil
+	return genkitAI.NewTool(namespaced, mcpTool.Description, fn, genkitAI.WithInputSchema(inputSchema)), nil
 }
 
 func mcpInputSchemaMap(mcpTool mcp.Tool) map[string]any {
-	schemaBytes, err := json.Marshal(mcpTool.InputSchema)
-	if err != nil {
-		return map[string]any{}
-	}
 	var out map[string]any
-	_ = json.Unmarshal(schemaBytes, &out)
+	if len(mcpTool.RawInputSchema) > 0 {
+		_ = json.Unmarshal(mcpTool.RawInputSchema, &out)
+	}
 	if out == nil {
-		return map[string]any{}
+		schemaBytes, err := json.Marshal(mcpTool.InputSchema)
+		if err != nil {
+			out = map[string]any{}
+		} else {
+			_ = json.Unmarshal(schemaBytes, &out)
+			if out == nil {
+				out = map[string]any{}
+			}
+		}
+	}
+	// mcp-go marshals a zero ToolInputSchema as type:"" — normalize for providers.
+	if t, _ := out["type"].(string); t == "" {
+		out["type"] = "object"
+	}
+	if out["properties"] == nil {
+		out["properties"] = map[string]any{}
 	}
 	return out
+}
+
+// mcpToolCallOutput turns an MCP tools/call result into a Genkit tool payload.
+// Modern protocol results include protocol bookkeeping (_meta, resultType); the
+// model only needs structuredContent or text content. MCP isError / NeedsInput
+// use tool.Fail so Genkit answers the model instead of aborting the turn.
+func mcpToolCallOutput(ctx context.Context, result *mcp.CallToolResult) (any, error) {
+	if result == nil {
+		return nil, fmt.Errorf("empty result")
+	}
+	if result.NeedsInput() {
+		return nil, genkitTool.Fail(ctx, errors.New("additional input required (not supported)"))
+	}
+	payload := mcpToolResultPayload(result)
+	if result.IsError {
+		return nil, genkitTool.Fail(ctx, errors.New(mcpToolErrorMessage(payload)))
+	}
+	return payload, nil
+}
+
+func mcpToolErrorMessage(payload any) string {
+	switch v := payload.(type) {
+	case string:
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	case map[string]any:
+		if len(v) == 0 {
+			return "the tool reported an error without a message"
+		}
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+	}
+	msg := fmt.Sprint(payload)
+	if msg == "" || msg == "map[]" {
+		return "the tool reported an error without a message"
+	}
+	return msg
+}
+
+func mcpToolResultPayload(result *mcp.CallToolResult) any {
+	if result.StructuredContent != nil {
+		return result.StructuredContent
+	}
+	texts := make([]string, 0, len(result.Content))
+	for _, c := range result.Content {
+		switch v := c.(type) {
+		case mcp.TextContent:
+			texts = append(texts, v.Text)
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				texts = append(texts, string(b))
+			}
+		}
+	}
+	switch len(texts) {
+	case 0:
+		return map[string]any{}
+	case 1:
+		return texts[0]
+	default:
+		return strings.Join(texts, "\n")
+	}
 }
 
 func prepareMCPToolArgs(mcpTool mcp.Tool, args any) (map[string]any, error) {

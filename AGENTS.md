@@ -8,14 +8,14 @@
 
 | 类别       | 技术/库           | 版本要求  |
 | ---------- | ----------------- | --------- |
-| 后端语言   | Go                | ≥ 1.27.1  |
-| 桌面框架   | Wails             | v3.x      |
+| 后端语言   | Go                | ≥ 1.27.3  |
+| 桌面框架   | Wails             | ≥ v3.1.0  |
 | 前端框架   | React             | v19.x     |
 | 前端 UI 库 | Material UI (MUI) | v9.1.x    |
 | 前端路由   | React Router      | v8.x      |
 | 终端模拟器 | XTerm.js          | v6.x      |
 | 构建工具   | Wails CLI + Vite  | Vite v8.x |
-| AI 框架    | Genkit            | v1.9.x    |
+| AI 框架    | Genkit            | ≥ v1.14.0 |
 
 ---
 

@@ -85,6 +85,13 @@ func wrapToolCall(
 
 	resp, err := next(ctx, params)
 	if err != nil {
+		// tool.Fail soft-answers the model; surface that as tool output, not a hard UI error.
+		if genkitAI.IsToolFailError(err) {
+			outJSON, _ := json.Marshal(map[string]any{"error": err.Error()})
+			emitDeps(deps, StreamEvent{Type: EventToolOutputAvailable, ToolCallID: callID, ToolName: name, Output: outJSON})
+			emitDeps(deps, StreamEvent{Type: EventFinishStep})
+			return resp, err
+		}
 		emitDeps(deps, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: name, ErrorText: err.Error()})
 		emitDeps(deps, StreamEvent{Type: EventFinishStep})
 		return resp, err

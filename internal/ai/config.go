@@ -63,16 +63,62 @@ func (c *Config) EffectiveAllowedDirs() []string {
 	return tool.SanitizeAllowedDirs(c.Filesystem.AllowedDirs)
 }
 
+// isOpenAIReasoningModel reports models that use the Responses/completions
+// reasoning API shape (o-series / gpt-5), where MaxTokens is rejected.
+func isOpenAIReasoningModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	m = strings.TrimPrefix(m, "openai/")
+	switch {
+	case strings.HasPrefix(m, "o1"),
+		strings.HasPrefix(m, "o3"),
+		strings.HasPrefix(m, "o4"),
+		strings.HasPrefix(m, "gpt-5"):
+		return true
+	default:
+		return false
+	}
+}
+
+// ollamaThinkOption returns a Think setting only for models that support it.
+// Non-thinking models (e.g. llama3.2) reject think:true with HTTP 400.
+func ollamaThinkOption(model string) *ollama.ThinkOption {
+	m := strings.ToLower(strings.TrimSpace(model))
+	base, _, _ := strings.Cut(m, ":")
+	switch {
+	case strings.Contains(base, "gpt-oss"):
+		return ollama.ThinkEffort("medium")
+	case strings.Contains(base, "deepseek-r1"),
+		strings.HasPrefix(base, "qwq"),
+		strings.HasPrefix(base, "magistral"):
+		return ollama.ThinkEnabled(true)
+	default:
+		return nil
+	}
+}
+
+// isGoogleThinkingModel reports Gemini models that accept ThinkingConfig.
+// Older models (1.5 / 2.0 / flash-lite class) reject includeThoughts.
+func isGoogleThinkingModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	m = strings.TrimPrefix(m, "googleai/")
+	m = strings.TrimPrefix(m, "google/")
+	switch {
+	case strings.Contains(m, "gemini-2.5"),
+		strings.Contains(m, "gemini-3"),
+		strings.Contains(m, "thinking"):
+		return true
+	default:
+		return false
+	}
+}
+
 // buildGenConfig 构建各供应商的原生配置结构
 func (c *Config) buildGenConfig() any {
 	switch c.Provider {
 	case ProviderOllama:
 		cfg := &ollama.GenerateContentConfig{
-			Think:       ollama.ThinkEnabled(true),
+			Think:       ollamaThinkOption(c.Model),
 			Temperature: &defaultTemperature,
-		}
-		if strings.Contains(c.Model, "GPT") {
-			cfg.Think = ollama.ThinkEffort("medium")
 		}
 		if c.Temperature > 0 {
 			cfg.Temperature = new(c.Temperature)
@@ -83,10 +129,19 @@ func (c *Config) buildGenConfig() any {
 		return cfg
 
 	case ProviderOpenAI, ProviderOpenAICompatible:
-		cfg := &openai.ChatCompletionNewParams{
-			Temperature:     openai.Float(defaultTemperature),
-			ReasoningEffort: openai.ReasoningEffortMedium,
+		cfg := &openai.ChatCompletionNewParams{}
+		// o-series / gpt-5 reject temperature and max_tokens; use MaxCompletionTokens.
+		// ReasoningEffort is official OpenAI only — many openai_compatible gateways reject it.
+		if isOpenAIReasoningModel(c.Model) {
+			if c.Provider == ProviderOpenAI {
+				cfg.ReasoningEffort = openai.ReasoningEffortMedium
+			}
+			if c.MaxTokens > 0 {
+				cfg.MaxCompletionTokens = openai.Int(int64(c.MaxTokens))
+			}
+			return cfg
 		}
+		cfg.Temperature = openai.Float(defaultTemperature)
 		if c.Temperature > 0 {
 			cfg.Temperature = openai.Float(c.Temperature)
 		}
@@ -97,9 +152,11 @@ func (c *Config) buildGenConfig() any {
 	case ProviderGoogle:
 		cfg := &genai.GenerateContentConfig{
 			Temperature: genai.Ptr(float32(0.5)),
-			ThinkingConfig: &genai.ThinkingConfig{
+		}
+		if isGoogleThinkingModel(c.Model) {
+			cfg.ThinkingConfig = &genai.ThinkingConfig{
 				IncludeThoughts: true,
-			},
+			}
 		}
 		if c.Temperature > 0 {
 			cfg.Temperature = genai.Ptr(float32(c.Temperature))
