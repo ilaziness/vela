@@ -10,20 +10,21 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Typography,
 } from "@mui/material";
-import {
-  Description as FileIcon,
-  Folder as FolderIcon,
-} from "@mui/icons-material";
 import { Entry } from "../../bindings/github.com/ilaziness/vela/internal/localfs/models";
 import { formatFileSize } from "../func/service";
 import { t } from "../i18n";
 import {
   PaneSide,
   dragStartsOnControl,
+  sftpCheckboxSx,
+  sftpCol,
+  sftpTableContainerSx,
+  sftpTableSx,
   writePaneDrag,
 } from "../func/sftpPane";
+import EllipsisTooltip from "./EllipsisTooltip";
+import SftpEntryLabel from "./SftpEntryLabel";
 
 interface LocalFilePaneProps {
   entries: Entry[];
@@ -68,26 +69,34 @@ const LocalFilePane: React.FC<LocalFilePaneProps> = ({
           <CircularProgress />
         </Box>
       ) : (
-        <TableContainer component={Paper} sx={{ boxShadow: "none" }}>
-          <Table stickyHeader size="small">
+        <TableContainer component={Paper} sx={sftpTableContainerSx}>
+          <Table stickyHeader size="small" sx={sftpTableSx}>
             <TableHead>
               <TableRow>
-                <TableCell padding="checkbox">
+                <TableCell sx={sftpCol.checkbox}>
                   <Checkbox
                     size="small"
+                    sx={sftpCheckboxSx}
                     indeterminate={selectedPaths.size > 0 && !allSelected}
                     checked={allSelected}
                     onChange={onToggleAll}
                   />
                 </TableCell>
                 <TableCell>{t("sftp.name")}</TableCell>
-                <TableCell align="center">{t("sftp.size")}</TableCell>
-                <TableCell align="center">{t("sftp.modified")}</TableCell>
+                <TableCell align="center" sx={sftpCol.size}>
+                  {t("sftp.size")}
+                </TableCell>
+                <TableCell align="center" sx={sftpCol.modified}>
+                  {t("sftp.modified")}
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {entries.map((entry) => {
                 const selected = selectedPaths.has(entry.path);
+                const modTimeText = entry.modTime
+                  ? new Date(entry.modTime).toLocaleString()
+                  : "-";
                 return (
                   <TableRow
                     hover
@@ -107,30 +116,22 @@ const LocalFilePane: React.FC<LocalFilePaneProps> = ({
                       });
                     }}
                   >
-                    <TableCell padding="checkbox">
+                    <TableCell>
                       <Checkbox
                         size="small"
+                        sx={sftpCheckboxSx}
                         checked={selected}
                         onChange={() => onToggle(entry.path)}
                       />
                     </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                        {entry.isDir ? (
-                          <FolderIcon sx={{ color: "#FFB74D" }} fontSize="small" />
-                        ) : (
-                          <FileIcon sx={{ color: "#81C784" }} fontSize="small" />
-                        )}
-                        <Typography noWrap>{entry.name}</Typography>
-                      </Box>
+                    <TableCell sx={{ overflow: "hidden" }}>
+                      <SftpEntryLabel isDir={entry.isDir} name={entry.name} />
                     </TableCell>
                     <TableCell align="center">
                       {entry.isDir ? "-" : formatFileSize(entry.size)}
                     </TableCell>
-                    <TableCell align="center">
-                      {entry.modTime
-                        ? new Date(entry.modTime).toLocaleString()
-                        : "-"}
+                    <TableCell align="center" sx={{ overflow: "hidden" }}>
+                      <EllipsisTooltip text={modTimeText} />
                     </TableCell>
                   </TableRow>
                 );

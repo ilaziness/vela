@@ -1,6 +1,7 @@
-import { Box, Tooltip, Typography } from "@mui/material";
+import { Box } from "@mui/material";
 import React from "react";
 import CloseIcon from "@mui/icons-material/Close";
+import EllipsisTooltip from "./EllipsisTooltip";
 
 interface SSHTabTextProps {
   text: string;
@@ -9,19 +10,8 @@ interface SSHTabTextProps {
 
 const SSHTabText: React.FC<SSHTabTextProps> = ({ text, onClose }) => {
   return (
-    <Box
-      component="span"
-      sx={{ display: "flex", alignItems: "center" }}
-    >
-      <Box
-        sx={{
-          maxWidth: 90,
-        }}
-      >
-        <Tooltip title={text}>
-          <Typography noWrap>{text}</Typography>
-        </Tooltip>
-      </Box>
+    <Box component="span" sx={{ display: "flex", alignItems: "center" }}>
+      <EllipsisTooltip text={text} sx={{ maxWidth: 90 }} />
       {onClose && (
         <CloseIcon
           sx={{

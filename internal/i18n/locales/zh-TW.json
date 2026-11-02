@@ -604,7 +604,6 @@
   "sftp.show_dotfiles": "顯示隱藏檔",
   "sftp.size": "大小",
   "sftp.symbolic_prefix": "符號：%s",
-  "sftp.type": "類型",
   "sftp.upload_failed": "上傳 %s 失敗：%s",
   "sftp.upload_file": "上傳檔案",
   "sftp.upload_folder": "上傳檔案夹",

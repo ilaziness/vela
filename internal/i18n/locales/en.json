@@ -604,7 +604,6 @@
   "sftp.show_dotfiles": "Show hidden files",
   "sftp.size": "Size",
   "sftp.symbolic_prefix": "Symbolic: %s",
-  "sftp.type": "Type",
   "sftp.upload_failed": "Failed to upload %s: %s",
   "sftp.upload_file": "Upload File",
   "sftp.upload_folder": "Upload Folder",

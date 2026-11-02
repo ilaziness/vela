@@ -3,6 +3,25 @@ export enum PaneSide {
   Remote = "remote",
 }
 
+/** Shared fixed-layout styles for local/remote file tables. */
+export const sftpTableSx = {
+  tableLayout: "fixed" as const,
+  width: "100%",
+  "& .MuiTableCell-root": { padding: "4px 8px" },
+};
+/** Avoid Paper radius + TableContainer overflow clipping the header checkbox. */
+export const sftpTableContainerSx = {
+  boxShadow: "none",
+  borderRadius: 0,
+  overflow: "visible",
+} as const;
+export const sftpCol = {
+  checkbox: { width: 36 },
+  size: { width: 88 },
+  modified: { width: 180 },
+} as const;
+export const sftpCheckboxSx = { p: 0 } as const;
+
 export const sftpDragMime = "application/x-vela-sftp";
 
 export interface PaneDragData {

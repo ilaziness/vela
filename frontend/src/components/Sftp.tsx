@@ -31,10 +31,8 @@ import {
   CloudDownload as DownloadIcon,
   CreateNewFolder as CreateFolderIcon,
   Delete as DeleteIcon,
-  Description as FileIcon,
   Edit as EditIcon,
   DriveFileRenameOutline as RenameIcon,
-  Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
   NoteAdd as CreateFileIcon,
   Security as ChmodIcon,
@@ -60,11 +58,17 @@ import {
   allowPaneDragOver,
   dragStartsOnControl,
   readPaneDrag,
+  sftpCheckboxSx,
+  sftpCol,
+  sftpTableContainerSx,
+  sftpTableSx,
   writePaneDrag,
 } from "../func/sftpPane";
 import { useMessageStore } from "../stores/message";
 import { useTransferStore } from "../stores/transfer";
+import EllipsisTooltip from "./EllipsisTooltip";
 import LocalFilePane from "./LocalFilePane";
+import SftpEntryLabel from "./SftpEntryLabel";
 import SftpNavbar from "./SftpNavbar";
 import {
   FileInfo,
@@ -981,13 +985,14 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                       minHeight: "100%",
                     }}
                   >
-                    <TableContainer component={Paper} sx={{ boxShadow: "none" }}>
-                      <Table stickyHeader size="small">
+                    <TableContainer component={Paper} sx={sftpTableContainerSx}>
+                      <Table stickyHeader size="small" sx={sftpTableSx}>
                         <TableHead>
                           <TableRow>
-                            <TableCell padding="checkbox">
+                            <TableCell sx={sftpCol.checkbox}>
                               <Checkbox
                                 size="small"
+                                sx={sftpCheckboxSx}
                                 indeterminate={
                                   selectionCount > 0 && !allSelected
                                 }
@@ -995,15 +1000,21 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                                 onChange={toggleSelectAll}
                               />
                             </TableCell>
-                            <TableCell>{t("sftp.type")}</TableCell>
                             <TableCell>{t("sftp.name")}</TableCell>
-                            <TableCell align="center">{t("sftp.size")}</TableCell>
-                            <TableCell align="center">{t("sftp.modified")}</TableCell>
+                            <TableCell align="center" sx={sftpCol.size}>
+                              {t("sftp.size")}
+                            </TableCell>
+                            <TableCell align="center" sx={sftpCol.modified}>
+                              {t("sftp.modified")}
+                            </TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
                           {fileList.map((file) => {
                             const selected = selectedNames.has(file.name);
+                            const modTimeText = new Date(
+                              file.modTime,
+                            ).toLocaleString();
                             return (
                               <TableRow
                                 hover
@@ -1028,9 +1039,10 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                                   });
                                 }}
                               >
-                                <TableCell padding="checkbox">
+                                <TableCell>
                                   <Checkbox
                                     size="small"
+                                    sx={sftpCheckboxSx}
                                     checked={selected}
                                     onChange={() => {
                                       setSelectedNames((prev) => {
@@ -1043,39 +1055,23 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
                                     }}
                                   />
                                 </TableCell>
-                                <TableCell component="th" scope="row">
-                                  {file.isDir ? (
-                                    <FolderIcon sx={{ color: "#FFB74D" }} />
-                                  ) : (
-                                    <FileIcon sx={{ color: "#81C784" }} />
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <Box
-                                    sx={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                    }}
-                                  >
-                                    <Typography noWrap sx={{ flex: 1 }}>
-                                      {file.name}
-                                    </Typography>
-                                    <Typography
-                                      noWrap
-                                      variant="subtitle2"
-                                      color="textSecondary"
-                                    >
-                                      {file.mode}
-                                    </Typography>
-                                  </Box>
+                                <TableCell sx={{ overflow: "hidden" }}>
+                                  <SftpEntryLabel
+                                    isDir={file.isDir}
+                                    name={file.name}
+                                    mode={file.mode}
+                                  />
                                 </TableCell>
                                 <TableCell align="center">
                                   {file.isDir
                                     ? "-"
                                     : formatFileSize(file.size)}
                                 </TableCell>
-                                <TableCell align="center">
-                                  {new Date(file.modTime).toLocaleString()}
+                                <TableCell
+                                  align="center"
+                                  sx={{ overflow: "hidden" }}
+                                >
+                                  <EllipsisTooltip text={modTimeText} />
                                 </TableCell>
                               </TableRow>
                             );
