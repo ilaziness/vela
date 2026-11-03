@@ -31,13 +31,14 @@ type SSHConfigImportResult = bookmark.ImportResult
 type SSHConfigExportResult = bookmark.ExportResult
 
 type BookmarkService struct {
-	app  *application.App
-	core *bookmark.Service
-	ssh  *SSHService
+	app   *application.App
+	core  *bookmark.Service
+	ssh   *SSHService
+	store *config.Store
 }
 
-func NewBookmarkService(app *application.App, core *bookmark.Service, ssh *SSHService) *BookmarkService {
-	return &BookmarkService{app: app, core: core, ssh: ssh}
+func NewBookmarkService(app *application.App, core *bookmark.Service, ssh *SSHService, store *config.Store) *BookmarkService {
+	return &BookmarkService{app: app, core: core, ssh: ssh, store: store}
 }
 
 func (bs *BookmarkService) ConnectBookmark(bookmarkID string) {
@@ -150,11 +151,7 @@ func (bs *BookmarkService) SaveAndConnect(b SSHBookmark) (string, error) {
 // ImportSSHConfig opens a file dialog and imports OpenSSH config into groupName.
 // Cancelled dialog returns Cancelled=true without error.
 func (bs *BookmarkService) ImportSSHConfig(groupName string) (SSHConfigImportResult, error) {
-	path, err := bs.app.Dialog.OpenFile().
-		SetTitle(i18n.T("dialog.select_openssh_config")).
-		CanChooseDirectories(false).
-		CanChooseFiles(true).
-		PromptForSingleSelection()
+	path, err := promptOpenFile(bs.app, bs.store, i18n.T("dialog.select_openssh_config"))
 	if dialogCancelled(err) || path == "" {
 		return SSHConfigImportResult{Cancelled: true}, nil
 	}
@@ -187,7 +184,7 @@ func (bs *BookmarkService) ExportSSHConfig(groupName string) (SSHConfigExportRes
 		b.WriteString(content)
 		content = b.String()
 	}
-	path, err := promptSaveFile(bs.app, i18n.T("dialog.export_openssh_config"), "config")
+	path, err := promptSaveFile(bs.app, bs.store, i18n.T("dialog.export_openssh_config"), "config")
 	if dialogCancelled(err) || path == "" {
 		return SSHConfigExportResult{Cancelled: true, Warnings: warnings}, nil
 	}

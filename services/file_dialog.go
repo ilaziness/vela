@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"github.com/ilaziness/vela/internal/config"
 )
 
 func dialogCancelled(err error) bool {
@@ -40,14 +42,97 @@ func defaultDownloadDir() string {
 	return home
 }
 
+func dialogStartDir(store *config.Store) string {
+	if store != nil {
+		if dir := store.LastDialogDir(); dir != "" {
+			return dir
+		}
+	}
+	return defaultDownloadDir()
+}
+
+// rememberDialogPath stores the selected directory, or the parent of a file / save-as path.
+func rememberDialogPath(store *config.Store, selected string) {
+	if store == nil || selected == "" {
+		return
+	}
+	dir := selected
+	if st, err := os.Stat(selected); err != nil || !st.IsDir() {
+		dir = filepath.Dir(selected)
+	}
+	_ = store.SetLastDialogDir(dir)
+}
+
+func withDialogStartDir(dlg *application.OpenFileDialogStruct, store *config.Store) *application.OpenFileDialogStruct {
+	if dir := dialogStartDir(store); dir != "" {
+		return dlg.SetDirectory(dir)
+	}
+	return dlg
+}
+
+// promptOpenFile shows a single-file open dialog.
+func promptOpenFile(app *application.App, store *config.Store, title string) (string, error) {
+	dlg := withDialogStartDir(
+		app.Dialog.OpenFile().
+			SetTitle(title).
+			CanChooseDirectories(false).
+			CanChooseFiles(true),
+		store,
+	)
+	path, err := dlg.PromptForSingleSelection()
+	if err == nil && path != "" {
+		rememberDialogPath(store, path)
+	}
+	return path, err
+}
+
+// promptOpenFiles shows a multi-file open dialog with an optional filter.
+func promptOpenFiles(app *application.App, store *config.Store, title, filterName, filterPattern string) ([]string, error) {
+	dlg := withDialogStartDir(
+		app.Dialog.OpenFile().
+			SetTitle(title).
+			CanChooseDirectories(false).
+			CanChooseFiles(true),
+		store,
+	)
+	if filterName != "" && filterPattern != "" {
+		dlg.AddFilter(filterName, filterPattern)
+	}
+	paths, err := dlg.PromptForMultipleSelection()
+	if err == nil && len(paths) > 0 {
+		rememberDialogPath(store, paths[0])
+	}
+	return paths, err
+}
+
+// promptOpenDirectory shows a directory-only open dialog.
+func promptOpenDirectory(app *application.App, store *config.Store, title string) (string, error) {
+	dlg := withDialogStartDir(
+		app.Dialog.OpenFile().
+			SetTitle(title).
+			CanChooseDirectories(true).
+			CanChooseFiles(false).
+			CanCreateDirectories(true),
+		store,
+	)
+	path, err := dlg.PromptForSingleSelection()
+	if err == nil && path != "" {
+		rememberDialogPath(store, path)
+	}
+	return path, err
+}
+
 // promptSaveFile shows a save dialog with a prefilled filename.
 // Wails v3 GTK4 Linux dialogs ignore SetFilename (wails#4841); zenity/kdialog
 // are tried first on Linux, then Wails.
-func promptSaveFile(app *application.App, title, filename string) (string, error) {
+func promptSaveFile(app *application.App, store *config.Store, title, filename string) (string, error) {
 	filename = suggestedSaveName(filename)
 	if runtime.GOOS == "linux" {
-		p, err := linuxSaveFile(title, filename)
+		p, err := linuxSaveFile(store, title, filename)
 		if err == nil {
+			if p != "" {
+				rememberDialogPath(store, p)
+			}
 			return p, nil
 		}
 	}
@@ -56,28 +141,20 @@ func promptSaveFile(app *application.App, title, filename string) (string, error
 		Message:              title,
 		Filename:             filename,
 		CanCreateDirectories: true,
-		Directory:            defaultDownloadDir(),
+		Directory:            dialogStartDir(store),
 	}
 	dlg := app.Dialog.SaveFile()
 	dlg.SetOptions(&opts)
-	return dlg.PromptForSingleSelection()
-}
-
-func promptOpenDirectory(app *application.App, title string) (string, error) {
-	dlg := app.Dialog.OpenFile().
-		SetTitle(title).
-		CanChooseDirectories(true).
-		CanChooseFiles(false).
-		CanCreateDirectories(true)
-	if dir := defaultDownloadDir(); dir != "" {
-		dlg = dlg.SetDirectory(dir)
+	path, err := dlg.PromptForSingleSelection()
+	if err == nil && path != "" {
+		rememberDialogPath(store, path)
 	}
-	return dlg.PromptForSingleSelection()
+	return path, err
 }
 
-func linuxSaveFile(title, filename string) (string, error) {
+func linuxSaveFile(store *config.Store, title, filename string) (string, error) {
 	initial := filename
-	if dir := defaultDownloadDir(); dir != "" {
+	if dir := dialogStartDir(store); dir != "" {
 		initial = filepath.Join(dir, filename)
 	}
 	cmds := [][]string{

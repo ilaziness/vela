@@ -16,12 +16,12 @@ const (
 	// 缓冲区大小: 1MB，优化大文件传输性能
 	bufferSize = 1024 * 1024
 	// Machine-local; must not travel with sync packs.
-	skipWindowStateName = "window-state.toml"
+	skipLocalStateName = "local-state.toml"
 )
 
 func shouldSkipSyncPath(relPath string) bool {
 	base := filepath.Base(relPath)
-	return base == skipWindowStateName
+	return base == skipLocalStateName
 }
 
 // archiveTargetPath joins dstDir with an archive entry name and rejects path escapes.

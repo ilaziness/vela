@@ -209,7 +209,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     }
     setLocalLoading(true);
     try {
-      const listing = await SftpService.ListLocal(target, showHiddenAll);
+      const listing = await SftpService.ListLocal(target, showHiddenAll, ownerKey);
       if (seq !== localListSeq.current) return false;
       const entries = listing.entries ?? [];
       localDirRef.current = listing.dir;

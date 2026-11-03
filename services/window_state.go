@@ -65,7 +65,7 @@ func bindMainWindowState(win *application.WebviewWindow, store *config.Store, lo
 
 func saveMainWindowState(win *application.WebviewWindow, store *config.Store, log *zap.Logger) {
 	prev := store.Window()
-	st := config.WindowState{
+	st := config.WindowGeometry{
 		Width:     prev.Width,
 		Height:    prev.Height,
 		Maximised: win.IsMaximised() || win.IsFullscreen(),

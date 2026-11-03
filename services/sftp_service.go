@@ -4,6 +4,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/localfs"
 	"github.com/ilaziness/vela/internal/sftp"
@@ -34,27 +35,42 @@ type TransferQueuedData struct {
 type SftpService struct {
 	app    *application.App
 	mgr    *sftp.Manager
+	store  *config.Store
 	logger *zap.Logger
 	edits  *editBook
 }
 
-func NewSftpService(app *application.App, mgr *sftp.Manager, logger *zap.Logger) *SftpService {
+func NewSftpService(app *application.App, mgr *sftp.Manager, store *config.Store, logger *zap.Logger) *SftpService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &SftpService{app: app, mgr: mgr, logger: logger, edits: newEditBook()}
+	return &SftpService{app: app, mgr: mgr, store: store, logger: logger, edits: newEditBook()}
 }
 
 func (s *SftpService) ListFiles(sessionID, path string, showHidden bool) ([]FileInfo, error) {
 	return s.mgr.ListFiles(sessionID, path, showHidden)
 }
 
-// ListLocal reads a local directory. An empty dir uses the user home directory.
-func (s *SftpService) ListLocal(dir string, showHidden bool) (localfs.Listing, error) {
-	return localfs.List(dir, showHidden)
+// ListLocal reads a local directory. An empty dir uses the remembered path for
+// ownerKey when set, otherwise the user home directory. Successful listings
+// update the per-host remembered directory.
+func (s *SftpService) ListLocal(dir string, showHidden bool, ownerKey string) (localfs.Listing, error) {
+	if dir == "" && ownerKey != "" {
+		dir = s.store.SftpLocalDir(ownerKey)
+	}
+	listing, err := localfs.List(dir, showHidden)
+	if err != nil {
+		return listing, err
+	}
+	if ownerKey != "" {
+		if saveErr := s.store.SetSftpLocalDir(ownerKey, listing.Dir); saveErr != nil {
+			s.logger.Debug("remember sftp local dir failed", zap.Error(saveErr))
+		}
+	}
+	return listing, nil
 }
 func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
-	localPath, err := s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_file")).PromptForSingleSelection()
+	localPath, err := promptOpenFile(s.app, s.store, i18n.T("dialog.select_file"))
 	if dialogCancelled(err) || localPath == "" {
 		return nil
 	}
@@ -64,7 +80,7 @@ func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	return s.mgr.UploadFile(sessionID, localPath, remotePath)
 }
 func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error {
-	localPathFile, err := promptSaveFile(s.app, i18n.T("dialog.save_file"), remotePathFile)
+	localPathFile, err := promptSaveFile(s.app, s.store, i18n.T("dialog.save_file"), remotePathFile)
 	if dialogCancelled(err) || localPathFile == "" {
 		return nil
 	}
@@ -74,8 +90,7 @@ func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error
 	return s.mgr.DownloadFile(sessionID, localPathFile, remotePathFile)
 }
 func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error {
-	localPath, err := s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_dir")).
-		CanChooseDirectories(true).CanChooseFiles(false).PromptForSingleSelection()
+	localPath, err := promptOpenDirectory(s.app, s.store, i18n.T("dialog.select_dir"))
 	if dialogCancelled(err) || localPath == "" {
 		return nil
 	}
@@ -85,7 +100,7 @@ func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error 
 	return s.mgr.UploadDirectory(sessionID, localPath, remotePath)
 }
 func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) error {
-	dest, err := promptSaveFile(s.app, i18n.T("dialog.save_dir"), remotePath)
+	dest, err := promptSaveFile(s.app, s.store, i18n.T("dialog.save_dir"), remotePath)
 	if dialogCancelled(err) || dest == "" {
 		return nil
 	}
@@ -104,7 +119,7 @@ func (s *SftpService) DownloadPaths(sessionID, localDir string, remotePaths []st
 }
 
 func (s *SftpService) DownloadPathsDialog(sessionID string, remotePaths []string) error {
-	localDir, err := promptOpenDirectory(s.app, i18n.T("dialog.select_dir"))
+	localDir, err := promptOpenDirectory(s.app, s.store, i18n.T("dialog.select_dir"))
 	if dialogCancelled(err) || localDir == "" {
 		return nil
 	}

@@ -153,12 +153,13 @@ func (s *AIService) OpenSkillDir(name string) error {
 
 // PickChatAttachments opens a native multi-file dialog and returns absolute paths.
 func (s *AIService) PickChatAttachments() ([]string, error) {
-	dlg := s.app.Dialog.OpenFile().
-		SetTitle(i18n.T("dialog.select_attachment")).
-		CanChooseFiles(true).
-		CanChooseDirectories(false)
-	dlg.AddFilter(i18n.T("dialog.attachment_filter"), "*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.txt;*.md;*.csv")
-	paths, err := dlg.PromptForMultipleSelection()
+	paths, err := promptOpenFiles(
+		s.app,
+		s.configService.store,
+		i18n.T("dialog.select_attachment"),
+		i18n.T("dialog.attachment_filter"),
+		"*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.txt;*.md;*.csv",
+	)
 	if dialogCancelled(err) {
 		return nil, nil
 	}

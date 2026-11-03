@@ -75,7 +75,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	hostPrompter := &hostKeyPrompter{app: a}
 	keyboardPrompter := &keyboardInteractivePrompter{app: a}
 	sshMgr := ssh.NewManager(log, filepath.Join(cfgStore.UserDataDir(), "known_hosts"), hostPrompter, keyboardPrompter)
-	sshMgr.SetZmodem(newZmodemPicker(a))
+	sshMgr.SetZmodem(newZmodemPicker(a, cfgStore))
 	sshMgr.SetOptions(ssh.Options{
 		ServerAliveInterval: time.Duration(cfgStore.Config.SSH.ServerAliveInterval) * time.Second,
 		DialTimeout:         time.Duration(cfgStore.Config.SSH.DialTimeoutSec) * time.Second,
@@ -98,8 +98,8 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	})
 	tunnelMgr := tunnel.NewManager(log, sshMgr)
 
-	sftpService := NewSftpService(a, sftpMgr, log)
-	sshService := NewSSHService(a, sshMgr, sftpMgr, tunnelMgr)
+	sftpService := NewSftpService(a, sftpMgr, cfgStore, log)
+	sshService := NewSSHService(a, sshMgr, sftpMgr, tunnelMgr, cfgStore)
 	sshService.setSFTPCloseHooks(sftpService.CloseSessionEdits, sftpService.CleanupSessionEditDir, sftpService.CloseAllEdits, sftpService.CleanupAllEditDirs)
 	sshService.setSSHConfigGetter(func() config.SSHConfig {
 		return cfgStore.Config.SSH
@@ -118,7 +118,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 		a.Event.Emit(EventBookmarkUpdate, BookmarkUpdateMsg)
 	}, onBadPass, keys.PrivatePEM, onEncrypted)
 	sshService.bind(termWS, bookmarks)
-	bookmarkService := NewBookmarkService(a, bookmarks, sshService)
+	bookmarkService := NewBookmarkService(a, bookmarks, sshService, cfgStore)
 
 	commandSvc := command.New(log, db, commandsLoader, sshService.SendToSession)
 	commandService := NewCommandService(windows, commandSvc, termWS)
@@ -131,7 +131,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	toolService := NewToolService(windows)
 	aiService := NewAIService(a, log, configService, sshService, db)
 	aiService.RecoverOrphanTurns()
-	appService := NewAppService(a, windows, termWS, log)
+	appService := NewAppService(a, windows, termWS, cfgStore, log)
 	tunnelService := NewSSHTunnelService(tunnelMgr)
 
 	a.RegisterService(application.NewService(appService))
@@ -143,7 +143,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	a.RegisterService(application.NewService(commandService))
 	a.RegisterService(application.NewService(syncService))
 	a.RegisterService(application.NewService(toolService))
-	a.RegisterService(application.NewService(NewKeyService(a, keys, log)))
+	a.RegisterService(application.NewService(NewKeyService(a, keys, cfgStore, log)))
 	a.RegisterService(application.NewService(aiService))
 
 	appService.startBackgroundUpdateCheck()

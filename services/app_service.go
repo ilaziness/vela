@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/httpproxy"
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/system"
@@ -50,16 +51,17 @@ type AppService struct {
 	windows     *Windows
 	termWS      *termws.Server
 	mainWindow  *application.WebviewWindow
+	store       *config.Store
 	logger      *zap.Logger
 	keybindings *KeyBindingManager
 	updateMu    sync.Mutex
 }
 
-func NewAppService(app *application.App, windows *Windows, termWS *termws.Server, logger *zap.Logger) *AppService {
+func NewAppService(app *application.App, windows *Windows, termWS *termws.Server, store *config.Store, logger *zap.Logger) *AppService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	cs := &AppService{app: app, windows: windows, termWS: termWS, mainWindow: windows.Main, logger: logger}
+	cs := &AppService{app: app, windows: windows, termWS: termWS, mainWindow: windows.Main, store: store, logger: logger}
 	cs.initUpdater()
 	cs.cleanupUpdateLeftovers()
 	return cs
@@ -136,18 +138,11 @@ func (cs *AppService) MainWindowClose() {
 }
 
 func (cs *AppService) SelectDirectory() (string, error) {
-	return cs.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_dir")).
-		CanChooseDirectories(true).
-		CanChooseFiles(false).
-		CanCreateDirectories(true).
-		PromptForSingleSelection()
+	return promptOpenDirectory(cs.app, cs.store, i18n.T("dialog.select_dir"))
 }
 
 func (cs *AppService) SelectFile() (string, error) {
-	return cs.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_file")).
-		CanChooseDirectories(false).
-		CanChooseFiles(true).
-		PromptForSingleSelection()
+	return promptOpenFile(cs.app, cs.store, i18n.T("dialog.select_file"))
 }
 
 func (cs *AppService) GetAppInfo() AppInfo {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	stdsync "sync"
 
 	"github.com/pelletier/go-toml/v2"
 	"go.uber.org/zap"
@@ -86,13 +87,14 @@ type AppConfig struct {
 }
 
 type Store struct {
-	Config          *Config
-	appConfig       *AppConfig
-	userConfigFile  string
-	appConfigFile   string
-	windowStateFile string
-	window          WindowState
-	logger          *zap.Logger
+	Config         *Config
+	appConfig      *AppConfig
+	userConfigFile string
+	appConfigFile  string
+	localStateFile string
+	local          LocalState
+	localMu        stdsync.Mutex
+	logger         *zap.Logger
 }
 
 func Default() *Config {
@@ -258,14 +260,14 @@ func Load(logger *zap.Logger) (*Store, error) {
 	logger.Debug("config loaded", zap.String("appConfigPath", appConfigPath), zap.String("userConfigPath", userConfigPath))
 
 	store := &Store{
-		Config:          finalConfig,
-		appConfig:       appConfig,
-		userConfigFile:  userConfigPath,
-		appConfigFile:   appConfigPath,
-		windowStateFile: filepath.Join(userDataDir, WindowStateFileName),
-		logger:          logger,
+		Config:         finalConfig,
+		appConfig:      appConfig,
+		userConfigFile: userConfigPath,
+		appConfigFile:  appConfigPath,
+		localStateFile: filepath.Join(userDataDir, LocalStateFileName),
+		logger:         logger,
 	}
-	store.LoadWindow()
+	store.LoadLocalState()
 	return store, nil
 }
 
@@ -317,7 +319,9 @@ func (s *Store) ApplyUserDataDir(dir string) error {
 		return fmt.Errorf("create user data dir failed: %w", err)
 	}
 	s.userConfigFile = filepath.Join(dir, FileName)
-	s.windowStateFile = filepath.Join(dir, WindowStateFileName)
+	s.localMu.Lock()
+	s.localStateFile = filepath.Join(dir, LocalStateFileName)
+	s.localMu.Unlock()
 	s.Config.General.UserDataDir = dir
 	return nil
 }

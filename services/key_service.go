@@ -6,6 +6,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/sshkey"
 )
@@ -16,14 +17,15 @@ type SSHKeyPublic = sshkey.PublicResult
 type KeyService struct {
 	app    *application.App
 	core   *sshkey.Service
+	store  *config.Store
 	logger *zap.Logger
 }
 
-func NewKeyService(app *application.App, core *sshkey.Service, logger *zap.Logger) *KeyService {
+func NewKeyService(app *application.App, core *sshkey.Service, store *config.Store, logger *zap.Logger) *KeyService {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &KeyService{app: app, core: core, logger: logger}
+	return &KeyService{app: app, core: core, store: store, logger: logger}
 }
 
 func (s *KeyService) List() ([]SSHKeyInfo, error) {
@@ -77,7 +79,7 @@ func (s *KeyService) GenerateAndExport(algorithm, comment, passphrase string) (S
 }
 
 func (s *KeyService) pickPath(filename string) (string, bool, error) {
-	path, err := promptSaveFile(s.app, i18n.T("dialog.export_private_key"), filename)
+	path, err := promptSaveFile(s.app, s.store, i18n.T("dialog.export_private_key"), filename)
 	if dialogCancelled(err) || path == "" {
 		return "", false, nil
 	}

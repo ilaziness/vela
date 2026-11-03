@@ -100,6 +100,7 @@ type SSHService struct {
 	mgr                  *ssh.Manager
 	sftp                 *sftp.Manager
 	tunnels              *tunnel.Manager
+	store                *config.Store
 	termws               *termws.Server
 	bookmarks            *bookmark.Service
 	getSSHConfig         func() config.SSHConfig
@@ -122,8 +123,8 @@ func (s *SSHService) setSFTPCloseHooks(onSession, onSessionCleanup func(sessionI
 	s.onSFTPCloseAllClean = onAllCleanup
 }
 
-func NewSSHService(app *application.App, mgr *ssh.Manager, sftpMgr *sftp.Manager, tunnels *tunnel.Manager) *SSHService {
-	s := &SSHService{app: app, mgr: mgr, sftp: sftpMgr, tunnels: tunnels}
+func NewSSHService(app *application.App, mgr *ssh.Manager, sftpMgr *sftp.Manager, tunnels *tunnel.Manager, store *config.Store) *SSHService {
+	s := &SSHService{app: app, mgr: mgr, sftp: sftpMgr, tunnels: tunnels, store: store}
 	mgr.SetOnSessionLogStopped(s.onSessionLogStopped)
 	mgr.SetOnCwd(s.onTerminalCwd)
 	return s
@@ -301,11 +302,11 @@ func (s *SSHService) CloseByID(id string) error {
 }
 
 func (s *SSHService) SelectKeyFile() (string, error) {
-	return s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_private_key")).PromptForSingleSelection()
+	return promptOpenFile(s.app, s.store, i18n.T("dialog.select_private_key"))
 }
 
 func (s *SSHService) SelectCertificateFile() (string, error) {
-	return s.app.Dialog.OpenFile().SetTitle(i18n.T("dialog.select_certificate")).PromptForSingleSelection()
+	return promptOpenFile(s.app, s.store, i18n.T("dialog.select_certificate"))
 }
 
 func (s *SSHService) GetActiveSessions() []map[string]any {
@@ -362,7 +363,7 @@ func (s *SSHService) StartSessionLog(sessionID string) (path string, started boo
 		prefix = prefix[:8]
 	}
 	filename := fmt.Sprintf("vela-session-%s-%s.log", prefix, time.Now().Format("20060102-150405"))
-	path, err = promptSaveFile(s.app, i18n.T("dialog.save_session_log"), filename)
+	path, err = promptSaveFile(s.app, s.store, i18n.T("dialog.save_session_log"), filename)
 	if dialogCancelled(err) || path == "" {
 		return "", false, nil
 	}
