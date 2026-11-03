@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -57,10 +58,18 @@ type ConfigService struct {
 	chanMutex         sync.Mutex
 	onSSHSaved        func(config.SSHConfig)
 	onLanguageChanged func(lang string)
+	hasSecrets        func() bool
+	probePassword     func(password string) bool
 }
 
 func NewConfigService(app *application.App, windows *Windows, store *config.Store, vault *secret.Vault) *ConfigService {
 	return &ConfigService{app: app, windows: windows, store: store, vault: vault}
+}
+
+// configureVaultProbes wires secret-existence and password-probe callbacks (from register).
+func (cs *ConfigService) configureVaultProbes(hasSecrets func() bool, probePassword func(string) bool) {
+	cs.hasSecrets = hasSecrets
+	cs.probePassword = probePassword
 }
 
 func (cs *ConfigService) current() *config.Config {
@@ -208,14 +217,86 @@ func (cs *ConfigService) saveAI(cfg ai.Config) error {
 	return cs.store.Save()
 }
 
-func (cs *ConfigService) SetUserPassword(password string) {
+func (cs *ConfigService) isUnlocked() bool {
+	_, err := cs.vault.Get()
+	return err == nil
+}
+
+// NeedsUnlock is true when encrypted secrets or a verifier exist and the vault is locked.
+func (cs *ConfigService) NeedsUnlock() bool {
+	if cs.isUnlocked() {
+		return false
+	}
+	ct, err := secret.LoadVerifierCiphertext(cs.userDataDir())
+	if err == nil && ct != "" {
+		return true
+	}
+	if cs.hasSecrets != nil && cs.hasSecrets() {
+		return true
+	}
+	return false
+}
+
+// Unlock validates the master password, sets the process vault, and wakes password waiters.
+func (cs *ConfigService) Unlock(password string) error {
+	if password == "" {
+		return usererr.Coded("error.password_not_entered", "Password not entered")
+	}
+	dir := cs.userDataDir()
+	ct, err := secret.LoadVerifierCiphertext(dir)
+	if err != nil {
+		return err
+	}
+	if ct != "" {
+		if err := secret.CheckPassword(ct, password); err != nil {
+			return usererr.Coded("error.password_invalid", "Invalid password")
+		}
+	} else if cs.hasSecrets != nil && cs.hasSecrets() {
+		if cs.probePassword == nil || !cs.probePassword(password) {
+			return usererr.Coded("error.password_invalid", "Invalid password")
+		}
+		if err := secret.EnsureVerifier(dir, password); err != nil {
+			return err
+		}
+	}
+	// First-time set (no verifier/secrets): vault only; verifier written on first encrypt.
+	cs.finishUnlock(password)
+	return nil
+}
+
+// AbortPasswordWait ends a pending password prompt without clearing an unlocked vault.
+func (cs *ConfigService) AbortPasswordWait() {
+	cs.wakePasswordWaiters()
+}
+
+func (cs *ConfigService) finishUnlock(password string) {
 	cs.vault.Set(password)
+	cs.wakePasswordWaiters()
+	cs.app.Event.Emit(EventInputPasswordClose, "")
+}
+
+func (cs *ConfigService) wakePasswordWaiters() {
 	cs.chanMutex.Lock()
 	ch := cs.passwordChan
 	cs.passwordChan = nil
 	cs.chanMutex.Unlock()
 	if ch != nil {
 		close(ch)
+	}
+}
+
+// clearVaultIfPasswordInvalid clears the vault only when the current password fails the verifier.
+func (cs *ConfigService) clearVaultIfPasswordInvalid() {
+	password, err := cs.vault.Get()
+	if err != nil || password == "" {
+		return
+	}
+	ct, err := secret.LoadVerifierCiphertext(cs.userDataDir())
+	if err != nil || ct == "" {
+		return
+	}
+	if err := secret.CheckPassword(ct, password); err != nil {
+		cs.vault.Clear()
 	}
 }
 
@@ -226,7 +307,11 @@ func (cs *ConfigService) waitForPassword(reason string) error {
 	cs.chanMutex.Lock()
 	if cs.passwordChan == nil {
 		cs.passwordChan = make(chan struct{})
-		cs.app.Event.Emit(EventInputPassword, reason)
+		msg := strings.TrimSpace(reason)
+		if msg == "" {
+			msg = i18n.T("password.encrypt_decrypt_required")
+		}
+		cs.app.Event.Emit(EventInputPassword, msg)
 	}
 	ch := cs.passwordChan
 	cs.chanMutex.Unlock()
@@ -235,7 +320,6 @@ func (cs *ConfigService) waitForPassword(reason string) error {
 		if _, err := cs.vault.Get(); err != nil {
 			return usererr.Coded("error.password_not_entered", "Password not entered")
 		}
-		cs.app.Event.Emit(EventInputPasswordClose, "")
 		return nil
 	case <-time.After(60 * time.Second):
 		cs.chanMutex.Lock()
@@ -267,7 +351,21 @@ func (cs *ConfigService) encryptValue(plain, reason string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return secret.Encrypt(password, plain)
+	enc, err := secret.Encrypt(password, plain)
+	if err != nil {
+		return "", err
+	}
+	cs.persistVerifierFromVault()
+	return enc, nil
+}
+
+// persistVerifierFromVault writes the master-password verifier after secrets are encrypted.
+func (cs *ConfigService) persistVerifierFromVault() {
+	password, err := cs.vault.Get()
+	if err != nil || password == "" {
+		return
+	}
+	_ = secret.EnsureVerifier(cs.userDataDir(), password)
 }
 
 func (cs *ConfigService) decryptValue(enc, reason string) (string, error) {

@@ -89,19 +89,20 @@ type ListItem struct {
 }
 
 type Service struct {
-	logger     *zap.Logger
-	db         *database.Database
-	passwordFn PasswordFn
-	keyPEM     KeyPEMFunc
-	onUpdate   func()
-	onBadPass  func()
+	logger      *zap.Logger
+	db          *database.Database
+	passwordFn  PasswordFn
+	keyPEM      KeyPEMFunc
+	onUpdate    func()
+	onBadPass   func()
+	onEncrypted func()
 }
 
-func New(logger *zap.Logger, db *database.Database, passwordFn PasswordFn, onUpdate, onBadPass func(), keyPEM KeyPEMFunc) *Service {
+func New(logger *zap.Logger, db *database.Database, passwordFn PasswordFn, onUpdate, onBadPass func(), keyPEM KeyPEMFunc, onEncrypted func()) *Service {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Service{logger: logger, db: db, passwordFn: passwordFn, onUpdate: onUpdate, onBadPass: onBadPass, keyPEM: keyPEM}
+	return &Service{logger: logger, db: db, passwordFn: passwordFn, onUpdate: onUpdate, onBadPass: onBadPass, keyPEM: keyPEM, onEncrypted: onEncrypted}
 }
 
 func (s *Service) emit() {
@@ -132,6 +133,9 @@ func (s *Service) encryptField(value, fieldName string) (string, error) {
 	encrypted, err := secret.Encrypt(password, value)
 	if err != nil {
 		return "", fmt.Errorf("failed to encrypt %s: %w", fieldName, err)
+	}
+	if s.onEncrypted != nil {
+		s.onEncrypted()
 	}
 	return encrypted, nil
 }
@@ -172,7 +176,7 @@ func (s *Service) encryptFieldIfNeeded(newValue, existing, fieldName string) (st
 }
 
 func (s *Service) decryptField(encrypted, fieldName string) (string, error) {
-	password, err := s.password(i18n.T("password.encrypt_bookmark"))
+	password, err := s.password(i18n.T("password.encrypt_decrypt_required"))
 	if err != nil {
 		return "", err
 	}

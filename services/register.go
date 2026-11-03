@@ -107,10 +107,16 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	termWS := termws.NewServer(log, sshMgr, func(id string) { _ = sshService.CloseByID(id) })
 	sshMgr.SetOnClose(sshService.onSessionClosed)
 
-	keys := sshkey.New(log, db, configService.getPasswordWithPrompt, vault.Clear)
+	configService.configureVaultProbes(
+		func() bool { return vaultHasEncryptedSecrets(cfgStore, db) },
+		func(pw string) bool { return vaultProbePassword(cfgStore, db, pw) },
+	)
+	onBadPass := configService.clearVaultIfPasswordInvalid
+	onEncrypted := configService.persistVerifierFromVault
+	keys := sshkey.New(log, db, configService.getPasswordWithPrompt, onBadPass, onEncrypted)
 	bookmarks := bookmark.New(log, db, configService.getPasswordWithPrompt, func() {
 		a.Event.Emit(EventBookmarkUpdate, BookmarkUpdateMsg)
-	}, vault.Clear, keys.PrivatePEM)
+	}, onBadPass, keys.PrivatePEM, onEncrypted)
 	sshService.bind(termWS, bookmarks)
 	bookmarkService := NewBookmarkService(a, bookmarks, sshService)
 
@@ -165,4 +171,83 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 		}
 	})
 	return nil
+}
+
+func vaultHasEncryptedSecrets(cfgStore *config.Store, db *database.Database) bool {
+	if cfgStore != nil && cfgStore.Config != nil {
+		aiCfg := cfgStore.Config.AI
+		if strings.TrimSpace(aiCfg.APIKeyEncrypted) != "" || strings.TrimSpace(aiCfg.WebSearch.APIKeyEncrypted) != "" {
+			return true
+		}
+	}
+	if db == nil {
+		return false
+	}
+	if bookmarks, err := db.BookmarkRepo.GetAllBookmarks(); err == nil {
+		for _, b := range bookmarks {
+			if b == nil {
+				continue
+			}
+			if b.Password != "" || b.PrivateKeyPassword != "" || b.ProxyPassword != "" {
+				return true
+			}
+		}
+	}
+	if keys, err := db.SSHKeyRepo.List(); err == nil {
+		for _, k := range keys {
+			if k != nil && k.PrivateKey != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// vaultProbePassword checks the master password against a few ciphertexts.
+// Argon2 is expensive; cap attempts so a wrong password cannot decrypt every row.
+func vaultProbePassword(cfgStore *config.Store, db *database.Database, password string) bool {
+	const maxAttempts = 5
+	attempts := 0
+	try := func(enc string) bool {
+		enc = strings.TrimSpace(enc)
+		if enc == "" || attempts >= maxAttempts {
+			return false
+		}
+		attempts++
+		_, err := secret.Decrypt(password, enc)
+		return err == nil
+	}
+	if cfgStore != nil && cfgStore.Config != nil {
+		aiCfg := cfgStore.Config.AI
+		if try(aiCfg.APIKeyEncrypted) || try(aiCfg.WebSearch.APIKeyEncrypted) {
+			return true
+		}
+	}
+	if db == nil {
+		return false
+	}
+	if bookmarks, err := db.BookmarkRepo.GetAllBookmarks(); err == nil {
+		for _, b := range bookmarks {
+			if b == nil {
+				continue
+			}
+			if try(b.Password) || try(b.PrivateKeyPassword) || try(b.ProxyPassword) {
+				return true
+			}
+			if attempts >= maxAttempts {
+				return false
+			}
+		}
+	}
+	if keys, err := db.SSHKeyRepo.List(); err == nil {
+		for _, k := range keys {
+			if k != nil && try(k.PrivateKey) {
+				return true
+			}
+			if attempts >= maxAttempts {
+				return false
+			}
+		}
+	}
+	return false
 }

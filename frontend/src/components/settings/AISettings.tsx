@@ -170,7 +170,8 @@ const AISettings: React.FC = () => {
   );
   const allowedDirs = config?.filesystem?.allowed_dirs ?? [];
 
-  const setAllowedDirs = (dirs: string[]) => {
+  const persistAllowedDirs = async (dirs: string[]) => {
+    await AIService.SetFilesystemAllowedDirs(dirs);
     updatePartialConfig({
       filesystem: { allowed_dirs: dirs },
     });
@@ -197,15 +198,19 @@ const AISettings: React.FC = () => {
         setNewAllowDir("");
         return;
       }
-      setAllowedDirs([...allowedDirs, normalized]);
+      await persistAllowedDirs([...allowedDirs, normalized]);
       setNewAllowDir("");
     } catch (err) {
       errorMessage(translateServiceError(err));
     }
   };
 
-  const removeAllowedDir = (dir: string) => {
-    setAllowedDirs(allowedDirs.filter((d) => d !== dir));
+  const removeAllowedDir = async (dir: string) => {
+    try {
+      await persistAllowedDirs(allowedDirs.filter((d) => d !== dir));
+    } catch (err) {
+      errorMessage(translateServiceError(err));
+    }
   };
 
   if (isLoading || !config) {
@@ -421,7 +426,7 @@ const AISettings: React.FC = () => {
                         <IconButton
                           edge="end"
                           aria-label="delete"
-                          onClick={() => removeAllowedDir(dir)}
+                          onClick={() => void removeAllowedDir(dir)}
                         >
                           <ClearIcon fontSize="small" />
                         </IconButton>

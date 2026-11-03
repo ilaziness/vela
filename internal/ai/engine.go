@@ -371,7 +371,7 @@ func (e *AIEngine) Close() {
 // When Genkit is not initialized, servers are probed for status only (no retained stdio processes).
 func (e *AIEngine) ReloadMCPAndSkills(ctx context.Context) error {
 	e.mu.RLock()
-	g := e.genkit
+	ready := e.genkit != nil
 	userDataDir := e.userDataDir
 	mcp := e.mcp
 	e.mu.RUnlock()
@@ -381,7 +381,38 @@ func (e *AIEngine) ReloadMCPAndSkills(ctx context.Context) error {
 	if mcp == nil {
 		return nil
 	}
-	return mcp.Reload(ctx, g != nil, userDataDir)
+	return mcp.Reload(ctx, ready, userDataDir)
+}
+
+// EnsureMCPToolsConnected reloads MCP with keepConnections when Genkit is ready
+// but ActiveTools is empty while enabled servers exist in mcp.json.
+func (e *AIEngine) EnsureMCPToolsConnected(ctx context.Context) error {
+	e.mu.RLock()
+	ready := e.genkit != nil
+	userDataDir := e.userDataDir
+	mcp := e.mcp
+	e.mu.RUnlock()
+	if !ready || mcp == nil || userDataDir == "" {
+		return nil
+	}
+	if len(mcp.ActiveTools()) > 0 {
+		return nil
+	}
+	cfg, err := LoadMCPConfig(userDataDir)
+	if err != nil {
+		return err
+	}
+	hasEnabled := false
+	for _, entry := range cfg.Entries() {
+		if entry.IsEnabled() {
+			hasEnabled = true
+			break
+		}
+	}
+	if !hasEnabled {
+		return nil
+	}
+	return mcp.Reload(ctx, true, userDataDir)
 }
 
 // ListMCPServers returns cached MCP status without probing.

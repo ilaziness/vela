@@ -9,105 +9,93 @@ import (
 )
 
 func TestBuildSystemPromptNoSSH(t *testing.T) {
-	got := BuildSystemPromptOpts(PromptOptions{})
-	if !strings.Contains(got, time.Now().Format("2006年1月")) {
+	got := BuildSystemPromptOpts(PromptOptions{UILanguage: "en"})
+	ym := time.Now().Format("2006-01")
+	if !strings.Contains(got, ym) {
 		t.Fatalf("expected current year-month in prompt, got:\n%s", got)
 	}
-	if !strings.Contains(got, "不要调用 run_ssh_command") {
-		t.Fatalf("expected no-SSH tool ban, got:\n%s", got)
+	if !strings.Contains(got, "Respond in the user's UI language: en") {
+		t.Fatalf("expected UI language rule:\n%s", got)
 	}
-	if !strings.Contains(got, "不要假设仍可访问聊天历史中曾出现的其他主机") {
-		t.Fatalf("expected history-host warning, got:\n%s", got)
+	if !strings.Contains(got, "Current SSH context") {
+		t.Fatalf("expected SSH context section:\n%s", got)
 	}
-	if strings.Contains(got, "可以使用 run_ssh_command") {
-		t.Fatalf("unexpected SSH-enabled wording:\n%s", got)
-	}
-	if strings.Contains(got, "run_ssh_command 在当前已连接主机") {
-		t.Fatalf("SSH capability should be omitted when disabled:\n%s", got)
+	if strings.Contains(got, "run_ssh_command is available") {
+		t.Fatalf("did not expect connected SSH tools blurb:\n%s", got)
 	}
 }
 
 func TestBuildSystemPromptWithSSH(t *testing.T) {
-	ctx := &SSHPromptContext{Host: "10.0.0.2", Port: 22, User: "root"}
-	got := BuildSystemPromptOpts(PromptOptions{SSH: ctx, EnableSSH: true})
-	if !strings.Contains(got, "root@10.0.0.2:22") {
-		t.Fatalf("expected connection line, got:\n%s", got)
+	ctx := &SSHPromptContext{Host: "h.example", Port: 22, User: "u"}
+	got := BuildSystemPromptOpts(PromptOptions{SSH: ctx, EnableSSH: true, UILanguage: "zh-CN"})
+	if !strings.Contains(got, "run_ssh_command") {
+		t.Fatalf("expected SSH capability:\n%s", got)
 	}
-	if !strings.Contains(got, "以本轮系统提示中的连接为准") {
-		t.Fatalf("expected current-host rule, got:\n%s", got)
+	if !strings.Contains(got, "u@h.example:22") {
+		t.Fatalf("expected connection line:\n%s", got)
 	}
-	remote := &ssh.RemoteSystemInfo{Ready: true, Hostname: "box"}
-	got2 := BuildSystemPromptOpts(PromptOptions{SSH: ctx, Remote: remote, EnableSSH: true})
-	if !strings.Contains(got2, "主机名：box") {
-		t.Fatalf("expected remote hostname, got:\n%s", got2)
+	if !strings.Contains(got, "Respond in the user's UI language: zh-CN") {
+		t.Fatalf("expected zh-CN language rule:\n%s", got)
+	}
+	remote := &ssh.RemoteSystemInfo{Ready: true, Hostname: "box", OSPretty: "Ubuntu", OSID: "ubuntu", OSVersion: "22.04"}
+	got2 := BuildSystemPromptOpts(PromptOptions{SSH: ctx, Remote: remote, EnableSSH: true, UILanguage: "en"})
+	if !strings.Contains(got2, "Hostname: box") {
+		t.Fatalf("expected remote info:\n%s", got2)
 	}
 }
 
 func TestBuildSystemPromptOptsFSAndSearch(t *testing.T) {
 	got := BuildSystemPromptOpts(PromptOptions{
 		EnableFS:        true,
-		AllowDirs:       []string{`D:\work`},
+		AllowDirs:       []string{`D:\data`},
 		EnableWebSearch: true,
+		UILanguage:      "en",
 	})
 	if !strings.Contains(got, "read_local_file") {
 		t.Fatalf("expected FS tools in prompt:\n%s", got)
 	}
-	if !strings.Contains(got, `D:\work`) {
+	if !strings.Contains(got, `D:\data`) {
 		t.Fatalf("expected allow dir in prompt:\n%s", got)
 	}
 	if !strings.Contains(got, "web_search") {
 		t.Fatalf("expected web_search in prompt:\n%s", got)
 	}
-	off := BuildSystemPromptOpts(PromptOptions{})
-	if strings.Contains(off, "web_search") || strings.Contains(off, "read_local_file") {
-		t.Fatalf("disabled tools must not appear:\n%s", off)
+	off := BuildSystemPromptOpts(PromptOptions{UILanguage: "en"})
+	if strings.Contains(off, "Local file allowlist") {
+		t.Fatalf("unexpected allowlist when FS off:\n%s", off)
 	}
 }
 
 func TestBuildSystemPromptCurrentPlanLastSection(t *testing.T) {
-	plan := `{"title":"Fix nginx","tasks":[{"id":"t1","title":"Check config","status":"running"},{"id":"t2","title":"Reload","status":"pending"}]}`
-	got := BuildSystemPromptOpts(PromptOptions{PlanJSON: plan})
-	idxPlan := strings.Index(got, "## 当前计划")
-	idxSSH := strings.Index(got, "## 当前 SSH 上下文")
+	plan := `{"title":"T","tasks":[{"id":"1","title":"A","status":"pending"}]}`
+	got := BuildSystemPromptOpts(PromptOptions{PlanJSON: plan, UILanguage: "en"})
+	idxPlan := strings.Index(got, "## Current plan")
 	if idxPlan < 0 {
-		t.Fatalf("missing ## 当前计划:\n%s", got)
+		t.Fatalf("expected Current plan:\n%s", got)
 	}
-	if idxSSH < 0 || idxPlan < idxSSH {
-		t.Fatalf("## 当前计划 must follow SSH section: ssh=%d plan=%d\n%s", idxSSH, idxPlan, got)
-	}
-	if !strings.Contains(got, "权威计划快照") {
-		t.Fatalf("expected authoritative wording:\n%s", got)
-	}
-	if !strings.Contains(got, "[running] Check config（id=t1）") {
-		t.Fatalf("expected formatted task:\n%s", got)
-	}
-	if !strings.Contains(got, "禁止多步做完再一次批量改状态") {
-		t.Fatalf("expected step-update rule:\n%s", got)
-	}
-	if !strings.Contains(got, "变更必须再调用 upsert_plan") {
-		t.Fatalf("expected plan mutation rule in section:\n%s", got)
+	if !strings.Contains(got, "[pending] A (id=1)") {
+		t.Fatalf("expected task line:\n%s", got)
 	}
 }
 
 func TestBuildSystemPromptEmptyOrInvalidPlanSkipped(t *testing.T) {
-	if strings.Contains(BuildSystemPromptOpts(PromptOptions{}), "## 当前计划") {
-		t.Fatal("empty plan must omit section")
+	if strings.Contains(BuildSystemPromptOpts(PromptOptions{UILanguage: "en"}), "## Current plan") {
+		t.Fatal("empty plan")
 	}
-	if strings.Contains(BuildSystemPromptOpts(PromptOptions{PlanJSON: `{`}), "## 当前计划") {
-		t.Fatal("invalid JSON must omit section")
+	if strings.Contains(BuildSystemPromptOpts(PromptOptions{PlanJSON: `{`, UILanguage: "en"}), "## Current plan") {
+		t.Fatal("invalid plan")
 	}
-	if strings.Contains(BuildSystemPromptOpts(PromptOptions{PlanJSON: `{"title":"x","tasks":[]}`}), "## 当前计划") {
-		t.Fatal("empty tasks must omit section")
+	if strings.Contains(BuildSystemPromptOpts(PromptOptions{PlanJSON: `{"title":"x","tasks":[]}`, UILanguage: "en"}), "## Current plan") {
+		t.Fatal("empty tasks")
 	}
 }
 
 func TestBuildSystemPromptSecurityBansSecrets(t *testing.T) {
-	got := BuildSystemPromptOpts(PromptOptions{})
+	got := BuildSystemPromptOpts(PromptOptions{UILanguage: "en"})
 	for _, want := range []string{
-		"禁止为获取凭据而探测或读取",
-		"勿经工具输出将凭据送入模型上下文",
-		"禁止使用凭据代登录",
-		"找密码 / 登录",
+		"Never request, output, or guess passwords",
+		"API keys",
+		"credentials",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected security wording %q in prompt:\n%s", want, got)

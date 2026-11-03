@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -62,9 +63,10 @@ const defaultTermType = "xterm-256color"
 
 // Wait for MOTD/prompt to finish before stdin injection (avoids double echo).
 const (
-	shellReadyQuiet   = 300 * time.Millisecond
-	shellReadyTimeout = 3 * time.Second
-	shellReadyPoll    = 20 * time.Millisecond
+	shellReadyQuiet     = 300 * time.Millisecond
+	shellReadyTimeout   = 3 * time.Second
+	shellReadyPoll      = 20 * time.Millisecond
+	echoSuppressTimeout = 1500 * time.Millisecond
 )
 
 func (e Endpoint) Addr() string {
@@ -118,6 +120,9 @@ type Session struct {
 	cwdParser      cwdParser
 	cwdMu          sync.Mutex
 	cwd            string
+	suppressMu     sync.Mutex
+	suppressActive bool
+	suppressUntil  time.Time
 }
 
 type hopClient struct {
@@ -543,28 +548,44 @@ func (sc *Session) Start(cols, rows int) error {
 	if err = sc.startOutput(); err != nil {
 		return sc.failStart(err)
 	}
-	// exec + env (not Shell): cwd OSC without stdin inject / history / AcceptEnv.
-	if err = sc.session.Start(shellStartCommand()); err != nil {
+	// Shell (not exec): OpenSSH prints MOTD; cwd OSC is injected quietly after prompt.
+	if err = sc.session.Shell(); err != nil {
 		return sc.failStart(err)
 	}
-	if payload := buildStdinBootstrap(sc.env, sc.startupCmd); payload != "" {
-		stdin := sc.Stdin
-		id := sc.ID
-		logger := sc.manager.logger
-		system.SafeGo(func() {
-			sc.waitShellReady(shellReadyTimeout)
-			sc.closeMu.Lock()
-			closed := sc.isClosed
-			sc.closeMu.Unlock()
-			if closed || stdin == nil {
-				return
-			}
-			if writeErr := writeStdinLine(stdin, payload); writeErr != nil {
-				logger.Warn("session stdin bootstrap failed",
-					zap.String("id", id), zap.Error(writeErr))
-			}
-		})
-	}
+	stdin := sc.Stdin
+	id := sc.ID
+	logger := sc.manager.logger
+	userBoot := buildStdinBootstrap(sc.env, sc.startupCmd)
+	system.SafeGo(func() {
+		sc.waitShellReady(shellReadyTimeout)
+		sc.closeMu.Lock()
+		closed := sc.isClosed
+		sc.closeMu.Unlock()
+		if closed || stdin == nil {
+			return
+		}
+		cwdLine := buildCwdInjectLine()
+		sc.beginEchoSuppress(echoSuppressTimeout)
+		if writeErr := writeStdinLine(stdin, cwdLine); writeErr != nil {
+			sc.endEchoSuppress()
+			logger.Warn("session cwd inject failed", zap.String("id", id), zap.Error(writeErr))
+			return
+		}
+		sc.waitEchoSuppressDone(echoSuppressTimeout)
+		if userBoot == "" {
+			return
+		}
+		sc.closeMu.Lock()
+		closed = sc.isClosed
+		sc.closeMu.Unlock()
+		if closed || stdin == nil {
+			return
+		}
+		if writeErr := writeStdinLine(stdin, userBoot); writeErr != nil {
+			logger.Warn("session stdin bootstrap failed",
+				zap.String("id", id), zap.Error(writeErr))
+		}
+	})
 	pty := sc.session
 	go func() {
 		waitErr := pty.Wait()
@@ -630,6 +651,9 @@ func (sc *Session) readFromPipe(pipe io.Reader, pipeName string) func() {
 		}
 		buf := make([]byte, sc.outputBuffSize)
 		emit := func(data []byte) bool {
+			if pipeName == "stdout" {
+				data = sc.filterEchoSuppress(data)
+			}
 			if len(data) == 0 {
 				return true
 			}
@@ -793,7 +817,7 @@ func filterEnv(env map[string]string) map[string]string {
 }
 
 // buildStdinBootstrap builds one shell line: exports + optional startup command.
-// Empty when neither is configured.
+// Empty when neither is configured. Visible to the user (not echo-suppressed).
 func buildStdinBootstrap(env map[string]string, startup string) string {
 	env = filterEnv(env)
 	startup = strings.TrimSpace(startup)
@@ -825,4 +849,55 @@ func writeStdinLine(stdin io.Writer, line string) error {
 	}
 	_, err := io.WriteString(stdin, line+"\n")
 	return err
+}
+
+func (sc *Session) beginEchoSuppress(d time.Duration) {
+	sc.suppressMu.Lock()
+	sc.suppressActive = true
+	sc.suppressUntil = time.Now().Add(d)
+	sc.suppressMu.Unlock()
+}
+
+func (sc *Session) endEchoSuppress() {
+	sc.suppressMu.Lock()
+	sc.suppressActive = false
+	sc.suppressMu.Unlock()
+}
+
+func (sc *Session) waitEchoSuppressDone(d time.Duration) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		sc.suppressMu.Lock()
+		active := sc.suppressActive
+		sc.suppressMu.Unlock()
+		if !active {
+			return
+		}
+		time.Sleep(shellReadyPoll)
+	}
+	sc.endEchoSuppress()
+}
+
+// filterEchoSuppress drops PTY echo of the silent cwd inject until the first
+// newline (end of echoed line) or timeout. Remaining bytes after '\n' are kept
+// (typically the reprinted prompt). feedCwd still sees raw stdout.
+func (sc *Session) filterEchoSuppress(data []byte) []byte {
+	sc.suppressMu.Lock()
+	defer sc.suppressMu.Unlock()
+	if !sc.suppressActive {
+		return data
+	}
+	if time.Now().After(sc.suppressUntil) {
+		sc.suppressActive = false
+		return data
+	}
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		sc.suppressActive = false
+		rest := data[i+1:]
+		for len(rest) > 0 && (rest[0] == '\r' || rest[0] == '\n') {
+			rest = rest[1:]
+		}
+		return rest
+	}
+	return nil
 }

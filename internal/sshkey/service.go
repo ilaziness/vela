@@ -28,17 +28,18 @@ type Info struct {
 type PasswordFn func(reason string) (string, error)
 
 type Service struct {
-	logger    *zap.Logger
-	db        *database.Database
-	password  PasswordFn
-	onBadPass func()
+	logger      *zap.Logger
+	db          *database.Database
+	password    PasswordFn
+	onBadPass   func()
+	onEncrypted func()
 }
 
-func New(logger *zap.Logger, db *database.Database, password PasswordFn, onBadPass func()) *Service {
+func New(logger *zap.Logger, db *database.Database, password PasswordFn, onBadPass, onEncrypted func()) *Service {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Service{logger: logger, db: db, password: password, onBadPass: onBadPass}
+	return &Service{logger: logger, db: db, password: password, onBadPass: onBadPass, onEncrypted: onEncrypted}
 }
 
 func (s *Service) List() ([]Info, error) {
@@ -134,6 +135,9 @@ func (s *Service) encrypt(plain string) (string, error) {
 	if err != nil {
 		s.logger.Error("encrypt ssh key failed", zap.Error(err))
 		return "", usererr.Coded("sshkey.encrypt_failed", "Failed to encrypt private key: %s", err.Error())
+	}
+	if s.onEncrypted != nil {
+		s.onEncrypted()
 	}
 	return encrypted, nil
 }

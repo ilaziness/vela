@@ -194,14 +194,14 @@ func fromHex(c byte) (byte, bool) {
 	}
 }
 
-// shellStartCommand starts a login shell with cwd reporting via env (not stdin).
-// VTE_VERSION helps vte.sh/fish; PROMPT_COMMAND covers bash without vte.sh.
-// SSH exec env does not need AcceptEnv; nothing is typed → not in history.
-func shellStartCommand() string {
+// buildCwdInjectLine is a bash-oriented silent stdin line for OSC 7 cwd reports.
+// Caller must echo-suppress so the line is not shown in the terminal UI.
+// Existing PROMPT_COMMAND (set by bashrc/oh-my-bash) is appended, not replaced.
+func buildCwdInjectLine() string {
 	report := `printf "\033]7;file://%s%s\007" "${HOSTNAME:-}" "$PWD"`
-	return "env VTE_VERSION=" + vteVersionValue +
-		" PROMPT_COMMAND=" + bashSingleQuote(report) +
-		` "${SHELL:-bash}" -l`
+	return "export VTE_VERSION=" + vteVersionValue +
+		"; export PROMPT_COMMAND=" + bashSingleQuote(report) +
+		`"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"`
 }
 
 func (sc *Session) getCwd() string {

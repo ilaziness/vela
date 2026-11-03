@@ -1,14 +1,58 @@
-import { Box } from "@mui/material";
+import { useEffect, useState } from "react";
+import { Box, CircularProgress } from "@mui/material";
 import SSHTabs from "../components/SSHTabs.tsx";
 import Header from "../components/Header.tsx";
 import Message from "../components/Message.tsx";
 import PasswordInputDialog from "../components/PasswordInputDialog.tsx";
+import VaultUnlockGate from "../components/VaultUnlockGate.tsx";
 import HostKeyPrompt from "../components/HostKeyPrompt";
 import KeyboardInteractivePrompt from "../components/KeyboardInteractivePrompt";
 import ShortcutListener from "../components/ShortcutListener";
 import { AppService } from "../../bindings/github.com/ilaziness/vela/services";
+import * as ConfigService from "../../bindings/github.com/ilaziness/vela/services/configservice";
+
+type GateState = "loading" | "locked" | "open";
 
 function App() {
+  const [gate, setGate] = useState<GateState>("loading");
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const needs = await ConfigService.NeedsUnlock();
+        if (!alive) return;
+        setGate(needs ? "locked" : "open");
+      } catch (err) {
+        console.error("NeedsUnlock failed", err);
+        if (alive) setGate("open");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (gate === "loading") {
+    return (
+      <Box
+        sx={{
+          height: "100%",
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <CircularProgress size={32} />
+      </Box>
+    );
+  }
+
+  if (gate === "locked") {
+    return <VaultUnlockGate onUnlocked={() => setGate("open")} />;
+  }
+
   return (
     <>
       <ShortcutListener />

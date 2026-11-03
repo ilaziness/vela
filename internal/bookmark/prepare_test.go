@@ -151,6 +151,6 @@ func testBookmarkService(t *testing.T, keyPath, keyPass string) (*Service, strin
 			t.Fatalf("unexpected key id %s", keyID)
 		}
 		return "PEM", nil
-	})
+	}, nil)
 	return svc, id
 }

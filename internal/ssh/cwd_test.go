@@ -137,16 +137,19 @@ func TestCwdParserLastWins(t *testing.T) {
 	}
 }
 
-func TestShellStartCommand(t *testing.T) {
-	s := shellStartCommand()
+func TestBuildCwdInjectLine(t *testing.T) {
+	s := buildCwdInjectLine()
 	for _, needle := range []string{
 		"VTE_VERSION=" + vteVersionValue,
 		"PROMPT_COMMAND=",
 		`\033]7;file://`,
-		`"${SHELL:-bash}" -l`,
+		`${PROMPT_COMMAND:+;$PROMPT_COMMAND}`,
 	} {
 		if !strings.Contains(s, needle) {
 			t.Fatalf("missing %q in %q", needle, s)
 		}
+	}
+	if strings.Contains(s, `"${SHELL:-bash}"`) {
+		t.Fatalf("should not exec a shell: %q", s)
 	}
 }

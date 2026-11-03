@@ -17,6 +17,7 @@ import (
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/usererr"
 )
@@ -304,6 +305,20 @@ func (s *AIService) ValidateAllowedDir(path string) (string, error) {
 	return tool.ValidateAllowedDir(path)
 }
 
+// SetFilesystemAllowedDirs persists the FS allowlist without reloading the Genkit engine.
+func (s *AIService) SetFilesystemAllowedDirs(dirs []string) error {
+	cfg, err := s.GetConfig()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return fmt.Errorf("ai config is nil")
+	}
+	out := *cfg
+	out.Filesystem.AllowedDirs = tool.SanitizeAllowedDirs(dirs)
+	return s.configService.saveAI(out)
+}
+
 func (s *AIService) resolveWebSearchRuntime(cfg *AIConfig) (tool.WebSearchRuntime, error) {
 	if cfg == nil || !tool.ValidSearchProvider(cfg.WebSearch.Provider) {
 		return tool.WebSearchRuntime{}, nil
@@ -426,6 +441,17 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		)
 		return nil, err
 	}
+	s.engineMu.Lock()
+	eng := s.engine
+	s.engineMu.Unlock()
+	if eng != nil {
+		// Short timeout: do not block Chat for a full MCP reconnect budget.
+		ctxMCP, cancelMCP := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := eng.EnsureMCPToolsConnected(ctxMCP); err != nil {
+			s.logger.Warn("ensure mcp tools failed", zap.Error(err))
+		}
+		cancelMCP()
+	}
 	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
 		return nil, err
 	}
@@ -520,6 +546,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			AllowDirs:       allowDirs,
 			EnableWebSearch: enableWebSearch,
 			PlanJSON:        planJSON,
+			UILanguage:      i18n.Language(),
 		}),
 		EnableSSH: enableSSH,
 		LinkID:    linkID,

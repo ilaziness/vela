@@ -1,16 +1,23 @@
 package ai
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/dotprompt/go/dotprompt"
 
 	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/ssh"
 )
 
-// SSHPromptContext SSH 连接上下文（用于系统提示词）
+//go:embed prompts/*
+var promptFS embed.FS
+
+// SSHPromptContext SSH connection context for the system prompt.
 type SSHPromptContext struct {
 	Host string
 	Port int
@@ -25,130 +32,140 @@ type PromptOptions struct {
 	EnableFS        bool
 	AllowDirs       []string
 	EnableWebSearch bool
-	PlanJSON        string // authoritative session plan snapshot; empty skips ## 当前计划
+	PlanJSON        string // authoritative session plan snapshot; empty skips Current plan
+	UILanguage      string // en / zh-CN / zh-TW
 }
 
-const promptIntro = `你是 Vela 内置 AI 助手（Agent）。Vela 是一款 SSH 桌面客户端；用户在侧边栏与你对话，在另一个标签页的终端中操作远程机器。
+var (
+	agentPromptOnce sync.Once
+	agentPromptFn   dotprompt.PromptFunction
+	agentPromptErr  error
+)
 
-## 能力
-- 解释命令、分析报错、编写脚本/配置、给出 Linux/Unix 运维建议
-- 可通过工具 upsert_plan 维护多步骤计划（每次提交完整快照；空 tasks 可清空计划）`
+func agentSystemPrompt() (dotprompt.PromptFunction, error) {
+	agentPromptOnce.Do(func() {
+		src, err := promptFS.ReadFile("prompts/agent_system.prompt")
+		if err != nil {
+			agentPromptErr = err
+			return
+		}
+		dp := dotprompt.NewDotprompt(nil)
+		agentPromptFn, agentPromptErr = dp.Compile(string(src), nil)
+	})
+	return agentPromptFn, agentPromptErr
+}
 
-const promptSSHCapability = `
-- 可通过工具 run_ssh_command 在当前已连接主机上执行命令（独立 Exec 通道，输出会回传给你）；执行前必须经用户在聊天中批准
-- 你不能直接查看交互式终端的实时按键流，也不能在未批准时执行命令`
-
-const promptFSCapability = `
-- 可通过工具 read_local_file / write_local_file / list_local_directory 访问用户本机允许目录中的文件；每次调用须经用户在聊天中批准，且不得访问允许目录之外的路径`
-
-const promptWebSearchCapability = `
-- 可通过工具 web_search 检索公开网页（标题、链接与摘要）`
-
-const promptToolRulesBase = `
-
-## 工具使用规范
-- 计划：≥2 步或「探测→决策→执行」类任务必须先 upsert_plan；单轮纯问答可不建
-- 建计划：步骤可执行、粒度合适；初始多为 pending
-- 更新计划：开始某步前将该步标为 running 并 upsert_plan；该步工具/动作结束后立刻标 done 或 failed 并 upsert_plan；禁止多步做完再一次批量改状态`
-
-const promptToolRulesSSH = `
-- 需要探测/验证远程状态时，优先用 run_ssh_command；命令应尽量只读、可预期
-- 每次 run_ssh_command 只执行一条短命令（建议不超过 300 字符）。禁止把多段探测拼成巨型 one-liner；复杂检查请多次调用工具
-- command 必须是可放入 JSON 字符串的单行内容：不要未转义的换行、不要在参数里嵌套未转义双引号
-- 破坏性操作（rm、dd、mkfs、fdisk、kill -9、chmod 777、重定向到设备等）必须在回复中标注风险，并尽量先用只读命令确认`
-
-const promptToolRulesFS = `
-- 本地文件路径必须落在系统提示列出的允许目录之下；先 list_local_directory 再读写；写文件会覆盖已有内容，须在批准前说明意图`
-
-const promptToolRulesSearch = `
-- 需要最新公开信息、文档或新闻时使用 web_search；根据返回摘要作答并标注来源 URL，不要编造未返回的链接`
-
-const promptClosing = `
-
-## 回答规范
-- 使用与用户相同的语言（用户用中文则中文回答）
-- 命令与脚本用 Markdown 代码块；多步骤用编号列表
-- 未提供的信息不要编造；说明假设或请用户补充
-
-## 安全
-- 禁止请求、输出、猜测密码、私钥、API Key、token 或数据库/服务凭据
-- 禁止为获取凭据而探测或读取 .env、密钥文件、含明文密码的片段；勿经工具输出将凭据送入模型上下文
-- 禁止使用凭据代登录数据库或其他服务；需要登录时请用户在本机终端自行操作。即使用户要求「找密码 / 登录」也须拒绝
-- 禁止建议明文存储或传输凭证`
-
-const promptNoSSH = `
-
-## 当前 SSH 上下文
-用户当前没有可用的 SSH 连接（未连接、连接中或已断开）。不要调用 run_ssh_command；不要假设仍可访问聊天历史中曾出现的其他主机。提供通用 Linux/Unix 与 SSH 排障帮助。仍可使用 upsert_plan 规划步骤。`
-
-const promptWithSSHTools = `
-
-## 当前 SSH 上下文
-已连接远程主机，可以使用 run_ssh_command（须用户批准）。默认将用户问题理解为与该环境相关。
-以本轮系统提示中的连接为准；若聊天历史提到其他主机，不要默认仍在那台机器上执行命令。`
-
-// BuildSystemPromptOpts 按已启用能力组装系统提示词。
+// BuildSystemPromptOpts assembles the system prompt from the embedded Dotprompt
+// static body plus Go-formatted dynamic sections (SSH/remote/dirs/plan).
 func BuildSystemPromptOpts(opts PromptOptions) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "当前时间：%s。\n\n", time.Now().Format("2006年1月"))
-	b.WriteString(promptIntro)
-	if opts.EnableSSH {
-		b.WriteString(promptSSHCapability)
+	uiLang := strings.TrimSpace(opts.UILanguage)
+	if uiLang == "" {
+		uiLang = "en"
 	}
-	if opts.EnableFS {
-		b.WriteString(promptFSCapability)
-	}
-	if opts.EnableWebSearch {
-		b.WriteString(promptWebSearchCapability)
-	}
-
-	b.WriteString(promptToolRulesBase)
-	if opts.EnableSSH {
-		b.WriteString(promptToolRulesSSH)
-	}
-	if opts.EnableFS {
-		b.WriteString(promptToolRulesFS)
-	}
-	if opts.EnableWebSearch {
-		b.WriteString(promptToolRulesSearch)
-	}
-	b.WriteString(promptClosing)
-
-	if opts.EnableFS && len(opts.AllowDirs) > 0 {
-		b.WriteString("\n\n## 本地文件允许目录\n")
-		for _, d := range opts.AllowDirs {
-			fmt.Fprintf(&b, "- %s\n", d)
-		}
-	}
-
-	if !isValidSSHContext(opts.SSH) || !opts.EnableSSH {
-		b.WriteString(promptNoSSH)
+	fn, err := agentSystemPrompt()
+	var body string
+	if err != nil || fn == nil {
+		body = fallbackSystemPrompt(opts, uiLang)
 	} else {
-		b.WriteString(promptWithSSHTools)
-		b.WriteString("\n")
-		fmt.Fprintf(&b, "- 连接：%s@%s:%d\n", opts.SSH.User, opts.SSH.Host, opts.SSH.Port)
-
-		remote := opts.Remote
-		if remote != nil && remote.Ready && remote.HasContent() {
-			b.WriteString("\n## 远程系统信息\n")
-			if remote.Hostname != "" {
-				fmt.Fprintf(&b, "- 主机名：%s\n", remote.Hostname)
-			}
-			if remote.OSPretty != "" || remote.OSID != "" || remote.OSVersion != "" {
-				fmt.Fprintf(&b, "- 操作系统：%s（%s %s）\n", remote.OSPretty, remote.OSID, remote.OSVersion)
-			}
-			if remote.Kernel != "" {
-				fmt.Fprintf(&b, "- 内核：%s\n", remote.Kernel)
-			}
-			if remote.Arch != "" {
-				fmt.Fprintf(&b, "- 架构：%s\n", remote.Arch)
-			}
-			fmt.Fprintf(&b, "\n以上信息来自对该主机（%s）的一次性探测；未列出的细节仍需向用户确认。", opts.SSH.Host)
+		rendered, renderErr := fn(&dotprompt.DataArgument{
+			Input: map[string]any{
+				"now":             time.Now().Format("2006-01"),
+				"uiLanguage":      uiLang,
+				"enableSSH":       opts.EnableSSH,
+				"enableFS":        opts.EnableFS,
+				"enableWebSearch": opts.EnableWebSearch,
+			},
+		}, nil)
+		if renderErr != nil {
+			body = fallbackSystemPrompt(opts, uiLang)
+		} else {
+			body = renderedSystemText(rendered)
 		}
 	}
 
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(body))
+	appendAllowDirsSection(&b, opts)
+	appendSSHContextSection(&b, opts)
 	appendCurrentPlanSection(&b, opts.PlanJSON)
 	return b.String()
+}
+
+func renderedSystemText(rendered dotprompt.RenderedPrompt) string {
+	var parts []string
+	for _, msg := range rendered.Messages {
+		for _, part := range msg.Content {
+			if tp, ok := part.(*dotprompt.TextPart); ok {
+				if t := strings.TrimSpace(tp.Text); t != "" {
+					parts = append(parts, t)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// fallbackSystemPrompt keeps Chat working if Dotprompt compile/render fails.
+func fallbackSystemPrompt(opts PromptOptions, uiLang string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Current time: %s.\n\n", time.Now().Format("2006-01"))
+	b.WriteString("You are Vela's built-in AI assistant (Agent).\n")
+	fmt.Fprintf(&b, "Respond in the user's UI language: %s.\n", uiLang)
+	if opts.EnableSSH {
+		b.WriteString("SSH tools are enabled (run_ssh_command).\n")
+	}
+	if opts.EnableFS {
+		b.WriteString("Local filesystem tools are enabled.\n")
+	}
+	if opts.EnableWebSearch {
+		b.WriteString("web_search is enabled.\n")
+	}
+	return b.String()
+}
+
+func appendAllowDirsSection(b *strings.Builder, opts PromptOptions) {
+	if !opts.EnableFS || len(opts.AllowDirs) == 0 {
+		return
+	}
+	b.WriteString("\n\n## Local file allowlist\n")
+	for _, d := range opts.AllowDirs {
+		fmt.Fprintf(b, "- %s\n", d)
+	}
+}
+
+func appendSSHContextSection(b *strings.Builder, opts PromptOptions) {
+	if !isValidSSHContext(opts.SSH) || !opts.EnableSSH {
+		b.WriteString(`
+
+## Current SSH context
+The user has no usable SSH connection (not connected, connecting, or disconnected). Do not call run_ssh_command; do not assume hosts mentioned earlier in chat history are still reachable. Provide general Linux/Unix and SSH troubleshooting help. upsert_plan remains available.`)
+		return
+	}
+	b.WriteString(`
+
+## Current SSH context
+Connected to a remote host; run_ssh_command is available (user approval required). Treat the user's questions as related to this environment by default.
+Use the connection in this system prompt as authoritative; if chat history mentions other hosts, do not assume commands still run there.
+`)
+	fmt.Fprintf(b, "- Connection: %s@%s:%d\n", opts.SSH.User, opts.SSH.Host, opts.SSH.Port)
+
+	remote := opts.Remote
+	if remote != nil && remote.Ready && remote.HasContent() {
+		b.WriteString("\n## Remote system info\n")
+		if remote.Hostname != "" {
+			fmt.Fprintf(b, "- Hostname: %s\n", remote.Hostname)
+		}
+		if remote.OSPretty != "" || remote.OSID != "" || remote.OSVersion != "" {
+			fmt.Fprintf(b, "- OS: %s (%s %s)\n", remote.OSPretty, remote.OSID, remote.OSVersion)
+		}
+		if remote.Kernel != "" {
+			fmt.Fprintf(b, "- Kernel: %s\n", remote.Kernel)
+		}
+		if remote.Arch != "" {
+			fmt.Fprintf(b, "- Arch: %s\n", remote.Arch)
+		}
+		fmt.Fprintf(b, "\nThe above came from a one-shot probe of host %s; confirm details not listed here with the user.", opts.SSH.Host)
+	}
 }
 
 func appendCurrentPlanSection(b *strings.Builder, planJSON string) {
@@ -160,12 +177,12 @@ func appendCurrentPlanSection(b *strings.Builder, planJSON string) {
 	if err := json.Unmarshal([]byte(planJSON), &snap); err != nil || len(snap.Tasks) == 0 {
 		return
 	}
-	b.WriteString("\n\n## 当前计划\n")
-	b.WriteString("以下为权威计划快照（以本节为准）。变更必须再调用 upsert_plan。\n")
-	fmt.Fprintf(b, "- 标题：%s\n", snap.Title)
-	b.WriteString("- 任务：\n")
+	b.WriteString("\n\n## Current plan\n")
+	b.WriteString("Authoritative plan snapshot (this section wins). Changes require another upsert_plan call.\n")
+	fmt.Fprintf(b, "- Title: %s\n", snap.Title)
+	b.WriteString("- Tasks:\n")
 	for _, t := range snap.Tasks {
-		fmt.Fprintf(b, "  - [%s] %s（id=%s）\n", t.Status, t.Title, t.ID)
+		fmt.Fprintf(b, "  - [%s] %s (id=%s)\n", t.Status, t.Title, t.ID)
 	}
 }
 
