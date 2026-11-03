@@ -36,6 +36,7 @@ import {
   planHintInput,
   matchCommandHints,
   readScreenCommand,
+  resolveSubmittedCommand,
   stepHintIndex,
   type ScreenBuffer,
 } from "../func/shellLineBuf";
@@ -194,9 +195,6 @@ function Terminal(props: {
   const hintItemsRef = React.useRef<string[]>([]);
   const hintActiveIndexRef = React.useRef(HINT_INDEX_NONE);
   const acceptingHintRef = React.useRef(false);
-  const historyRefreshTimerRef = React.useRef<number | NodeJS.Timeout | null>(
-    null,
-  );
   const bellFlashTimerRef = React.useRef<number | NodeJS.Timeout | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
@@ -750,19 +748,32 @@ function Terminal(props: {
             screenSyncRef.current !== null,
           );
           if (plan.kind === "submit") {
+            const syncing = screenSyncRef.current !== null;
+            let cmd = plan.command;
+            const cols = promptColsRef.current;
+            // Rescue Tab/completion races: local buf may still be a prefix.
+            // Empty Enter without a pending sync must not fish screen text.
+            if (t && cols != null && (cmd !== "" || syncing)) {
+              const screenCmd = readScreenCommand(screenBufferOf(t), cols);
+              cmd = resolveSubmittedCommand(cmd, screenCmd);
+            }
             stopScreenSync();
             lineBufRef.current = "";
-            // Refresh from backend so secrets skipped server-side never enter the hint cache.
             clearHints();
-            if (historyRefreshTimerRef.current) {
-              clearTimeout(historyRefreshTimerRef.current);
+            if (cmd) {
+              void (async () => {
+                try {
+                  await CommandService.RecordShellHistory(props.linkID, cmd);
+                  if (mountedRef.current) {
+                    await loadHistoryCache();
+                  }
+                } catch (err) {
+                  LogService.Error(
+                    `record shell history failed: ${parseCallServiceError(err)}`,
+                  );
+                }
+              })();
             }
-            historyRefreshTimerRef.current = globalThis.setTimeout(() => {
-              historyRefreshTimerRef.current = null;
-              if (mountedRef.current) {
-                void loadHistoryCache();
-              }
-            }, 300);
             return;
           }
           if (plan.kind === "local") {
@@ -964,10 +975,6 @@ function Terminal(props: {
       if (screenSyncTimerRef.current != null) {
         clearTimeout(screenSyncTimerRef.current);
         screenSyncTimerRef.current = null;
-      }
-      if (historyRefreshTimerRef.current) {
-        clearTimeout(historyRefreshTimerRef.current);
-        historyRefreshTimerRef.current = null;
       }
       if (bellFlashTimerRef.current != null) {
         clearTimeout(bellFlashTimerRef.current);

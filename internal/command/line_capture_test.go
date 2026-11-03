@@ -51,9 +51,42 @@ func TestLineCapturePasswordPrompt(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("password must not be recorded, got %#v", got)
 	}
+	if c.AcceptHistory("s3cret") {
+		t.Fatal("password Enter must reject matching frontend record")
+	}
 	got = c.FeedInput([]byte("whoami\r"))
 	if len(got) != 1 || got[0] != "whoami" {
 		t.Fatalf("after password got %#v", got)
+	}
+	if !c.AcceptHistory("whoami") {
+		t.Fatal("normal command after password must allow history")
+	}
+}
+
+func TestLineCaptureAcceptHistorySecretPending(t *testing.T) {
+	c := &LineCapture{}
+	c.FeedOutput([]byte("Password: "))
+	if c.AcceptHistory("s3cret") {
+		t.Fatal("secretPending must block")
+	}
+	_ = c.FeedInput([]byte("s3cret\r"))
+	if c.AcceptHistory("s3cret") {
+		t.Fatal("lastSecretLine must reject password")
+	}
+	if !c.AcceptHistory("whoami") {
+		t.Fatal("normal cmd after secret must allow")
+	}
+}
+
+func TestLineCaptureAcceptHistoryAltScreen(t *testing.T) {
+	c := &LineCapture{}
+	c.FeedOutput([]byte("\x1b[?1049h"))
+	if c.AcceptHistory("ls") {
+		t.Fatal("alt screen must block history")
+	}
+	c.FeedOutput([]byte("\x1b[?1049l"))
+	if !c.AcceptHistory("ls") {
+		t.Fatal("after leave alt screen must allow history")
 	}
 }
 

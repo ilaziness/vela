@@ -121,12 +121,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	bookmarkService := NewBookmarkService(a, bookmarks, sshService)
 
 	commandSvc := command.New(log, db, commandsLoader, sshService.SendToSession)
-	termWS.SetOnCommand(func(cmd string) {
-		if err := commandSvc.AddHistory(cmd); err != nil {
-			log.Error("add shell command history failed", zap.Error(err))
-		}
-	})
-	commandService := NewCommandService(windows, commandSvc)
+	commandService := NewCommandService(windows, commandSvc, termWS)
 	configService.onLanguageChanged = func(lang string) {
 		if err := commandSvc.ReloadBuiltin(lang); err != nil {
 			log.Error("reload builtin commands failed", zap.String("language", lang), zap.Error(err))

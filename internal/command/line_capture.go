@@ -15,19 +15,21 @@ var (
 	passwordPromptRe = regexp.MustCompile(`(?i)(password|passphrase|密码|口令)`)
 )
 
-// LineCapture assembles submitted shell lines from a raw PTY stdin byte stream
-// and skips lines typed after a password-like prompt in recent PTY output.
+// LineCapture tracks PTY stdin/stdout for password-prompt and alt-screen gates.
+// FeedInput still assembles lines for tests; production history uses the frontend
+// submit path gated by AllowHistoryRecord.
 // Safe for concurrent FeedInput (WS read) and FeedOutput (WS write).
 type LineCapture struct {
-	mu            sync.Mutex
-	buf           []byte
-	esc           bool
-	csi           bool // ESC [ ... final (stdin)
-	osc           bool // ESC ] ... BEL/ST (stdin)
-	secretPending bool
-	lastOutLine   string // last evaluated prompt line; only re-arm secret when it changes
-	recentOut     []byte
-	altScreen     bool
+	mu             sync.Mutex
+	buf            []byte
+	esc            bool
+	csi            bool // ESC [ ... final (stdin)
+	osc            bool // ESC ] ... BEL/ST (stdin)
+	secretPending  bool
+	lastSecretLine string // password text from secret Enter; reject matching Record
+	lastOutLine    string // last evaluated prompt line; only re-arm secret when it changes
+	recentOut      []byte
+	altScreen      bool
 	// Incomplete DEC private mode / CSI from prior FeedOutput chunk.
 	outCSIPend []byte
 }
@@ -151,7 +153,22 @@ func (c *LineCapture) applyDECPrivate(seq []byte) {
 	if changed {
 		c.buf = c.buf[:0]
 		c.secretPending = false
+		c.lastSecretLine = ""
 	}
+}
+
+// AcceptHistory reports whether cmd from the frontend may be stored.
+func (c *LineCapture) AcceptHistory(cmd string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.altScreen || c.secretPending {
+		return false
+	}
+	if c.lastSecretLine != "" && cmd == c.lastSecretLine {
+		c.lastSecretLine = ""
+		return false
+	}
+	return true
 }
 
 // FeedInput consumes stdin bytes and returns completed non-secret command lines.
@@ -216,6 +233,7 @@ func (c *LineCapture) FeedInput(data []byte) []string {
 			c.buf = c.buf[:0]
 			if c.secretPending {
 				c.secretPending = false
+				c.lastSecretLine = line
 			} else if line != "" {
 				out = append(out, line)
 			}
@@ -236,6 +254,7 @@ func (c *LineCapture) FeedInput(data []byte) []string {
 		case 0x03: // Ctrl+C
 			c.buf = c.buf[:0]
 			c.secretPending = false
+			c.lastSecretLine = ""
 			i++
 		default:
 			if b < 0x20 {

@@ -1,6 +1,8 @@
 package services
 
 import (
+	"strings"
+
 	"github.com/ilaziness/vela/internal/command"
 )
 
@@ -14,13 +16,19 @@ type SendCommandRequest struct {
 	SessionIDs []string `json:"session_ids"`
 }
 
+// historyGate decides whether a terminal submit may be stored (password / TUI).
+type historyGate interface {
+	AcceptHistory(sessionID, cmd string) bool
+}
+
 type CommandService struct {
 	windows *Windows
 	core    *command.Service
+	gate    historyGate
 }
 
-func NewCommandService(windows *Windows, core *command.Service) *CommandService {
-	return &CommandService{windows: windows, core: core}
+func NewCommandService(windows *Windows, core *command.Service, gate historyGate) *CommandService {
+	return &CommandService{windows: windows, core: core, gate: gate}
 }
 
 func (cs *CommandService) GetUserCommands() []UserCommand { return cs.core.UserCommands() }
@@ -33,6 +41,16 @@ func (cs *CommandService) DeleteUserCommand(category, name string) error {
 func (cs *CommandService) GetCommandHistory() []CommandHistory { return cs.core.History() }
 func (cs *CommandService) AddCommandHistory(c string) error    { return cs.core.AddHistory(c) }
 func (cs *CommandService) ClearCommandHistory() error          { return cs.core.ClearHistory() }
+
+// RecordShellHistory stores a line submitted from the terminal UI after gate checks.
+func (cs *CommandService) RecordShellHistory(sessionID, cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" || !cs.gate.AcceptHistory(sessionID, cmd) {
+		return nil
+	}
+	return cs.core.AddHistory(cmd)
+}
+
 func (cs *CommandService) GetBuiltinCommands() map[string][]BuiltinCommand {
 	return cs.core.Builtin()
 }

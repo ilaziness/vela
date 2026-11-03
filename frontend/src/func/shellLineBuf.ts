@@ -10,7 +10,7 @@ export const SCREEN_SYNC_QUIET_MS = 40;
 export const SCREEN_SYNC_WATCH_MS = 500;
 
 export type HintInputPlan =
-  | { kind: "submit" }
+  | { kind: "submit"; command: string }
   | { kind: "local"; buf: string; reveal: boolean }
   | { kind: "screen"; reveal: boolean };
 
@@ -26,8 +26,8 @@ export function planHintInput(
   syncing: boolean,
 ): HintInputPlan {
   const applied = applyShellInput(buf, data);
-  if (applied.submitted) {
-    return { kind: "submit" };
+  if (applied.submitted !== undefined) {
+    return { kind: "submit", command: applied.submitted };
   }
   // While a shell redraw is in flight, keep reading the screen so the local
   // buffer does not diverge. reveal still follows this chunk only.
@@ -35,6 +35,28 @@ export function planHintInput(
     return { kind: "screen", reveal: applied.reveal };
   }
   return { kind: "local", buf: applied.buf, reveal: applied.reveal };
+}
+
+/**
+ * Prefer the local submitted line; only adopt a screen read when it looks like
+ * a Tab/completion extension of that line (or the local line is empty).
+ */
+export function resolveSubmittedCommand(
+  localCommand: string,
+  screenCommand: string,
+): string {
+  const local = localCommand.trim();
+  const screen = screenCommand.trim();
+  if (!screen) {
+    return local;
+  }
+  if (!local) {
+    return screen;
+  }
+  if (screen === local || screen.startsWith(local)) {
+    return screen;
+  }
+  return local;
 }
 
 /** Skip one ESC sequence. Delete (\x1b[3~) edits text; arrows do not. */
@@ -129,11 +151,8 @@ function applyShellInput(
     }
 
     if (ch === "\r" || ch === "\n") {
-      const line = result.trim();
+      submitted = result.trim();
       result = "";
-      if (line) {
-        submitted = line;
-      }
       i += 1;
       if (ch === "\r" && data[i] === "\n") {
         i += 1;
