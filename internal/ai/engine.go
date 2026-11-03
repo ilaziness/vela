@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"uuid"
 
@@ -29,6 +30,9 @@ type AIEngine struct {
 	tools       tool.Set
 	userDataDir string
 	mcp         *mcpRuntime
+	catalog     atomic.Value // *CatalogSnapshot
+	catalogMu   sync.Mutex   // serializes catalog writers (Snapshot stays lock-free)
+	mcpMu       sync.Mutex   // serializes ReloadMCP and shutdownMCP
 	mu          sync.RWMutex
 }
 
@@ -125,8 +129,12 @@ func (e *AIEngine) Init(ctx context.Context, cfg *Config) error {
 	mcp := e.mcp
 	e.mu.Unlock()
 
+	e.PublishBuiltinFromConfig(cfg)
+	if err := e.PublishSkills(); err != nil {
+		e.logger.Warn("publish skills after init failed", zap.Error(err))
+	}
 	if userDataDir != "" && mcp != nil {
-		if err := mcp.Reload(ctx, true, userDataDir); err != nil {
+		if err := e.ReloadMCP(ctx); err != nil {
 			e.logger.Warn("reload mcp after init failed", zap.Error(err))
 		}
 	}
@@ -143,8 +151,8 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEve
 	cfg := e.config
 	tools := e.tools
 	userDataDir := e.userDataDir
-	mcp := e.mcp
 	e.mu.RUnlock()
+	snap := e.Snapshot()
 
 	if g == nil || !cfg.Enabled {
 		return nil, fmt.Errorf("ai engine not initialized or not enabled")
@@ -178,29 +186,44 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEve
 		return applyStreamedText(storedTurn(resp, promptLen), streamed), err
 	}
 
+	builtinNames := []string{tool.UpsertPlan}
 	activeTools := []genkitAI.ToolRef{tools.Plan}
 	if deps.EnableSSH() {
 		activeTools = append(activeTools, tools.SSH)
+		builtinNames = append(builtinNames, tool.RunSSHCommand)
 	}
 	if deps.EnableFS() {
 		activeTools = append(activeTools, tools.Read, tools.Write, tools.List)
+		builtinNames = append(builtinNames, tool.ReadLocalFile, tool.WriteLocalFile, tool.ListLocalDirectory)
 	}
 	if deps.EnableWebSearch() {
 		activeTools = append(activeTools, tools.Search)
+		builtinNames = append(builtinNames, tool.WebSearch)
 	}
-	if mcp != nil {
-		for _, t := range mcp.ActiveTools() {
-			activeTools = append(activeTools, t)
+	mcpNames := make([]string, 0, len(snap.MCPTools))
+	for _, t := range snap.MCPTools {
+		activeTools = append(activeTools, t)
+		if t != nil {
+			mcpNames = append(mcpNames, t.Name())
 		}
 	}
+	skillNames := make([]string, 0, len(snap.Skills))
+	for _, s := range snap.Skills {
+		skillNames = append(skillNames, s.Name)
+	}
+	e.logger.Debug("ai run tools for genkit",
+		zap.Strings("builtin", builtinNames),
+		zap.Strings("mcp", mcpNames),
+		zap.Strings("skills", skillNames),
+		zap.Bool("use_skill_tool", len(skillNames) > 0),
+		zap.Int("withToolsCount", len(activeTools)),
+	)
 
 	// Soft MCP / invalid-arg paths use tool.Fail (soft-answers without SoftToolErrors).
 	// SoftToolErrors would also soft-answer MCP transport failures and burn MaxAgentTurns.
 	middleware := []genkitAI.Middleware{toolStreamMiddleware{}}
-	if skillDirs, err := EnabledSkillPaths(userDataDir); err == nil && len(skillDirs) > 0 {
-		middleware = append(middleware, skillsMiddleware{SkillDirs: skillDirs})
-	} else if err != nil {
-		e.logger.Warn("list enabled skills failed", zap.Error(err))
+	if len(snap.Skills) > 0 {
+		middleware = append(middleware, skillsMiddleware{Skills: snap.Skills})
 	}
 	// Checkpoint last so WrapGenerate snapshots after skills/system injection and generate.
 	if rd.OnCheckpoint != nil {
@@ -301,26 +324,6 @@ func isToolArgsParseError(err error) bool {
 		strings.Contains(msg, "unmarshal failed to parse json string")
 }
 
-// PublicGenerateError is a short message for the chat UI. Full detail belongs in logs.
-func PublicGenerateError(err error) string {
-	if err == nil {
-		return "generate failed"
-	}
-	if isToolArgsParseError(err) {
-		return "工具参数 JSON 无效（命令过长或引号未转义），请改用更短的单条命令"
-	}
-	msg := err.Error()
-	msg = strings.TrimPrefix(msg, "AI chat failed: ")
-	msg = strings.TrimPrefix(msg, "generate error: ")
-	if strings.Contains(msg, `{"`) || strings.Contains(strings.ToLower(msg), "json string") {
-		return "生成失败：模型输出无法解析"
-	}
-	if len(msg) > 240 {
-		return msg[:240] + "…"
-	}
-	return msg
-}
-
 // IsEnabled 是否启用
 func (e *AIEngine) IsEnabled() bool {
 	e.mu.RLock()
@@ -340,11 +343,10 @@ func (e *AIEngine) SetConfig(cfg *Config) error {
 		e.modelName = ""
 		e.genConfig = nil
 		e.tools = tool.Set{}
-		mcp := e.mcp
 		e.mu.Unlock()
-		if mcp != nil {
-			mcp.Close()
-		}
+		e.shutdownMCP()
+		// Refresh builtin flags from the saved config (caller should pass full cfg with Enabled=false).
+		e.PublishBuiltinFromConfig(cfg)
 		return nil
 	}
 	return e.Init(context.Background(), cfg)
@@ -359,17 +361,28 @@ func (e *AIEngine) GetConfig() Config {
 
 // Close disconnects MCP clients.
 func (e *AIEngine) Close() {
+	e.shutdownMCP()
+}
+
+// shutdownMCP serializes with ReloadMCP so a finishing reload cannot revive clients after disable.
+func (e *AIEngine) shutdownMCP() {
+	e.mcpMu.Lock()
+	defer e.mcpMu.Unlock()
 	e.mu.RLock()
 	mcp := e.mcp
 	e.mu.RUnlock()
 	if mcp != nil {
 		mcp.Close()
 	}
+	e.clearMCPTools()
 }
 
-// ReloadMCPAndSkills reloads mcp.json connections; skills are read from disk on each Run.
+// ReloadMCP reloads mcp.json connections and publishes MCP tools into the catalog.
 // When Genkit is not initialized, servers are probed for status only (no retained stdio processes).
-func (e *AIEngine) ReloadMCPAndSkills(ctx context.Context) error {
+func (e *AIEngine) ReloadMCP(ctx context.Context) error {
+	e.mcpMu.Lock()
+	defer e.mcpMu.Unlock()
+
 	e.mu.RLock()
 	ready := e.genkit != nil
 	userDataDir := e.userDataDir
@@ -381,11 +394,24 @@ func (e *AIEngine) ReloadMCPAndSkills(ctx context.Context) error {
 	if mcp == nil {
 		return nil
 	}
-	return mcp.Reload(ctx, ready, userDataDir)
+	if err := mcp.Reload(ctx, ready, userDataDir); err != nil {
+		return err
+	}
+	// genkit may be cleared under e.mu while probes ran (disable does that before waiting on mcpMu).
+	e.mu.RLock()
+	stillReady := e.genkit != nil
+	e.mu.RUnlock()
+	if ready && !stillReady {
+		mcp.Close()
+		e.clearMCPTools()
+		return nil
+	}
+	e.publishMCP()
+	return nil
 }
 
 // EnsureMCPToolsConnected reloads MCP with keepConnections when Genkit is ready
-// but ActiveTools is empty while enabled servers exist in mcp.json.
+// but catalog MCP tools are empty while enabled servers exist in mcp.json.
 func (e *AIEngine) EnsureMCPToolsConnected(ctx context.Context) error {
 	e.mu.RLock()
 	ready := e.genkit != nil
@@ -395,7 +421,7 @@ func (e *AIEngine) EnsureMCPToolsConnected(ctx context.Context) error {
 	if !ready || mcp == nil || userDataDir == "" {
 		return nil
 	}
-	if len(mcp.ActiveTools()) > 0 {
+	if len(e.Snapshot().MCPTools) > 0 {
 		return nil
 	}
 	cfg, err := LoadMCPConfig(userDataDir)
@@ -412,7 +438,7 @@ func (e *AIEngine) EnsureMCPToolsConnected(ctx context.Context) error {
 	if !hasEnabled {
 		return nil
 	}
-	return mcp.Reload(ctx, true, userDataDir)
+	return e.ReloadMCP(ctx)
 }
 
 // ListMCPServers returns cached MCP status without probing.

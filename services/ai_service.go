@@ -187,7 +187,14 @@ func (s *AIService) reloadEngine(cfg *AIConfig) error {
 		s.engineMu.Lock()
 		defer s.engineMu.Unlock()
 		if s.engine != nil {
-			_ = s.engine.SetConfig(&ai.Config{Enabled: false})
+			// Keep filesystem/web-search/etc. so catalog publish on disable stays accurate.
+			disabled := ai.Config{Enabled: false}
+			if cfg != nil {
+				disabled = *cfg
+				disabled.Enabled = false
+				disabled.APIKey = ""
+			}
+			_ = s.engine.SetConfig(&disabled)
 		}
 		return nil
 	}
@@ -316,7 +323,15 @@ func (s *AIService) SetFilesystemAllowedDirs(dirs []string) error {
 	}
 	out := *cfg
 	out.Filesystem.AllowedDirs = tool.SanitizeAllowedDirs(dirs)
-	return s.configService.saveAI(out)
+	if err := s.configService.saveAI(out); err != nil {
+		return err
+	}
+	engine, _, err := s.ensureEngineDir()
+	if err != nil {
+		return err
+	}
+	engine.PublishBuiltinFromConfig(&out)
+	return nil
 }
 
 func (s *AIService) resolveWebSearchRuntime(cfg *AIConfig) (tool.WebSearchRuntime, error) {
@@ -444,14 +459,15 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	s.engineMu.Lock()
 	eng := s.engine
 	s.engineMu.Unlock()
-	if eng != nil {
-		// Short timeout: do not block Chat for a full MCP reconnect budget.
-		ctxMCP, cancelMCP := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := eng.EnsureMCPToolsConnected(ctxMCP); err != nil {
-			s.logger.Warn("ensure mcp tools failed", zap.Error(err))
-		}
-		cancelMCP()
+	if eng == nil {
+		return nil, fmt.Errorf("ai engine not ready")
 	}
+	// Short timeout: do not block Chat for a full MCP reconnect budget.
+	ctxMCP, cancelMCP := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := eng.EnsureMCPToolsConnected(ctxMCP); err != nil {
+		s.logger.Warn("ensure mcp tools failed", zap.Error(err))
+	}
+	cancelMCP()
 	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
 		return nil, err
 	}
@@ -513,12 +529,16 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 
 	linkID, sshCtx, remoteInfo := s.resolveSSHContext(req.SSHContext)
 	enableSSH := linkID != ""
-	allowDirs := cfg.EffectiveAllowedDirs()
+	snap := eng.Snapshot()
+	allowDirs := snap.AllowDirs
+	enableFS := snap.EnableFS
 	webSearch, err := s.resolveWebSearchRuntime(cfg)
 	if err != nil {
 		return nil, err
 	}
-	enableFS := len(allowDirs) > 0
+	if !snap.EnableWebSearch {
+		webSearch = tool.WebSearchRuntime{}
+	}
 	enableWebSearch := webSearch.APIKey != "" && tool.ValidSearchProvider(webSearch.Provider)
 	planJSON := ""
 	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {

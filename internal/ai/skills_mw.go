@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -17,17 +16,16 @@ const (
 	skillsMissingDescLabel = "No description provided."
 )
 
-// skillsMiddleware exposes enabled local SKILL.md directories to the model.
-// SkillDirs are absolute paths to skill folders (each containing SKILL.md).
+// skillsMiddleware exposes enabled local SKILL.md dirs from a catalog snapshot.
 type skillsMiddleware struct {
-	SkillDirs []string
+	Skills []EnabledSkill
 }
 
 func (s skillsMiddleware) Name() string { return "vela/skills" }
 
 func (s skillsMiddleware) New(ctx context.Context) (*genkitAI.Hooks, error) {
 	_ = ctx
-	info := scanEnabledSkills(s.SkillDirs)
+	info := skillsByName(s.Skills)
 	if len(info) == 0 {
 		return &genkitAI.Hooks{}, nil
 	}
@@ -42,7 +40,7 @@ func (s skillsMiddleware) New(ctx context.Context) (*genkitAI.Hooks, error) {
 			if !ok {
 				return "", fmt.Errorf("skill %q not found or disabled", in.SkillName)
 			}
-			data, err := os.ReadFile(si.path)
+			data, err := os.ReadFile(skillMarkdownPath(si.Path))
 			if err != nil {
 				return "", fmt.Errorf("failed to read skill %q: %w", in.SkillName, err)
 			}
@@ -62,39 +60,23 @@ func (s skillsMiddleware) New(ctx context.Context) (*genkitAI.Hooks, error) {
 	}, nil
 }
 
-type enabledSkillInfo struct {
-	path        string
-	description string
-}
-
-func scanEnabledSkills(dirs []string) map[string]enabledSkillInfo {
-	result := make(map[string]enabledSkillInfo)
-	for _, dir := range dirs {
-		dir = strings.TrimSpace(dir)
-		if dir == "" {
+func skillsByName(skills []EnabledSkill) map[string]EnabledSkill {
+	result := make(map[string]EnabledSkill, len(skills))
+	for _, s := range skills {
+		name := strings.TrimSpace(s.Name)
+		if name == "" || strings.TrimSpace(s.Path) == "" {
 			continue
 		}
-		abs, err := filepath.Abs(dir)
-		if err != nil {
-			continue
-		}
-		skillMD := filepath.Join(abs, skillMarkdownName)
-		data, err := os.ReadFile(skillMD)
-		if err != nil {
-			continue
-		}
-		name := filepath.Base(abs)
-		fm := parseSkillFrontmatter(data)
-		desc := strings.TrimSpace(fm.Description)
+		desc := strings.TrimSpace(s.Description)
 		if desc == "" {
 			desc = skillsMissingDescLabel
 		}
-		result[name] = enabledSkillInfo{path: skillMD, description: desc}
+		result[name] = EnabledSkill{Name: name, Description: desc, Path: s.Path}
 	}
 	return result
 }
 
-func buildEnabledSkillsPrompt(info map[string]enabledSkillInfo) string {
+func buildEnabledSkillsPrompt(info map[string]EnabledSkill) string {
 	names := make([]string, 0, len(info))
 	for name := range info {
 		names = append(names, name)
@@ -107,7 +89,7 @@ func buildEnabledSkillsPrompt(info map[string]enabledSkillInfo) string {
 	b.WriteString("Only use them once to load the context.\n")
 	b.WriteString("Here are the available skills:\n")
 	for _, name := range names {
-		desc := info[name].description
+		desc := info[name].Description
 		if desc == "" || desc == skillsMissingDescLabel {
 			fmt.Fprintf(&b, " - %s\n", name)
 			continue

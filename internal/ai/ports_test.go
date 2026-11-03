@@ -252,6 +252,37 @@ func TestPublicGenerateErrorStripsHugeJSON(t *testing.T) {
 	}
 }
 
+func TestPublicGenerateErrorSurfacesAPIBusy(t *testing.T) {
+	err := fmt.Errorf(`generate error: stream error: POST "https://api.deepseek.com/chat/completions": 503 Service Unavailable
+{"message":"Service is too busy. We advise users to temporarily switch to alternative LLM API service providers.","type":"service_unavailable_error","param":null,"code":"service_unavailable_error"}`)
+	got := PublicGenerateError(err)
+	if strings.Contains(got, "无法解析") {
+		t.Fatalf("misclassified API error as parse failure: %q", got)
+	}
+	if !strings.Contains(got, "503") || !strings.Contains(got, "too busy") {
+		t.Fatalf("got=%q", got)
+	}
+}
+
+func TestPublicGenerateErrorOpenAIStyleErrorObject(t *testing.T) {
+	err := fmt.Errorf(`stream error: POST "https://api.openai.com/v1/chat/completions": 429 Too Many Requests {"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}`)
+	got := PublicGenerateError(err)
+	if !strings.Contains(got, "429") || !strings.Contains(got, "Rate limit") {
+		t.Fatalf("got=%q", got)
+	}
+}
+
+func TestPublicGenerateErrorIgnoresURLPort(t *testing.T) {
+	err := fmt.Errorf(`stream error: POST "https://proxy.example.com:443/v1/chat/completions": 503 Service Unavailable {"message":"busy"}`)
+	got := PublicGenerateError(err)
+	if strings.Contains(got, "(443)") {
+		t.Fatalf("matched URL port as status: %q", got)
+	}
+	if !strings.Contains(got, "503") || !strings.Contains(got, "busy") {
+		t.Fatalf("got=%q", got)
+	}
+}
+
 func TestTrimIncompleteToolRound(t *testing.T) {
 	reqPart := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "c1"})
 	history := []ChatMessage{

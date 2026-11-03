@@ -60,7 +60,7 @@ func (s *AIService) ReloadMCPServers() ([]ai.MCPServerInfo, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := engine.ReloadMCPAndSkills(ctx); err != nil {
+	if err := engine.ReloadMCP(ctx); err != nil {
 		return nil, err
 	}
 	return engine.ListMCPServers()
@@ -77,7 +77,7 @@ func (s *AIService) SetMCPServerEnabled(name string, enabled bool) ([]ai.MCPServ
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := engine.ReloadMCPAndSkills(ctx); err != nil {
+	if err := engine.ReloadMCP(ctx); err != nil {
 		return nil, err
 	}
 	return engine.ListMCPServers()
@@ -105,13 +105,34 @@ func (s *AIService) ListSkills() ([]ai.SkillInfo, error) {
 	return ai.ListSkills(dir)
 }
 
-// SetSkillEnabled updates skills-state.json.
+// SetSkillEnabled updates skills-state.json then publishes skills into the catalog.
 func (s *AIService) SetSkillEnabled(name string, enabled bool) error {
-	dir, err := s.requireUserDataDir()
+	engine, dir, err := s.ensureEngineDir()
 	if err != nil {
 		return err
 	}
-	return ai.SetSkillEnabled(dir, name, enabled)
+	if err := ai.SetSkillEnabled(dir, name, enabled); err != nil {
+		return err
+	}
+	return engine.PublishSkills()
+}
+
+// HydrateCatalog loads builtin + skills into the memory catalog without connecting MCP.
+func (s *AIService) HydrateCatalog() {
+	engine, _, err := s.ensureEngineDir()
+	if err != nil {
+		s.logger.Warn("hydrate catalog: engine dir", zap.Error(err))
+		return
+	}
+	cfg, err := s.GetConfig()
+	if err != nil {
+		s.logger.Warn("hydrate catalog: get config", zap.Error(err))
+	} else if cfg != nil {
+		engine.PublishBuiltinFromConfig(cfg)
+	}
+	if err := engine.PublishSkills(); err != nil {
+		s.logger.Warn("hydrate catalog: skills", zap.Error(err))
+	}
 }
 
 // OpenSkillsDir opens the skills directory.

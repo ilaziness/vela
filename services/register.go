@@ -131,6 +131,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	toolService := NewToolService(windows)
 	aiService := NewAIService(a, log, configService, sshService, db)
 	aiService.RecoverOrphanTurns()
+	go aiService.HydrateCatalog()
 	appService := NewAppService(a, windows, termWS, cfgStore, log)
 	tunnelService := NewSSHTunnelService(tunnelMgr)
 

@@ -137,21 +137,6 @@ func ListSkills(userDataDir string) ([]SkillInfo, error) {
 	return out, nil
 }
 
-// EnabledSkillPaths returns absolute paths of enabled skill directories for middleware.
-func EnabledSkillPaths(userDataDir string) ([]string, error) {
-	skills, err := ListSkills(userDataDir)
-	if err != nil {
-		return nil, err
-	}
-	paths := make([]string, 0)
-	for _, s := range skills {
-		if s.Enabled {
-			paths = append(paths, s.Path)
-		}
-	}
-	return paths, nil
-}
-
 // SetSkillEnabled updates skills-state.json disabled list.
 func SetSkillEnabled(userDataDir, name string, enabled bool) error {
 	name = strings.TrimSpace(name)

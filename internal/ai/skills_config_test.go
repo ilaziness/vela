@@ -50,23 +50,23 @@ func TestListSkillsAndSetEnabled(t *testing.T) {
 	if list[0].Enabled {
 		t.Fatal("expected disabled")
 	}
-	paths, err := EnabledSkillPaths(dir)
+	enabled, err := enabledSkillsFromDisk(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 0 {
-		t.Fatalf("paths=%v", paths)
+	if len(enabled) != 0 {
+		t.Fatalf("enabled=%v", enabled)
 	}
 
 	if err := SetSkillEnabled(dir, "demo-skill", true); err != nil {
 		t.Fatal(err)
 	}
-	paths, err = EnabledSkillPaths(dir)
+	enabled, err = enabledSkillsFromDisk(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 1 {
-		t.Fatalf("paths=%v", paths)
+	if len(enabled) != 1 || enabled[0].Name != "demo-skill" {
+		t.Fatalf("enabled=%v", enabled)
 	}
 
 	if err := SetSkillEnabled(dir, "missing", false); err == nil {
