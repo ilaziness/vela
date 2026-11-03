@@ -86,11 +86,13 @@ type AppConfig struct {
 }
 
 type Store struct {
-	Config         *Config
-	appConfig      *AppConfig
-	userConfigFile string
-	appConfigFile  string
-	logger         *zap.Logger
+	Config          *Config
+	appConfig       *AppConfig
+	userConfigFile  string
+	appConfigFile   string
+	windowStateFile string
+	window          WindowState
+	logger          *zap.Logger
 }
 
 func Default() *Config {
@@ -255,13 +257,16 @@ func Load(logger *zap.Logger) (*Store, error) {
 
 	logger.Debug("config loaded", zap.String("appConfigPath", appConfigPath), zap.String("userConfigPath", userConfigPath))
 
-	return &Store{
-		Config:         finalConfig,
-		appConfig:      appConfig,
-		userConfigFile: userConfigPath,
-		appConfigFile:  appConfigPath,
-		logger:         logger,
-	}, nil
+	store := &Store{
+		Config:          finalConfig,
+		appConfig:       appConfig,
+		userConfigFile:  userConfigPath,
+		appConfigFile:   appConfigPath,
+		windowStateFile: filepath.Join(userDataDir, WindowStateFileName),
+		logger:          logger,
+	}
+	store.LoadWindow()
+	return store, nil
 }
 
 func (s *Store) UserDataDir() string {
@@ -312,6 +317,7 @@ func (s *Store) ApplyUserDataDir(dir string) error {
 		return fmt.Errorf("create user data dir failed: %w", err)
 	}
 	s.userConfigFile = filepath.Join(dir, FileName)
+	s.windowStateFile = filepath.Join(dir, WindowStateFileName)
 	s.Config.General.UserDataDir = dir
 	return nil
 }

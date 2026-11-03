@@ -63,7 +63,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 		return fmt.Errorf("config store is nil")
 	}
 	BootstrapLanguage(cfgStore, log)
-	windows := NewWindows(a, mainWindow, cfgStore.Config.General.Frameless)
+	windows := NewWindows(a, mainWindow, cfgStore.Config.General.Frameless, cfgStore, log)
 	vault := secret.NewVault()
 	configService := NewConfigService(a, windows, cfgStore, vault)
 

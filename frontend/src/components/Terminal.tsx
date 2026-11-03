@@ -184,6 +184,7 @@ function Terminal(props: {
   loggingRef.current = logging;
   const lineBufRef = React.useRef("");
   const promptColsRef = React.useRef<number | null>(null);
+  const altScreenRef = React.useRef(false);
   const screenSyncRef = React.useRef<{
     reveal: boolean;
     sawWrite: boolean;
@@ -596,6 +597,7 @@ function Terminal(props: {
         term.current?.loadAddon(attachAddon);
 
         lineBufRef.current = "";
+        altScreenRef.current = false;
         clearHints();
         void loadHistoryCache();
 
@@ -699,6 +701,17 @@ function Terminal(props: {
         };
 
         term.current.onWriteParsed(() => {
+          const t = term.current;
+          if (t) {
+            const alt = t.buffer.active.type === "alternate";
+            if (alt !== altScreenRef.current) {
+              altScreenRef.current = alt;
+              stopScreenSync();
+              lineBufRef.current = "";
+              promptColsRef.current = null;
+              clearHints();
+            }
+          }
           const sync = screenSyncRef.current;
           if (!sync) {
             return;
@@ -713,6 +726,20 @@ function Terminal(props: {
             return;
           }
           const t = term.current;
+          // Live buffer type only — do not sticky-suppress after leaving a TUI.
+          if (t?.buffer.active.type === "alternate") {
+            if (
+              lineBufRef.current !== "" ||
+              screenSyncRef.current !== null ||
+              hintItemsRef.current.length > 0
+            ) {
+              stopScreenSync();
+              lineBufRef.current = "";
+              promptColsRef.current = null;
+              clearHints();
+            }
+            return;
+          }
           const midLine = t
             ? hasContentAfterCursor(screenBufferOf(t))
             : false;

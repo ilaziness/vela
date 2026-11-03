@@ -40,7 +40,7 @@ func main() {
 		},
 	})
 
-	mainWindow := app.Window.NewWithOptions(mainWindowOptions(cfgStore.Config.General.Frameless))
+	mainWindow := app.Window.NewWithOptions(mainWindowOptions(app, cfgStore))
 
 	commandsLoader := command.LoaderFromFS(commandsFS, "data/commands")
 	if err := services.RegisterServices(app, mainWindow, cfgStore, logService.Logger(), commandsLoader); err != nil {
@@ -52,15 +52,24 @@ func main() {
 	}
 }
 
-func mainWindowOptions(frameless bool) application.WebviewWindowOptions {
+func mainWindowOptions(app *application.App, store *config.Store) application.WebviewWindowOptions {
+	frameless := store.Config.General.Frameless
+	st := store.Window()
+	width, height := st.EffectiveSize()
+	if primary := app.Screen.GetPrimary(); primary != nil {
+		width, height = config.ClampToWorkArea(width, height, primary.WorkArea.Width, primary.WorkArea.Height)
+	}
 	opts := application.WebviewWindowOptions{
 		Title:                      "Vela",
 		URL:                        "/",
-		Width:                      1600,
-		Height:                     900,
+		Width:                      width,
+		Height:                     height,
 		Frameless:                  frameless,
 		DefaultContextMenuDisabled: true,
 		EnableFileDrop:             true,
+	}
+	if st.Maximised {
+		opts.StartState = application.WindowStateMaximised
 	}
 	if frameless {
 		opts.Mac = application.MacWindow{

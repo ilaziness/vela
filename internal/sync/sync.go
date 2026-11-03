@@ -70,6 +70,9 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
+		if shouldSkipSyncPath(relPath) {
+			return nil
+		}
 		targetPath := filepath.Join(dst, relPath)
 
 		if info.IsDir() {

@@ -2,6 +2,7 @@ package command
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -21,25 +22,34 @@ type LineCapture struct {
 	mu            sync.Mutex
 	buf           []byte
 	esc           bool
-	csi           bool // ESC [ ... final
-	osc           bool // ESC ] ... BEL/ST
+	csi           bool // ESC [ ... final (stdin)
+	osc           bool // ESC ] ... BEL/ST (stdin)
 	secretPending bool
 	lastOutLine   string // last evaluated prompt line; only re-arm secret when it changes
 	recentOut     []byte
+	altScreen     bool
+	// Incomplete DEC private mode / CSI from prior FeedOutput chunk.
+	outCSIPend []byte
 }
 
 const maxRecentOut = 4096
+const maxOutCSIPend = 64
 
-// FeedOutput records recent PTY output and updates password-prompt detection.
+// FeedOutput records recent PTY output and updates password-prompt / alt-screen detection.
 func (c *LineCapture) FeedOutput(data []byte) {
 	if len(data) == 0 {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.scanAltScreen(data)
 	c.recentOut = append(c.recentOut, data...)
 	if len(c.recentOut) > maxRecentOut {
 		c.recentOut = append([]byte(nil), c.recentOut[len(c.recentOut)-maxRecentOut:]...)
+	}
+	// TUI redraws must not arm password skipping (e.g. file content containing "password").
+	if c.altScreen {
+		return
 	}
 	plain := stripANSI(string(c.recentOut))
 	plain = strings.ReplaceAll(plain, "\r", "\n")
@@ -54,6 +64,94 @@ func (c *LineCapture) FeedOutput(data []byte) {
 	c.lastOutLine = last
 	// New last line: arm when it looks like a password prompt, else clear sticky flag.
 	c.secretPending = passwordPromptRe.MatchString(last)
+}
+
+// scanAltScreen updates altScreen from DEC private mode sequences (47/1047/1049).
+// Handles CSI split across FeedOutput calls via outCSIPend.
+func (c *LineCapture) scanAltScreen(data []byte) {
+	buf := data
+	if len(c.outCSIPend) > 0 {
+		combined := make([]byte, 0, len(c.outCSIPend)+len(data))
+		combined = append(combined, c.outCSIPend...)
+		combined = append(combined, data...)
+		buf = combined
+		c.outCSIPend = nil
+	}
+	i := 0
+	for i < len(buf) {
+		if buf[i] != 0x1b {
+			i++
+			continue
+		}
+		if i+1 >= len(buf) {
+			c.outCSIPend = append([]byte(nil), buf[i:]...)
+			return
+		}
+		if buf[i+1] != '[' {
+			i++
+			continue
+		}
+		j := i + 2
+		for j < len(buf) {
+			b := buf[j]
+			if b >= 0x40 && b <= 0x7e {
+				c.applyDECPrivate(buf[i : j+1])
+				i = j + 1
+				break
+			}
+			if b < 0x20 && b != 0x1b {
+				i = j
+				break
+			}
+			j++
+		}
+		if j >= len(buf) {
+			pend := buf[i:]
+			if len(pend) > maxOutCSIPend {
+				pend = pend[len(pend)-maxOutCSIPend:]
+			}
+			c.outCSIPend = append([]byte(nil), pend...)
+			return
+		}
+	}
+}
+
+func (c *LineCapture) applyDECPrivate(seq []byte) {
+	// Expect ESC [ ? <params> h|l
+	if len(seq) < 5 || seq[0] != 0x1b || seq[1] != '[' {
+		return
+	}
+	final := seq[len(seq)-1]
+	if final != 'h' && final != 'l' {
+		return
+	}
+	body := seq[2 : len(seq)-1]
+	if len(body) == 0 || body[0] != '?' {
+		return
+	}
+	enter := final == 'h'
+	changed := false
+	for _, p := range strings.Split(string(body[1:]), ";") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			continue
+		}
+		switch n {
+		case 47, 1047, 1049:
+			if c.altScreen != enter {
+				c.altScreen = enter
+				changed = true
+			}
+		}
+	}
+	if changed {
+		c.buf = c.buf[:0]
+		c.secretPending = false
+	}
 }
 
 // FeedInput consumes stdin bytes and returns completed non-secret command lines.
@@ -100,10 +198,19 @@ func (c *LineCapture) FeedInput(data []byte) []string {
 			continue
 		}
 
-		switch b {
-		case 0x1b: // ESC
+		if b == 0x1b {
 			c.esc = true
 			i++
+			continue
+		}
+
+		// TUI alternate screen: keep escape state machine, do not record.
+		if c.altScreen {
+			i++
+			continue
+		}
+
+		switch b {
 		case '\r', '\n':
 			line := strings.TrimSpace(string(c.buf))
 			c.buf = c.buf[:0]

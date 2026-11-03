@@ -3,7 +3,9 @@ package services
 import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/i18n"
 )
 
@@ -16,10 +18,12 @@ type Windows struct {
 	frameless bool
 }
 
-func NewWindows(app *application.App, main *application.WebviewWindow, frameless bool) *Windows {
+func NewWindows(app *application.App, main *application.WebviewWindow, frameless bool, store *config.Store, log *zap.Logger) *Windows {
 	w := &Windows{app: app, Main: main, frameless: frameless}
 	RegisterFileDropHandler(app, main)
+	flushWindow := bindMainWindowState(main, store, log)
 	main.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		flushWindow()
 		for _, window := range app.Window.GetAll() {
 			window.Close()
 		}

@@ -131,3 +131,71 @@ func TestLineCaptureCRLF(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+func TestLineCaptureAltScreenIgnoresKeys(t *testing.T) {
+	c := &LineCapture{}
+	c.FeedOutput([]byte("\x1b[?1049h"))
+	got := c.FeedInput([]byte("G\r"))
+	if len(got) != 0 {
+		t.Fatalf("G in alt screen must not record, got %#v", got)
+	}
+	got = c.FeedInput([]byte("ihello\r"))
+	if len(got) != 0 {
+		t.Fatalf("insert text in alt screen must not record, got %#v", got)
+	}
+	c.FeedOutput([]byte("\x1b[?1049l"))
+	got = c.FeedInput([]byte("ls\r"))
+	if len(got) != 1 || got[0] != "ls" {
+		t.Fatalf("after leave alt screen got %#v", got)
+	}
+}
+
+func TestLineCaptureAltScreenSplitCSI(t *testing.T) {
+	c := &LineCapture{}
+	c.FeedOutput([]byte("\x1b[?1049"))
+	c.FeedOutput([]byte("h"))
+	got := c.FeedInput([]byte("G\r"))
+	if len(got) != 0 {
+		t.Fatalf("split CSI enter must ignore keys, got %#v", got)
+	}
+	c.FeedOutput([]byte("\x1b[?1049"))
+	c.FeedOutput([]byte("l"))
+	got = c.FeedInput([]byte("pwd\r"))
+	if len(got) != 1 || got[0] != "pwd" {
+		t.Fatalf("split CSI leave got %#v", got)
+	}
+}
+
+func TestLineCaptureAltScreenModes(t *testing.T) {
+	for _, seq := range []string{"\x1b[?47h", "\x1b[?1047h", "\x1b[?1;1049h"} {
+		c := &LineCapture{}
+		c.FeedOutput([]byte(seq))
+		got := c.FeedInput([]byte("x\r"))
+		if len(got) != 0 {
+			t.Fatalf("%q must enter alt screen, got %#v", seq, got)
+		}
+	}
+}
+
+func TestLineCaptureAltScreenClearsPendingBuf(t *testing.T) {
+	c := &LineCapture{}
+	_ = c.FeedInput([]byte("partial"))
+	c.FeedOutput([]byte("\x1b[?1049h"))
+	c.FeedOutput([]byte("\x1b[?1049l"))
+	got := c.FeedInput([]byte("\r"))
+	if len(got) != 0 {
+		t.Fatalf("buf should be cleared on alt enter, got %#v", got)
+	}
+}
+
+func TestLineCaptureAltScreenIgnoresPasswordInRedraw(t *testing.T) {
+	c := &LineCapture{}
+	c.FeedOutput([]byte("\x1b[?1049h"))
+	c.FeedOutput([]byte("password = secret\r\n"))
+	c.FeedOutput([]byte("\x1b[?1049l"))
+	c.FeedOutput([]byte("user@host:~$ "))
+	got := c.FeedInput([]byte("ls\r"))
+	if len(got) != 1 || got[0] != "ls" {
+		t.Fatalf("TUI output must not arm password skip, got %#v", got)
+	}
+}

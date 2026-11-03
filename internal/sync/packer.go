@@ -15,7 +15,14 @@ import (
 const (
 	// 缓冲区大小: 1MB，优化大文件传输性能
 	bufferSize = 1024 * 1024
+	// Machine-local; must not travel with sync packs.
+	skipWindowStateName = "window-state.toml"
 )
+
+func shouldSkipSyncPath(relPath string) bool {
+	base := filepath.Base(relPath)
+	return base == skipWindowStateName
+}
 
 // archiveTargetPath joins dstDir with an archive entry name and rejects path escapes.
 func archiveTargetPath(dstDir, name string) (string, error) {
@@ -81,6 +88,9 @@ func PackStream(srcDir string, writer io.Writer, userKey string) error {
 		if err != nil {
 			return err
 		}
+		if shouldSkipSyncPath(relPath) {
+			return nil
+		}
 
 		// 创建 tar 头
 		header, err := tar.FileInfoHeader(info, info.Name())
@@ -129,6 +139,13 @@ func PackStreamWithProgress(srcDir string, writer io.Writer, userKey string, onP
 		if err != nil {
 			return err
 		}
+		relPath, relErr := filepath.Rel(srcDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		if shouldSkipSyncPath(relPath) {
+			return nil
+		}
 		if !info.IsDir() {
 			totalSize += info.Size()
 		}
@@ -171,6 +188,9 @@ func PackStreamWithProgress(srcDir string, writer io.Writer, userKey string, onP
 		relPath, err := filepath.Rel(srcDir, path)
 		if err != nil {
 			return err
+		}
+		if shouldSkipSyncPath(relPath) {
+			return nil
 		}
 
 		// 创建 tar 头

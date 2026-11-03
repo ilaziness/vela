@@ -71,6 +71,30 @@ func TestPackAndUnpackStream(t *testing.T) {
 	}
 }
 
+func TestPackSkipsWindowState(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "keep.txt"), []byte("ok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "window-state.toml"), []byte("width=1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var packed bytes.Buffer
+	if err := PackStream(srcDir, &packed, "key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := UnpackStream(bytes.NewReader(packed.Bytes()), dstDir, "key"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, "keep.txt")); err != nil {
+		t.Fatalf("keep.txt missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, "window-state.toml")); !os.IsNotExist(err) {
+		t.Fatalf("window-state.toml should be skipped, err=%v", err)
+	}
+}
+
 func TestPackStreamWithProgress(t *testing.T) {
 	srcDir := t.TempDir()
 
