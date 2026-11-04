@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termws"
 	"github.com/ilaziness/vela/internal/tunnel"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const EventHostKeyPrompt = "eventHostKeyPrompt"
@@ -191,7 +191,7 @@ func (s *SSHService) hops(req ConnectRequest) ([]ssh.Endpoint, error) {
 		return []ssh.Endpoint{target}, nil
 	}
 	if s.bookmarks == nil {
-		return nil, errors.New("bookmark service not initialized")
+		return nil, usererr.Coded("ssh.bookmark_service_nil", "Bookmark service is not initialized")
 	}
 	return s.bookmarks.ResolveHops(target, req.ProxyJumpID)
 }
@@ -350,13 +350,13 @@ func (s *SSHService) GetHostResources(linkID string) (ssh.HostResources, error) 
 // Cancelled dialog returns started=false with no error.
 func (s *SSHService) StartSessionLog(sessionID string) (path string, started bool, err error) {
 	if sessionID == "" {
-		return "", false, fmt.Errorf("session id is required")
+		return "", false, usererr.Coded("ssh.session_required", "Session is required")
 	}
 	if !s.mgr.HasSession(sessionID) {
 		return "", false, mapSSHUserError(fmt.Errorf("%w: %s", ssh.ErrSessionNotFound, sessionID))
 	}
 	if s.mgr.IsSessionLogging(sessionID) {
-		return "", false, fmt.Errorf("session log already recording")
+		return "", false, usererr.Coded("ssh.log_already_recording", "Session log is already recording")
 	}
 	prefix := sessionID
 	if len(prefix) > 8 {

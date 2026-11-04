@@ -15,3 +15,20 @@ func Coded(code, messageFmt string, params ...string) *Error {
 	}
 	return New(code, msg, params...)
 }
+
+// Wrap returns err if it is already a coded user error; otherwise Coded with
+// params followed by err.Error() as the last sprintf argument.
+func Wrap(err error, code, messageFmt string, params ...string) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := As(err); ok {
+		return err
+	}
+	all := make([]string, 0, len(params)+1)
+	all = append(all, params...)
+	all = append(all, err.Error())
+	ue := Coded(code, messageFmt, all...)
+	ue.cause = err
+	return ue
+}

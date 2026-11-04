@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 type fakeKeyboardPrompter struct {
@@ -59,7 +61,7 @@ func TestKeyboardStoreAnswerCancelAndFinish(t *testing.T) {
 	if _, err := s.begin("a", 1); err == nil {
 		t.Fatal("expected duplicate prompt to fail")
 	}
-	if err := s.answer("a", []string{"one", "two"}); err == nil || !strings.Contains(err.Error(), "答案数量不匹配") {
+	if err := s.answer("a", []string{"one", "two"}); usererr.CodeOf(err) != "ssh.kex_answer_mismatch" {
 		t.Fatalf("err = %v", err)
 	}
 	if err := s.answer("a", []string{"otp"}); err != nil {
@@ -256,13 +258,13 @@ func TestKeyboardChallengeRejectsBadRounds(t *testing.T) {
 	}}
 	m := NewManager(nil, "", nil, prompter)
 	_, err := m.answerKeyboardChallenge(Endpoint{}, nil, nil, time.Second, time.Second, "", "", []string{"Password:"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "格式无效") {
+	if usererr.CodeOf(err) != "ssh.kex_invalid" {
 		t.Fatalf("err = %v", err)
 	}
 	questions := make([]string, maxKeyboardQuestions+1)
 	echos := make([]bool, len(questions))
 	_, err = m.answerKeyboardChallenge(Endpoint{}, nil, nil, time.Second, time.Second, "", "", questions, echos)
-	if err == nil || !strings.Contains(err.Error(), "问题过多") {
+	if usererr.CodeOf(err) != "ssh.kex_too_many" {
 		t.Fatalf("err = %v", err)
 	}
 	if prompter.calls != 0 {

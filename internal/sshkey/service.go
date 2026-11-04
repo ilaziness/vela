@@ -1,6 +1,8 @@
 package sshkey
 
 import (
+	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +91,7 @@ func (s *Service) GenerateAndSave(name, algorithm, comment string) (Info, error)
 func (s *Service) PrivatePEM(id string) (string, error) {
 	row, err := s.db.SSHKeyRepo.Get(id)
 	if err != nil {
-		return "", err
+		return "", mapSSHKeyGetError(err)
 	}
 	plain, err := s.decrypt(row.PrivateKey)
 	if err != nil {
@@ -102,9 +104,16 @@ func (s *Service) PrivatePEM(id string) (string, error) {
 func (s *Service) Get(id string) (Info, error) {
 	row, err := s.db.SSHKeyRepo.Get(id)
 	if err != nil {
-		return Info{}, err
+		return Info{}, mapSSHKeyGetError(err)
 	}
 	return toInfo(row), nil
+}
+
+func mapSSHKeyGetError(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return usererr.Coded("sshkey.not_found", "SSH key not found")
+	}
+	return err
 }
 
 func (s *Service) Delete(id string) error {

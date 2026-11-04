@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -45,7 +44,7 @@ func init() {
 	application.RegisterEvent[AIStreamChunkData](EventAIStreamChunk)
 }
 
-var ErrAINotEnabled = usererr.Coded("ai.not_enabled", "AI assistant is not enabled. Open Settings → AI to configure and enable it.")
+var ErrAINotEnabled = usererr.Coded("ai.not_enabled", "AI assistant is not enabled. Open Settings → AI assistant to configure and enable it.")
 var ErrGenerationStopped = errors.New("generation stopped")
 
 type AIMessage struct {
@@ -147,7 +146,7 @@ func NewAIService(app *application.App, logger *zap.Logger, configService *Confi
 
 func (s *AIService) GetConfig() (*AIConfig, error) {
 	if s.configService == nil {
-		return nil, fmt.Errorf("config service not initialized")
+		return nil, usererr.Coded("ai.config_unavailable", "Config service is not initialized")
 	}
 	cfg := s.configService.aiConfig()
 	return &cfg, nil
@@ -214,7 +213,7 @@ func (s *AIService) reloadEngine(cfg *AIConfig) error {
 	}
 	s.engine.SetUserDataDir(s.userDataDir())
 	if err := s.engine.SetConfig(engineCfg); err != nil {
-		return fmt.Errorf("set ai engine config failed: %w", err)
+		return usererr.Wrap(err, "ai.engine_config_failed", "Failed to apply AI engine settings: %s")
 	}
 	return nil
 }
@@ -231,7 +230,7 @@ func (s *AIService) saveConfig(cfg AIConfig, reset bool) error {
 	if cfg.APIKey != "" {
 		encrypted, err := s.configService.encryptAPIKey(cfg.APIKey)
 		if err != nil {
-			return fmt.Errorf("encrypt api key failed: %w", err)
+			return usererr.Wrap(err, "ai.encrypt_key_failed", "Failed to encrypt API key: %s")
 		}
 		cfg.APIKeyEncrypted = encrypted
 		cfg.APIKey = ""
@@ -239,7 +238,7 @@ func (s *AIService) saveConfig(cfg AIConfig, reset bool) error {
 	if cfg.WebSearch.APIKey != "" {
 		encrypted, err := s.configService.encryptAPIKey(cfg.WebSearch.APIKey)
 		if err != nil {
-			return fmt.Errorf("encrypt web search api key failed: %w", err)
+			return usererr.Wrap(err, "ai.encrypt_search_key_failed", "Failed to encrypt web search API key: %s")
 		}
 		cfg.WebSearch.APIKeyEncrypted = encrypted
 		cfg.WebSearch.APIKey = ""
@@ -324,7 +323,7 @@ func (s *AIService) SetFilesystemAllowedDirs(dirs []string) error {
 		return err
 	}
 	if cfg == nil {
-		return fmt.Errorf("ai config is nil")
+		return usererr.Coded("ai.config_nil", "AI config is missing")
 	}
 	out := *cfg
 	out.Filesystem.AllowedDirs = tool.SanitizeAllowedDirs(dirs)
@@ -429,13 +428,13 @@ func (s *AIService) UpdateSession(session *AISession) error {
 
 func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	if req == nil {
-		return nil, fmt.Errorf("chat request is nil")
+		return nil, usererr.Coded("ai.chat_request_nil", "Chat request is missing")
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	newMessage := strings.TrimSpace(req.NewMessage)
 	runID := strings.TrimSpace(req.RunID)
 	if sessionID == "" || newMessage == "" {
-		return nil, fmt.Errorf("session id and message are required")
+		return nil, usererr.Coded("ai.session_message_required", "Session and message are required")
 	}
 	if runID == "" {
 		runID = uuid.New().String()
@@ -463,7 +462,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	eng := s.engine
 	s.engineMu.Unlock()
 	if eng == nil {
-		return nil, fmt.Errorf("ai engine not ready")
+		return nil, usererr.Coded("ai.engine_not_ready", "AI engine is not ready")
 	}
 	// Short timeout: do not block Chat for a full MCP reconnect budget.
 	ctxMCP, cancelMCP := context.WithTimeout(context.Background(), 10*time.Second)
@@ -501,7 +500,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
 	}
 	if ai.TurnHasInterrupt(messages) {
-		return nil, fmt.Errorf("pending tool approval must be resolved before sending a new message")
+		return nil, usererr.Coded("ai.approval_pending", "Resolve the pending tool approval before sending a new message")
 	}
 
 	dataDir, err := s.requireUserDataDir()
@@ -944,12 +943,12 @@ func (s *AIService) FlushAndStop() {
 // and Resume until complete or the next interrupt (no stream events without a subscriber).
 func (s *AIService) RespondToolApproval(req *ToolApprovalRequest) error {
 	if req == nil {
-		return fmt.Errorf("request is nil")
+		return usererr.Coded("ai.request_nil", "Request is missing")
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
 	approvalID := strings.TrimSpace(req.ApprovalID)
 	if sessionID == "" || approvalID == "" {
-		return fmt.Errorf("session_id and approval_id are required")
+		return usererr.Coded("ai.approval_ids_required", "Session and approval ID are required")
 	}
 	s.runsMu.Lock()
 	run := s.runs[sessionID]
@@ -959,13 +958,13 @@ func (s *AIService) RespondToolApproval(req *ToolApprovalRequest) error {
 		ch := run.approvals[approvalID]
 		run.mu.Unlock()
 		if ch == nil {
-			return fmt.Errorf("unknown or expired approval id")
+			return usererr.Coded("ai.approval_unknown", "Unknown or expired approval")
 		}
 		select {
 		case ch <- approvalDecision{Approved: req.Approved, Reason: req.Reason}:
 			return nil
 		default:
-			return fmt.Errorf("approval already resolved")
+			return usererr.Coded("ai.approval_resolved", "This approval was already resolved")
 		}
 	}
 	return s.coldRespondToolApproval(sessionID, approvalID, req.Approved, req.Reason, req.SSHContext)
@@ -977,7 +976,7 @@ func (s *AIService) RespondToolApproval(req *ToolApprovalRequest) error {
 func (s *AIService) StopGeneration(sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return fmt.Errorf("session id is required")
+		return usererr.Coded("ai.session_required", "Session is required")
 	}
 	s.runsMu.Lock()
 	run := s.runs[sessionID]
@@ -1013,7 +1012,7 @@ func (s *AIService) StopGeneration(sessionID string) error {
 func (s *AIService) CancelSSHExec(sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return fmt.Errorf("session id is required")
+		return usererr.Coded("ai.session_required", "Session is required")
 	}
 	s.runsMu.Lock()
 	run := s.runs[sessionID]
@@ -1041,7 +1040,7 @@ func (s *AIService) CancelChat(sessionID, runID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
 	if sessionID == "" || runID == "" {
-		return fmt.Errorf("session id and run id are required")
+		return usererr.Coded("ai.session_run_required", "Session and run ID are required")
 	}
 	s.runsMu.Lock()
 	run := s.runs[sessionID]
@@ -1113,7 +1112,7 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 // On ctx cancel, missing decisions become soft-deny (Reason:stopped) so Resume can finish.
 func (s *AIService) waitApprovals(ctx context.Context, run *agentRun, pending []ai.PendingApproval) ([]ai.ApprovalDecision, error) {
 	if run == nil {
-		return nil, fmt.Errorf("no active generation")
+		return nil, usererr.Coded("ai.no_active_generation", "No active generation")
 	}
 	type slot struct {
 		id string
@@ -1205,7 +1204,7 @@ func (s *AIService) coldRespondToolApproval(sessionID, approvalID string, approv
 		s.runsMu.Lock()
 		delete(s.coldApprovals, sessionID)
 		s.runsMu.Unlock()
-		return fmt.Errorf("no pending tool approval for session")
+		return usererr.Coded("ai.no_pending_approval", "No pending tool approval for this session")
 	}
 	for _, h := range holds {
 		if _, ok := pendingMap[h.ApprovalID]; !ok {
@@ -1225,11 +1224,11 @@ func (s *AIService) coldRespondToolApproval(sessionID, approvalID string, approv
 
 	resumeParts := ai.BuildResumeParts(messages, decisions)
 	if len(resumeParts) == 0 {
-		return fmt.Errorf("unable to build resume parts")
+		return usererr.Coded("ai.resume_parts_failed", "Unable to resume this turn")
 	}
 	claimIDs := trailingTurnMessageIDs(history)
 	if len(claimIDs) == 0 {
-		return fmt.Errorf("interrupted turn rows missing; cannot reclaim for resume")
+		return usererr.Coded("ai.interrupt_rows_missing", "Interrupted turn data is missing; cannot resume")
 	}
 	return s.runColdResume(sessionID, messages, resumeParts, claimIDs, sshCtx)
 }
@@ -1269,7 +1268,7 @@ func (s *AIService) runColdResume(sessionID string, messages []ai.ChatMessage, r
 	eng := s.engine
 	s.engineMu.Unlock()
 	if eng == nil {
-		return fmt.Errorf("ai engine not ready")
+		return usererr.Coded("ai.engine_not_ready", "AI engine is not ready")
 	}
 
 	runID := uuid.New().String()
@@ -1286,7 +1285,7 @@ func (s *AIService) runColdResume(sessionID string, messages []ai.ChatMessage, r
 	if _, busy := s.runs[sessionID]; busy {
 		s.runsMu.Unlock()
 		cancel()
-		return fmt.Errorf("generation already active for session")
+		return usererr.Coded("ai.generation_active", "A generation is already running for this session")
 	}
 	s.runs[sessionID] = run
 	s.runsMu.Unlock()

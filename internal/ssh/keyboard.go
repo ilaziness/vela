@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -10,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	cryptossh "golang.org/x/crypto/ssh"
 
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
 )
 
@@ -65,7 +65,7 @@ func (s *keyboardStore) begin(id string, expected int) (chan keyboardResult, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.pending[id]; ok {
-		return nil, fmt.Errorf("keyboard-interactive prompt already in progress")
+		return nil, usererr.Coded("ssh.kex_in_progress", "A keyboard-interactive prompt is already in progress")
 	}
 	ch := make(chan keyboardResult, 1)
 	s.pending[id] = &keyboardPending{ch: ch, expected: expected}
@@ -94,10 +94,10 @@ func (s *keyboardStore) settle(id string, result keyboardResult) error {
 	defer s.mu.Unlock()
 	p := s.pending[id]
 	if p == nil || p.settled {
-		return fmt.Errorf("没有待回答的 keyboard-interactive 提问")
+		return usererr.Coded("ssh.kex_none_pending", "No pending keyboard-interactive prompt")
 	}
 	if !result.cancel && len(result.answers) != p.expected {
-		return fmt.Errorf("keyboard-interactive 答案数量不匹配")
+		return usererr.Coded("ssh.kex_answer_mismatch", "Keyboard-interactive answer count does not match")
 	}
 	copied := make([]string, len(result.answers))
 	copy(copied, result.answers)
@@ -109,14 +109,14 @@ func (s *keyboardStore) settle(id string, result keyboardResult) error {
 
 func (m *Manager) AnswerKeyboardInteractive(id string, answers []string) error {
 	if m == nil || m.keyboard == nil {
-		return fmt.Errorf("没有待回答的 keyboard-interactive 提问")
+		return usererr.Coded("ssh.kex_none_pending", "No pending keyboard-interactive prompt")
 	}
 	return m.keyboard.answer(id, answers)
 }
 
 func (m *Manager) CancelKeyboardInteractive(id string) error {
 	if m == nil || m.keyboard == nil {
-		return fmt.Errorf("没有待回答的 keyboard-interactive 提问")
+		return usererr.Coded("ssh.kex_none_pending", "No pending keyboard-interactive prompt")
 	}
 	return m.keyboard.cancel(id)
 }
@@ -139,10 +139,10 @@ func (m *Manager) answerKeyboardChallenge(
 	echos []bool,
 ) ([]string, error) {
 	if len(echos) != len(questions) {
-		return nil, fmt.Errorf("keyboard-interactive 提问格式无效")
+		return nil, usererr.Coded("ssh.kex_invalid", "Invalid keyboard-interactive prompt")
 	}
 	if len(questions) > maxKeyboardQuestions {
-		return nil, fmt.Errorf("keyboard-interactive 问题过多")
+		return nil, usererr.Coded("ssh.kex_too_many", "Too many keyboard-interactive questions")
 	}
 	// 没有提问、标题和说明时直接回空应答。PAM 常在认证末尾发这种空轮次。
 	if len(questions) == 0 && strings.TrimSpace(name) == "" && strings.TrimSpace(instruction) == "" {
@@ -157,7 +157,7 @@ func (m *Manager) answerKeyboardChallenge(
 		return answers, nil
 	}
 	if m.keyboardPrompter == nil || m.keyboard == nil {
-		return nil, fmt.Errorf("keyboard-interactive prompt unavailable")
+		return nil, usererr.Coded("ssh.kex_unavailable", "Keyboard-interactive prompt is unavailable")
 	}
 
 	id := utils.GenerateRandomID()

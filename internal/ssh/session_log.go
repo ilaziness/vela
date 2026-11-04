@@ -1,10 +1,11 @@
 package ssh
 
 import (
-	"fmt"
 	"os"
 
 	"go.uber.org/zap"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -23,7 +24,7 @@ func (m *Manager) SetOnSessionLogStopped(fn func(sessionID, reason string)) {
 // OpenFile runs without session locks so closePTY is not blocked on disk I/O.
 func (m *Manager) StartSessionLog(id, path string) error {
 	if path == "" {
-		return fmt.Errorf("log path is required")
+		return usererr.Coded("ssh.log_path_required", "Log path is required")
 	}
 	sess, err := m.GetSession(id)
 	if err != nil {
@@ -33,14 +34,14 @@ func (m *Manager) StartSessionLog(id, path string) error {
 	closed := sess.isClosed
 	sess.closeMu.Unlock()
 	if closed {
-		return fmt.Errorf("session is closed")
+		return usererr.Coded("ssh.session_closed", "Session is closed")
 	}
 	// Reject before OpenFile so we do not truncate a path only to fail attach.
 	sess.logMu.Lock()
 	already := sess.logFile != nil
 	sess.logMu.Unlock()
 	if already {
-		return fmt.Errorf("session log already recording")
+		return usererr.Coded("ssh.log_already_recording", "Session log is already recording")
 	}
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
@@ -53,13 +54,13 @@ func (m *Manager) StartSessionLog(id, path string) error {
 	defer sess.closeMu.Unlock()
 	if sess.isClosed {
 		_ = f.Close()
-		return fmt.Errorf("session is closed")
+		return usererr.Coded("ssh.session_closed", "Session is closed")
 	}
 	sess.logMu.Lock()
 	defer sess.logMu.Unlock()
 	if sess.logFile != nil {
 		_ = f.Close()
-		return fmt.Errorf("session log already recording")
+		return usererr.Coded("ssh.log_already_recording", "Session log is already recording")
 	}
 	sess.logFile = f
 	return nil

@@ -18,6 +18,7 @@ import (
 	cryptossh "golang.org/x/crypto/ssh"
 
 	"github.com/ilaziness/vela/internal/sshkey"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 func newTestSigner(t *testing.T) cryptossh.Signer {
@@ -198,7 +199,7 @@ func TestUserCertificateSignerKeyMismatch(t *testing.T) {
 	user := newTestSigner(t)
 	path := writeTestCert(t, user, []string{"root"}, cryptossh.UserCert, time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
 	_, _, err := userCertificateSigner(path, "root", newTestSigner(t), nil)
-	if err == nil || !strings.Contains(err.Error(), "不匹配") {
+	if usererr.CodeOf(err) != "ssh.cert_no_matching_key" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -207,7 +208,7 @@ func TestUserCertificateSignerRejectsHostCert(t *testing.T) {
 	user := newTestSigner(t)
 	path := writeTestCert(t, user, nil, cryptossh.HostCert, time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
 	_, _, err := userCertificateSigner(path, "root", user, nil)
-	if err == nil || !strings.Contains(err.Error(), "用户证书") {
+	if usererr.CodeOf(err) != "ssh.cert_not_user" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -216,7 +217,7 @@ func TestUserCertificateSignerExpired(t *testing.T) {
 	user := newTestSigner(t)
 	path := writeTestCert(t, user, []string{"root"}, cryptossh.UserCert, time.Now().Add(-2*time.Hour), time.Now().Add(-time.Minute))
 	_, _, err := userCertificateSigner(path, "root", user, nil)
-	if err == nil || !strings.Contains(err.Error(), "过期") {
+	if usererr.CodeOf(err) != "ssh.cert_expired" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -225,7 +226,7 @@ func TestUserCertificateSignerNotYetValid(t *testing.T) {
 	user := newTestSigner(t)
 	path := writeTestCert(t, user, []string{"root"}, cryptossh.UserCert, time.Now().Add(time.Hour), time.Now().Add(2*time.Hour))
 	_, _, err := userCertificateSigner(path, "root", user, nil)
-	if err == nil || !strings.Contains(err.Error(), "尚未生效") {
+	if usererr.CodeOf(err) != "ssh.cert_not_yet_valid" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -234,7 +235,7 @@ func TestUserCertificateSignerPrincipalMismatch(t *testing.T) {
 	user := newTestSigner(t)
 	path := writeTestCert(t, user, []string{"alice"}, cryptossh.UserCert, time.Now().Add(-time.Minute), time.Now().Add(time.Hour))
 	_, _, err := userCertificateSigner(path, "root", user, nil)
-	if err == nil || !strings.Contains(err.Error(), "不适用于用户") {
+	if usererr.CodeOf(err) != "ssh.cert_user_mismatch" {
 		t.Fatalf("err = %v", err)
 	}
 }

@@ -22,6 +22,14 @@ type Error struct {
 	Code    string
 	Params  []string
 	Message string
+	cause   error
+}
+
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
 }
 
 func (e *Error) Error() string {

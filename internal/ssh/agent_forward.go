@@ -2,18 +2,19 @@ package ssh
 
 import (
 	"errors"
-	"fmt"
 	"io"
 
 	"go.uber.org/zap"
 	cryptossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 func (m *Manager) enableAgentForward(clientKey string) error {
 	v, ok := m.clients.Load(clientKey)
 	if !ok {
-		return fmt.Errorf("SSH client not found")
+		return usererr.Coded("ssh.client_not_found", "SSH client not found")
 	}
 	return v.(*hopClient).enableAgentForward(m.logger)
 }
@@ -25,7 +26,7 @@ func (h *hopClient) enableAgentForward(logger *zap.Logger) error {
 		return nil
 	}
 	if h.target == nil {
-		return fmt.Errorf("SSH client not found")
+		return usererr.Coded("ssh.client_not_found", "SSH client not found")
 	}
 
 	eps, err := dialAgentEndpoints()
@@ -33,7 +34,7 @@ func (h *hopClient) enableAgentForward(logger *zap.Logger) error {
 		if err == nil {
 			err = errors.New("no SSH agent endpoints")
 		}
-		return fmt.Errorf("SSH agent 不可用: %w", err)
+		return usererr.Wrap(err, "ssh.agent_unavailable", "SSH agent is unavailable: %s")
 	}
 
 	var agents []agent.Agent
@@ -63,7 +64,7 @@ func (h *hopClient) enableAgentForward(logger *zap.Logger) error {
 		if listErr == nil {
 			listErr = errors.New("no usable SSH agent")
 		}
-		return fmt.Errorf("SSH agent 不可用: %w", listErr)
+		return usererr.Wrap(listErr, "ssh.agent_unavailable", "SSH agent is unavailable: %s")
 	}
 
 	var keyring agent.Agent
@@ -125,7 +126,7 @@ func (m *multiAgent) Sign(key cryptossh.PublicKey, data []byte) (*cryptossh.Sign
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, fmt.Errorf("agent: key not found")
+	return nil, errors.New("agent: key not found")
 }
 
 func (m *multiAgent) Add(key agent.AddedKey) error {

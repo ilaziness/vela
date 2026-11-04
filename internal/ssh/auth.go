@@ -1,10 +1,11 @@
 package ssh
 
 import (
-	"fmt"
 	"os"
 
 	cryptossh "golang.org/x/crypto/ssh"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 // authMethods 按 Agent、密钥文件、密码的顺序组装静态认证方法。
@@ -82,7 +83,7 @@ func agentUnavailableIsFatal(ep Endpoint, keyboardEnabled bool) bool {
 func signerFromPEM(pem string) (cryptossh.Signer, error) {
 	signer, err := cryptossh.ParsePrivateKey([]byte(pem))
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse private key: %w", err)
+		return nil, usererr.Wrap(err, "ssh.private_key_parse", "Unable to parse private key: %s")
 	}
 	return signer, nil
 }
@@ -90,7 +91,7 @@ func signerFromPEM(pem string) (cryptossh.Signer, error) {
 func signerFromKeyFile(path, passphrase string) (cryptossh.Signer, error) {
 	keyContent, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read private key: %w", err)
+		return nil, usererr.Wrap(err, "ssh.private_key_read", "Unable to read private key: %s")
 	}
 	if passphrase == "" {
 		return cryptossh.ParsePrivateKey(keyContent)

@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 func (s *AIService) userDataDir() string {
@@ -24,7 +24,7 @@ func (s *AIService) userDataDir() string {
 func (s *AIService) requireUserDataDir() (string, error) {
 	dir := s.userDataDir()
 	if dir == "" {
-		return "", fmt.Errorf("user data dir is empty")
+		return "", usererr.Coded("ai.user_data_dir_empty", "User data directory is not set")
 	}
 	return dir, nil
 }
@@ -152,10 +152,10 @@ func (s *AIService) OpenSkillsDir() error {
 func (s *AIService) OpenSkillDir(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("skill name is required")
+		return usererr.Coded("ai.skill_name_required", "Skill name is required")
 	}
 	if name != filepath.Base(name) || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("invalid skill name")
+		return usererr.Coded("ai.skill_name_invalid", "Invalid skill name")
 	}
 	dir, err := s.requireUserDataDir()
 	if err != nil {
@@ -167,7 +167,7 @@ func (s *AIService) OpenSkillDir(name string) error {
 	}
 	path := filepath.Join(skillsDir, name)
 	if st, err := os.Stat(path); err != nil || !st.IsDir() {
-		return fmt.Errorf("skill %q not found", name)
+		return usererr.Coded("ai.skill_not_found", `Skill "%s" was not found`, name)
 	}
 	return ai.OpenPath(path)
 }

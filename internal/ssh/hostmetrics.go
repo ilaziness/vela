@@ -3,7 +3,6 @@ package ssh
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +10,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -82,7 +83,7 @@ func (m *Manager) hostMetricsFetchMu(key string) *sync.Mutex {
 // Results are deduplicated by clientKey with a short TTL.
 func (m *Manager) FetchHostResources(ctx context.Context, linkID string) (HostResources, error) {
 	if linkID == "" {
-		return HostResources{}, fmt.Errorf("link id is required")
+		return HostResources{}, usererr.Coded("ssh.link_id_required", "Connection is required")
 	}
 	sess, err := m.GetSession(linkID)
 	if err != nil {

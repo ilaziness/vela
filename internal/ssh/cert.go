@@ -2,12 +2,13 @@ package ssh
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"time"
 
 	cryptossh "golang.org/x/crypto/ssh"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 // userCertificateSigner 读取 OpenSSH 用户证书，并用匹配的私钥组成证书签名者。
@@ -23,7 +24,7 @@ func userCertificateSigner(path, user string, keySigner cryptossh.Signer, agentS
 	if keySigner != nil && sameSignerKey(keySigner, cert.Key) {
 		signer, err := cryptossh.NewCertSigner(cert, signerForCertKey(keySigner, cert.Key))
 		if err != nil {
-			return nil, false, fmt.Errorf("证书与私钥不匹配: %w", err)
+			return nil, false, usererr.Wrap(err, "ssh.cert_key_mismatch", "Certificate does not match the private key: %s")
 		}
 		return signer, false, nil
 	}
@@ -33,32 +34,32 @@ func userCertificateSigner(path, user string, keySigner cryptossh.Signer, agentS
 		}
 		signer, err := cryptossh.NewCertSigner(cert, signerForCertKey(agent, cert.Key))
 		if err != nil {
-			return nil, false, fmt.Errorf("证书与私钥不匹配: %w", err)
+			return nil, false, usererr.Wrap(err, "ssh.cert_key_mismatch", "Certificate does not match the private key: %s")
 		}
 		return signer, true, nil
 	}
-	return nil, false, fmt.Errorf("证书与可用私钥不匹配")
+	return nil, false, usererr.Coded("ssh.cert_no_matching_key", "Certificate does not match any available private key")
 }
 
 func parseUserCertificate(path string) (*cryptossh.Certificate, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("无法读取证书: %w", err)
+		return nil, usererr.Wrap(err, "ssh.cert_read_failed", "Failed to read certificate: %s")
 	}
 	pub, _, _, _, err := cryptossh.ParseAuthorizedKey(data)
 	if err != nil {
-		return nil, fmt.Errorf("无法解析证书: %w", err)
+		return nil, usererr.Wrap(err, "ssh.cert_parse_failed", "Failed to parse certificate: %s")
 	}
 	cert, ok := pub.(*cryptossh.Certificate)
 	if !ok || cert.CertType != cryptossh.UserCert {
-		return nil, fmt.Errorf("不是 OpenSSH 用户证书")
+		return nil, usererr.Coded("ssh.cert_not_user", "Not an OpenSSH user certificate")
 	}
 	now := uint64(time.Now().Unix())
 	if now < cert.ValidAfter {
-		return nil, fmt.Errorf("证书尚未生效")
+		return nil, usererr.Coded("ssh.cert_not_yet_valid", "Certificate is not yet valid")
 	}
 	if now >= cert.ValidBefore {
-		return nil, fmt.Errorf("证书已过期")
+		return nil, usererr.Coded("ssh.cert_expired", "Certificate has expired")
 	}
 	return cert, nil
 }
@@ -72,7 +73,7 @@ func certificateAllowsUser(cert *cryptossh.Certificate, user string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("证书不适用于用户 %s", user)
+	return usererr.Coded("ssh.cert_user_mismatch", "Certificate is not valid for user %s", user)
 }
 
 func samePublicKey(a, b cryptossh.PublicKey) bool {

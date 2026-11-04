@@ -3,7 +3,6 @@ package sftp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 const (
@@ -99,7 +99,7 @@ func joinRemotePath(elem ...string) string {
 func (sft *Manager) getSftpClient(sessionID string) (*sftp.Client, error) {
 	connVal, ok := sft.clients.Load(sessionID)
 	if !ok {
-		return nil, fmt.Errorf("SSH session with ID %s not found", sessionID)
+		return nil, usererr.Coded("sftp.session_not_found", "SSH session %s was not found", sessionID)
 	}
 	return connVal.(*sftp.Client), nil
 }
@@ -327,11 +327,11 @@ func (sft *Manager) uploadFileReplace(client *sftp.Client, local *os.File, remot
 		return errors.New(ErrTrackerRequired)
 	}
 	if remoteFinal == "" {
-		return fmt.Errorf("remote path is empty")
+		return usererr.Coded("sftp.remote_path_empty", "Remote path is empty")
 	}
 	staging := editStagingRemotePath(remoteFinal)
 	if staging == remoteFinal {
-		return fmt.Errorf("edit staging path equals remote path")
+		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
 	}
 	if _, err := local.Seek(0, io.SeekStart); err != nil {
 		return err
@@ -377,7 +377,7 @@ func (sft *Manager) replaceStagedFile(client stagingReplacer, staging, remoteFin
 	if st, statErr := client.Stat(remoteFinal); statErr == nil {
 		if st.IsDir() {
 			sft.removeStaging(client, staging)
-			return fmt.Errorf("remote path is a directory")
+			return usererr.Coded("sftp.remote_is_dir", "Remote path is a directory")
 		}
 		if rmErr := client.Remove(remoteFinal); rmErr != nil {
 			sft.removeStaging(client, staging)
@@ -396,12 +396,14 @@ func (sft *Manager) replaceStagedFile(client stagingReplacer, staging, remoteFin
 		if removed {
 			sft.logger.Error("edit rename failed after removing original",
 				zap.String("staging", staging), zap.String("remote", remoteFinal), zap.Error(err))
-			return fmt.Errorf("original remote file %s was removed but renaming %s into place failed; new contents remain at %s: %w",
-				remoteFinal, staging, staging, err)
+			return usererr.Wrap(err, "sftp.rename_original_removed",
+				"Original remote file %s was removed but renaming %s into place failed; new contents remain at %s: %s",
+				remoteFinal, staging, staging)
 		}
 		sft.logger.Error("edit rename failed; new contents remain in staging",
 			zap.String("staging", staging), zap.String("remote", remoteFinal), zap.Error(err))
-		return fmt.Errorf("rename %s to %s failed; new contents remain at %s: %w", staging, remoteFinal, staging, err)
+		return usererr.Wrap(err, "sftp.rename_failed",
+			"Failed to rename %s to %s; new contents remain at %s: %s", staging, remoteFinal, staging)
 	}
 	return nil
 }
@@ -634,7 +636,7 @@ type uploadJob struct {
 
 func (sft *Manager) UploadPaths(sessionID, remotePath string, localPaths []string) error {
 	if sessionID == "" || remotePath == "" || len(localPaths) == 0 {
-		return fmt.Errorf("invalid upload parameters")
+		return usererr.Coded("sftp.invalid_upload", "Invalid upload parameters")
 	}
 	if _, err := sft.getSftpClient(sessionID); err != nil {
 		return err
@@ -643,13 +645,13 @@ func (sft *Manager) UploadPaths(sessionID, remotePath string, localPaths []strin
 	for _, p := range localPaths {
 		info, err := os.Stat(p)
 		if err != nil {
-			return fmt.Errorf("local path %s: %w", p, err)
+			return usererr.Wrap(err, "sftp.local_path", "Local path %s: %s", p)
 		}
 		job := uploadJob{path: p, isDir: info.IsDir(), size: info.Size()}
 		if info.IsDir() {
 			total, err := sft.calcLocalDirSize(p)
 			if err != nil {
-				return fmt.Errorf("local path %s: %w", p, err)
+				return usererr.Wrap(err, "sftp.local_path", "Local path %s: %s", p)
 			}
 			job.size = total
 		}
@@ -689,7 +691,7 @@ func (sft *Manager) uploadDirectory(sessionID string, localPath, remotePath stri
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory")
+		return usererr.Coded("sftp.not_directory", "Path is not a directory")
 	}
 
 	remoteDir := joinRemotePath(remotePath, filepath.Base(localPath))
@@ -780,7 +782,7 @@ func (sft *Manager) downloadDirectory(sessionID string, localPath, remotePath st
 		return err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory")
+		return usererr.Coded("sftp.not_directory", "Path is not a directory")
 	}
 
 	if err := os.MkdirAll(localPath, 0755); err != nil {
@@ -829,7 +831,7 @@ type downloadJob struct {
 // DownloadPaths downloads remote files/dirs into localDir asynchronously.
 func (sft *Manager) DownloadPaths(sessionID, localDir string, remotePaths []string) error {
 	if sessionID == "" || localDir == "" || len(remotePaths) == 0 {
-		return fmt.Errorf("invalid download parameters")
+		return usererr.Coded("sftp.invalid_download", "Invalid download parameters")
 	}
 	ftpClient, err := sft.getSftpClient(sessionID)
 	if err != nil {
@@ -842,13 +844,13 @@ func (sft *Manager) DownloadPaths(sessionID, localDir string, remotePaths []stri
 	for _, rp := range remotePaths {
 		info, err := ftpClient.Stat(rp)
 		if err != nil {
-			return fmt.Errorf("remote path %s: %w", rp, err)
+			return usererr.Wrap(err, "sftp.remote_path", "Remote path %s: %s", rp)
 		}
 		job := downloadJob{remote: rp, isDir: info.IsDir(), size: info.Size()}
 		if info.IsDir() {
 			total, err := sft.calcRemoteDirSize(sessionID, rp)
 			if err != nil {
-				return fmt.Errorf("remote path %s: %w", rp, err)
+				return usererr.Wrap(err, "sftp.remote_path", "Remote path %s: %s", rp)
 			}
 			job.size = total
 		}
@@ -913,7 +915,7 @@ func (sft *Manager) RenameFile(sessionID string, oldPath, newPath string) error 
 		return err
 	}
 	if _, err := ftpClient.Stat(newPath); err == nil {
-		return fmt.Errorf("%s exists", newPath)
+		return usererr.Coded("sftp.path_exists", "%s already exists", newPath)
 	}
 
 	return ftpClient.Rename(oldPath, newPath)
@@ -1004,7 +1006,7 @@ func (sft *Manager) CreateFile(sessionID string, path string) error {
 		return err
 	}
 	if _, err := ftpClient.Stat(path); err == nil {
-		return fmt.Errorf("file already exists")
+		return usererr.Coded("sftp.file_exists", "File already exists")
 	}
 	_, err = ftpClient.Create(path)
 	return err
@@ -1017,7 +1019,7 @@ func (sft *Manager) CreateDirectory(sessionID string, path string) error {
 		return err
 	}
 	if _, err := ftpClient.Stat(path); err == nil {
-		return fmt.Errorf("directory already exists")
+		return usererr.Coded("sftp.dir_exists", "Directory already exists")
 	}
 	return ftpClient.MkdirAll(path)
 }
@@ -1063,26 +1065,26 @@ func (sft *Manager) DismissTransfer(transferID string) error {
 // RetryTransfer re-queues a persisted transfer using the same ID.
 func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 	if sft.queue == nil {
-		return fmt.Errorf("transfer queue unavailable")
+		return usererr.Coded("sftp.queue_unavailable", "Transfer queue is unavailable")
 	}
 	rec, err := sft.queue.Get(transferID)
 	if err != nil {
 		return err
 	}
 	if rec == nil {
-		return fmt.Errorf("transfer not found")
+		return usererr.Coded("sftp.transfer_not_found", "Transfer not found")
 	}
 	switch rec.Status {
 	case transfer.StatusFailed, transfer.StatusCancelled, transfer.StatusInterrupted:
 	default:
-		return fmt.Errorf("transfer is not retryable (status=%s)", rec.Status)
+		return usererr.Coded("sftp.transfer_not_retryable", "This transfer cannot be retried (status: %s)", rec.Status)
 	}
 	owner := sft.ownerKey(sessionID)
 	if owner == "" || rec.OwnerKey != owner {
-		return fmt.Errorf("transfer owner mismatch")
+		return usererr.Coded("sftp.transfer_owner_mismatch", "Transfer owner mismatch")
 	}
 	if sft.transfers.HasActive(transferID) {
-		return fmt.Errorf("transfer already active")
+		return usererr.Coded("sftp.transfer_active", "Transfer is already active")
 	}
 	if _, err := sft.getSftpClient(sessionID); err != nil {
 		return err
@@ -1131,7 +1133,7 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 			_, startErr = sft.startDownloadFileAsync(sessionID, rec.LocalFile, rec.RemoteFile, info.Size(), opts)
 		}
 	default:
-		return fmt.Errorf("unknown transfer type: %s", rec.TransferType)
+		return usererr.Coded("sftp.unknown_transfer_type", "Unknown transfer type: %s", rec.TransferType)
 	}
 	if startErr != nil {
 		return startErr

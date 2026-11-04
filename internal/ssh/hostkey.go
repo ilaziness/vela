@@ -12,6 +12,8 @@ import (
 	"time"
 
 	cryptossh "golang.org/x/crypto/ssh"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 type hostKeyStore struct {
@@ -27,7 +29,7 @@ func (s *hostKeyStore) begin(host string) (chan bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.pending[host]; ok {
-		return nil, fmt.Errorf("host key prompt already in progress for %s", host)
+		return nil, usererr.Coded("ssh.host_key_in_progress", "A host key prompt is already in progress for %s", host)
 	}
 	ch := make(chan bool, 1)
 	s.pending[host] = ch
@@ -45,7 +47,7 @@ func (s *hostKeyStore) decide(host string, accept bool) error {
 	ch := s.pending[host]
 	s.mu.Unlock()
 	if ch == nil {
-		return fmt.Errorf("no pending host key prompt")
+		return usererr.Coded("ssh.host_key_none", "No pending host key prompt")
 	}
 	select {
 	case ch <- accept:
@@ -242,9 +244,9 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 	}
 	if m.prompter == nil {
 		if mismatch {
-			return fmt.Errorf("host key mismatch for %s", host)
+			return usererr.Coded("ssh.host_key_mismatch", "Host key mismatch for %s", host)
 		}
-		return fmt.Errorf("host key not trusted")
+		return usererr.Coded("ssh.host_key_untrusted", "Host key is not trusted")
 	}
 
 	ch, err := m.hostKey.begin(host)
@@ -272,9 +274,9 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 	case accept := <-ch:
 		if !accept {
 			if mismatch {
-				return fmt.Errorf("host key mismatch for %s", host)
+				return usererr.Coded("ssh.host_key_mismatch", "Host key mismatch for %s", host)
 			}
-			return fmt.Errorf("host key not trusted")
+			return usererr.Coded("ssh.host_key_untrusted", "Host key is not trusted")
 		}
 		m.knownHostsMu.Lock()
 		defer m.knownHostsMu.Unlock()
@@ -283,7 +285,7 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 		}
 		return appendKnownHost(knownPath, host, keyType, keyBase64)
 	case <-time.After(30 * time.Second):
-		return fmt.Errorf("host key prompt timeout")
+		return usererr.Coded("ssh.host_key_timeout", "Host key confirmation timed out")
 	}
 }
 
@@ -319,7 +321,7 @@ func (m *Manager) ListKnownHosts() ([]KnownHostEntry, error) {
 
 func (m *Manager) DeleteKnownHost(host, keyType string) error {
 	if host == "" {
-		return fmt.Errorf("host is required")
+		return usererr.Coded("ssh.host_required", "Host is required")
 	}
 	path := m.knownHostsFile()
 	m.knownHostsMu.Lock()

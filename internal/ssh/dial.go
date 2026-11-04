@@ -4,19 +4,22 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
 	cryptossh "golang.org/x/crypto/ssh"
+
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 func (m *Manager) dialHops(hops []Endpoint, timeout time.Duration, proxy ProxyConfig) (*hopClient, error) {
 	const maxDepth = 5
 	if len(hops) == 0 {
-		return nil, fmt.Errorf("empty hop list")
+		return nil, usererr.Coded("ssh.empty_hops", "Empty hop list")
 	}
 	if len(hops) > maxDepth+1 {
-		return nil, fmt.Errorf("跳板机层数超过最大限制 (%d)", maxDepth)
+		return nil, usererr.Coded("ssh.jump_too_deep", "Jump host chain exceeds the maximum of %s hops", strconv.Itoa(maxDepth))
 	}
 	seen := make(map[string]bool)
 	var jumps []*cryptossh.Client
@@ -33,12 +36,12 @@ func (m *Manager) dialHops(hops []Endpoint, timeout time.Duration, proxy ProxyCo
 		addr := hop.Addr()
 		if seen[addr] {
 			closeOpened()
-			return nil, fmt.Errorf("检测到跳板机循环引用: %s", addr)
+			return nil, usererr.Coded("ssh.jump_cycle", "Jump host cycle detected: %s", addr)
 		}
 		seen[addr] = true
 		if i > 0 && hops[i-1].Host == hop.Host && hops[i-1].Port == hop.Port {
 			closeOpened()
-			return nil, fmt.Errorf("跳板机不能与目标主机相同")
+			return nil, usererr.Coded("ssh.jump_same_host", "Jump host cannot be the same as the target")
 		}
 		var hopProxy ProxyConfig
 		if i == 0 {
@@ -65,7 +68,7 @@ func (m *Manager) dialOne(ep Endpoint, timeout time.Duration, via *cryptossh.Cli
 	}
 	if err != nil {
 		if agentUnavailableIsFatal(ep, m.keyboardPrompter != nil) {
-			return nil, fmt.Errorf("SSH agent 不可用: %w", err)
+			return nil, usererr.Wrap(err, "ssh.agent_unavailable", "SSH agent is unavailable: %s")
 		}
 		m.logger.Debug("ssh agent unavailable, continuing with other auth", zap.Error(err))
 	} else {

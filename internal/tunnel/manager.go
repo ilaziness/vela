@@ -17,6 +17,7 @@ import (
 	"github.com/ilaziness/vela/internal/buildinfo"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
 )
 
@@ -251,7 +252,7 @@ func (tn *tunnelConn) stop() {
 func (t *Manager) StopByID(id string) error {
 	v, ok := t.tunnels.Load(id)
 	if !ok {
-		return fmt.Errorf("tunnel not found")
+		return usererr.Coded("tunnel.not_found", "Tunnel not found")
 	}
 	tn := v.(*tunnelConn)
 	tn.stop()

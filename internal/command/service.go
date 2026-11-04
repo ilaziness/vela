@@ -12,6 +12,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/usererr"
 )
 
 type BuiltinCommand struct {
@@ -154,7 +155,7 @@ func (s *Service) SaveUser(cmd UserCommand) error {
 func (s *Service) DeleteUser(category, name string) error {
 	cmd, err := s.db.UserCommandRepo.GetCommandByCategoryAndName(category, name)
 	if err != nil {
-		return fmt.Errorf("user command not found: category=%s, name=%s", category, name)
+		return usererr.Coded("command.not_found", "Command not found: %s / %s", category, name)
 	}
 	return s.db.UserCommandRepo.DeleteCommand(cmd.ID)
 }
@@ -232,7 +233,7 @@ func (s *Service) All() map[string][]Info {
 
 func (s *Service) Send(command string, sessionIDs []string) error {
 	if s.sendFn == nil {
-		return fmt.Errorf("SSH service not initialized")
+		return usererr.Coded("command.ssh_unavailable", "SSH service is not initialized")
 	}
 	var lastErr error
 	for _, id := range sessionIDs {

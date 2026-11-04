@@ -354,7 +354,10 @@ const TransferList: React.FC<TransferListProps> = ({
                               wordBreak: "break-word",
                             }}
                           >
-                            {tf("transfer.error", transfer.error ?? "")}
+                            {tf(
+                              "transfer.error",
+                              translateServiceError(transfer.error ?? ""),
+                            )}
                           </Typography>
                         )}
                       </Box>

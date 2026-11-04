@@ -17,6 +17,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/system"
 	"github.com/ilaziness/vela/internal/termcharset"
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
 	"github.com/ilaziness/vela/internal/zmodem"
 )
@@ -299,7 +300,7 @@ func hopsClientKey(hops []Endpoint, proxy ProxyConfig) string {
 
 func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 	if len(hops) == 0 {
-		return "", fmt.Errorf("empty hop list")
+		return "", usererr.Coded("ssh.empty_hops", "Empty hop list")
 	}
 	target := hops[len(hops)-1]
 	m.logger.Debug("Connecting to SSH server", zap.String("host", target.Host), zap.Int("port", target.Port))
@@ -331,7 +332,7 @@ func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 
 func (m *Manager) TestConnect(hops []Endpoint, proxy ProxyConfig) error {
 	if len(hops) == 0 {
-		return fmt.Errorf("empty hop list")
+		return usererr.Coded("ssh.empty_hops", "Empty hop list")
 	}
 	target := hops[len(hops)-1]
 	m.logger.Debug("Testing SSH connection", zap.String("host", target.Host), zap.Int("port", target.Port))
@@ -367,7 +368,7 @@ func (m *Manager) SendToSession(sessionID, command string) error {
 		return err
 	}
 	if sess.Stdin == nil {
-		return fmt.Errorf("stdin not available")
+		return usererr.Coded("ssh.stdin_unavailable", "Standard input is not available")
 	}
 	_, err = sess.Stdin.Write([]byte(command + "\n"))
 	if err != nil {
@@ -509,18 +510,18 @@ func (sc *Session) Start(cols, rows int) error {
 	if sc.forwardAgent {
 		if err := sc.manager.enableAgentForward(sc.ClientKey); err != nil {
 			sc.manager.logger.Error("SSH agent forwarding enable failed", zap.Error(err), zap.String("id", sc.ID))
-			return fmt.Errorf("SSH agent 转发失败: %w", err)
+			return usererr.Wrap(err, "ssh.agent_forward_failed", "SSH agent forwarding failed: %s")
 		}
 	}
 	var err error
 	sc.session, err = sc.client.NewSession()
 	if err != nil {
-		return fmt.Errorf("Start session fail")
+		return usererr.Wrap(err, "ssh.start_session_failed", "Failed to start session: %s")
 	}
 	if sc.forwardAgent {
 		if err = agent.RequestAgentForwarding(sc.session); err != nil {
 			sc.manager.logger.Error("SSH agent forwarding request denied", zap.Error(err), zap.String("id", sc.ID))
-			return sc.failStart(fmt.Errorf("SSH agent 转发请求被拒绝: %w", err))
+			return sc.failStart(usererr.Wrap(err, "ssh.agent_forward_denied", "SSH agent forwarding was denied: %s"))
 		}
 	}
 	term := sc.term
@@ -763,7 +764,7 @@ func (sc *Session) closePTY() error {
 func (sc *Session) Resize(cols, rows int) error {
 	sc.manager.logger.Debug("Resizing SSH session", zap.String("id", sc.ID), zap.Int("cols", cols), zap.Int("rows", rows))
 	if sc.session == nil {
-		return fmt.Errorf("no active session")
+		return usererr.Coded("ssh.no_active_session", "No active session")
 	}
 	return sc.session.WindowChange(rows, cols)
 }
@@ -845,7 +846,7 @@ func bashSingleQuote(s string) string {
 
 func writeStdinLine(stdin io.Writer, line string) error {
 	if stdin == nil {
-		return fmt.Errorf("stdin not available")
+		return usererr.Coded("ssh.stdin_unavailable", "Standard input is not available")
 	}
 	_, err := io.WriteString(stdin, line+"\n")
 	return err
