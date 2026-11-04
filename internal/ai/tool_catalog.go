@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"path/filepath"
 	"strings"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
@@ -148,8 +147,4 @@ func enabledSkillsFromDisk(userDataDir string) ([]EnabledSkill, error) {
 		})
 	}
 	return out, nil
-}
-
-func skillMarkdownPath(skillDir string) string {
-	return filepath.Join(skillDir, skillMarkdownName)
 }

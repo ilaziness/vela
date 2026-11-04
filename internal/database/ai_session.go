@@ -57,6 +57,8 @@ type AISessionRepository interface {
 	ListUnsealedRuns(ctx context.Context, sessionID string) ([]UnsealedRunRef, error)
 	ReplaceRunMessages(ctx context.Context, sessionID, runID string, msgs []*AIMessage) error
 	SealRunMessages(ctx context.Context, sessionID, runID string) error
+	// SetMessagesRunID assigns run_id on sealed rows so ReplaceRunMessages can rewrite them (cold resume).
+	SetMessagesRunID(ctx context.Context, runID string, ids []string) error
 	UpdateMessageContent(ctx context.Context, id, content, parts string) error
 	UpdateMessageStatus(ctx context.Context, id, status string) error
 	UpdateMessageStatuses(ctx context.Context, ids []string, status string) error
@@ -372,6 +374,30 @@ func (r *SQLiteAISessionRepository) SealRunMessages(ctx context.Context, session
 		sessionID, runID)
 	if err != nil {
 		return fmt.Errorf("seal run messages failed: %w", err)
+	}
+	return nil
+}
+
+// SetMessagesRunID sets run_id for the given message ids (cold resume reclaim of sealed interrupt rows).
+func (r *SQLiteAISessionRepository) SetMessagesRunID(ctx context.Context, runID string, ids []string) error {
+	if runID == "" || len(ids) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin set run_id tx failed: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE ai_messages SET run_id = ? WHERE id = ?`, runID, id); err != nil {
+			return fmt.Errorf("set message run_id failed: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit set run_id failed: %w", err)
 	}
 	return nil
 }

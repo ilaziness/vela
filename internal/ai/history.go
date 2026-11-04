@@ -34,6 +34,8 @@ type AgentRequest struct {
 	SystemPrompt string
 	EnableSSH    bool
 	LinkID       string
+	// ResumeParts, when set, starts with WithResume (cold approval path; no new user message).
+	ResumeParts []*genkitAI.Part
 }
 
 // AgentResponse is the new model/tool messages produced by this Run.
@@ -46,7 +48,7 @@ type AgentResponse struct {
 // System prompt is always injected fresh (not taken from stored history).
 // upsert_plan tool parts are stripped from sealed history (authoritative plan is in system).
 // Attachment refs (vela-att:// and vela-path:) are resolved using userDataDir.
-func buildGenkitMessages(history []ChatMessage, newParts []*genkitAI.Part, systemPrompt, userDataDir string) ([]*genkitAI.Message, error) {
+func buildGenkitHistoryOnly(history []ChatMessage, systemPrompt, userDataDir string) ([]*genkitAI.Message, error) {
 	var msgs []*genkitAI.Message
 	if systemPrompt != "" {
 		msgs = append(msgs, genkitAI.NewSystemTextMessage(systemPrompt))
@@ -70,7 +72,17 @@ func buildGenkitMessages(history []ChatMessage, newParts []*genkitAI.Part, syste
 		}
 		msgs = append(msgs, genkitAI.NewMessage(role, nil, resolved...))
 	}
-	msgs = sanitizeTranscript(msgs)
+	// Keep trailing interrupt tool-requests for WithResume (do not trimIncompleteToolRound).
+	return dropOrphanTools(msgs), nil
+}
+
+func buildGenkitMessages(history []ChatMessage, newParts []*genkitAI.Part, systemPrompt, userDataDir string) ([]*genkitAI.Message, error) {
+	msgs, err := buildGenkitHistoryOnly(history, systemPrompt, userDataDir)
+	if err != nil {
+		return nil, err
+	}
+	// New user turn: drop an unresolved interrupt tail so providers accept the prompt.
+	msgs = trimIncompleteToolRound(msgs)
 	if len(newParts) == 0 {
 		return msgs, fmt.Errorf("new user parts are required")
 	}
@@ -248,6 +260,40 @@ func PrepareTurn(resp *AgentResponse, cancelled bool) *AgentResponse {
 	}
 	annotateDeniedToolStatuses(resp.Turn)
 	return resp
+}
+
+// PrepareTurnInterrupted keeps Genkit interrupt tool-request parts so a paused
+// turn remains resumable (must not call completeTurn / trimIncompleteToolRound).
+func PrepareTurnInterrupted(resp *AgentResponse) *AgentResponse {
+	if resp == nil {
+		return nil
+	}
+	resp.Turn = dropOrphanToolsChat(resp.Turn)
+	return resp
+}
+
+func dropOrphanToolsChat(turn []ChatMessage) []ChatMessage {
+	if len(turn) == 0 {
+		return turn
+	}
+	msgs := dropOrphanTools(chatMessagesToGenkit(turn))
+	return genkitToChatMessages(msgs, nil)
+}
+
+// TurnHasInterrupt reports whether the turn ends with an unresolved interrupt hold.
+func TurnHasInterrupt(turn []ChatMessage) bool {
+	for i := len(turn) - 1; i >= 0; i-- {
+		if turn[i].Role != RoleModel {
+			continue
+		}
+		for _, p := range UnmarshalParts(turn[i].Parts) {
+			if p != nil && p.IsInterrupt() {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 // applyStreamedText fills in model text that was emitted as stream deltas but may be

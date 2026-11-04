@@ -187,7 +187,6 @@ func TestToolDepsArmSSHExecCancelWiring(t *testing.T) {
 		approvals: make(map[string]chan approvalDecision),
 	}
 	h := &aiHost{run: run}
-	// Same wiring as Chat(): callback on ToolDeps, not ApprovalGate.
 	arm := h.ArmSSHExecCancel
 	arm()
 	run.mu.Lock()
@@ -198,12 +197,12 @@ func TestToolDepsArmSSHExecCancelWiring(t *testing.T) {
 	}
 }
 
-func TestRespondToolApprovalArmsSSHExecPending(t *testing.T) {
+func TestRespondToolApprovalDeliversDecision(t *testing.T) {
+	ch := make(chan approvalDecision, 1)
 	run := &agentRun{
-		runID:        "run-1",
-		cancel:       func() {},
-		approvals:    map[string]chan approvalDecision{"appr-1": make(chan approvalDecision, 1)},
-		sshApprovals: map[string]struct{}{"appr-1": {}},
+		runID:     "run-1",
+		cancel:    func() {},
+		approvals: map[string]chan approvalDecision{"appr-1": ch},
 	}
 	s := &AIService{
 		runs:      map[string]*agentRun{"sess": run},
@@ -214,39 +213,30 @@ func TestRespondToolApprovalArmsSSHExecPending(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run.mu.Lock()
-	pending := run.execPending
-	_, stillMarked := run.sshApprovals["appr-1"]
-	run.mu.Unlock()
-	if !pending {
-		t.Fatal("approving an SSH-marked approval should arm execPending immediately")
-	}
-	if stillMarked {
-		t.Fatal("sshApprovals mark should be cleared after respond")
+	select {
+	case d := <-ch:
+		if !d.Approved {
+			t.Fatal("expected approved decision")
+		}
+	default:
+		t.Fatal("expected decision on channel")
 	}
 }
 
-func TestRespondToolApprovalMCPDoesNotArm(t *testing.T) {
+func TestRespondToolApprovalUnknownID(t *testing.T) {
 	run := &agentRun{
 		runID:     "run-1",
 		cancel:    func() {},
-		approvals: map[string]chan approvalDecision{"appr-mcp": make(chan approvalDecision, 1)},
-		// no sshApprovals entry — MCP
+		approvals: map[string]chan approvalDecision{},
 	}
 	s := &AIService{
 		runs:      map[string]*agentRun{"sess": run},
 		cancelled: make(map[string]struct{}),
 	}
 	if err := s.RespondToolApproval(&ToolApprovalRequest{
-		SessionID: "sess", ApprovalID: "appr-mcp", Approved: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	run.mu.Lock()
-	pending := run.execPending
-	run.mu.Unlock()
-	if pending {
-		t.Fatal("MCP approve must not arm execPending")
+		SessionID: "sess", ApprovalID: "missing", Approved: true,
+	}); err == nil {
+		t.Fatal("expected error for unknown approval id")
 	}
 }
 

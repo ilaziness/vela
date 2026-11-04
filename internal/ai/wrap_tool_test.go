@@ -12,13 +12,6 @@ import (
 	"github.com/ilaziness/vela/internal/ai/tool"
 )
 
-type alwaysApprove struct{}
-
-func (alwaysApprove) Open(string) {}
-func (alwaysApprove) Wait(context.Context, string) (bool, string, error) {
-	return true, "", nil
-}
-
 func mcpWrapToolParams(t *testing.T, callID string) *genkitAI.ToolParams {
 	t.Helper()
 	tl := genkitAI.NewTool("mcp__srv__t", "test", func(_ *genkitAI.ToolContext, _ map[string]any) (string, error) {
@@ -38,8 +31,7 @@ func TestWrapToolCallFailEmitsOutputAvailable(t *testing.T) {
 	t.Parallel()
 	var events []StreamEvent
 	ctx := tool.WithDeps(context.Background(), tool.Deps{
-		Approval: alwaysApprove{},
-		Emit:     func(ev StreamEvent) { events = append(events, ev) },
+		Emit: func(ev StreamEvent) { events = append(events, ev) },
 	})
 	failMsg := "additional input required (not supported)"
 	_, err := wrapToolCall(ctx, mcpWrapToolParams(t, "call-1"), func(context.Context, *genkitAI.ToolParams) (*genkitAI.MultipartToolResponse, error) {
@@ -76,8 +68,7 @@ func TestWrapToolCallHardErrorEmitsOutputError(t *testing.T) {
 	t.Parallel()
 	var events []StreamEvent
 	ctx := tool.WithDeps(context.Background(), tool.Deps{
-		Approval: alwaysApprove{},
-		Emit:     func(ev StreamEvent) { events = append(events, ev) },
+		Emit: func(ev StreamEvent) { events = append(events, ev) },
 	})
 	_, err := wrapToolCall(ctx, mcpWrapToolParams(t, "call-2"), func(context.Context, *genkitAI.ToolParams) (*genkitAI.MultipartToolResponse, error) {
 		return nil, errors.New("transport down")

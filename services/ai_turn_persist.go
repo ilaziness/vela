@@ -141,7 +141,14 @@ func (p *turnPersister) Finalize(resp *ai.AgentResponse, cancelled bool) (*datab
 	if p.streamBuf != "" {
 		merged = mergeStreamSegment(merged, p.streamBuf)
 	}
-	prepared := ai.PrepareTurn(merged, cancelled)
+	// Stop/abort synthesizes denials. Keep interrupt only when the run is still paused
+	// (Chat returned an interrupt snapshot, cancelled=false).
+	var prepared *ai.AgentResponse
+	if !cancelled && ai.TurnHasInterrupt(merged.Turn) {
+		prepared = ai.PrepareTurnInterrupted(merged)
+	} else {
+		prepared = ai.PrepareTurn(merged, cancelled)
+	}
 	last, err := p.finalizePreparedLocked(prepared, cancelled)
 	if err != nil {
 		return last, err
@@ -162,8 +169,16 @@ func (p *turnPersister) ForceFinalize() (*database.AIMessage, error) {
 		return nil, nil
 	}
 	merged := mergeStreamSegment(&ai.AgentResponse{Turn: append([]ai.ChatMessage(nil), p.lastTurn...)}, p.streamBuf)
-	prepared := ai.PrepareTurn(merged, true)
-	last, err := p.finalizePreparedLocked(prepared, true)
+	keepInterrupt := ai.TurnHasInterrupt(merged.Turn)
+	var prepared *ai.AgentResponse
+	if keepInterrupt {
+		// Preserve Genkit interrupt holds so cold RespondToolApproval can resume.
+		// Do not mark the user message cancelled — the turn is paused, not abandoned.
+		prepared = ai.PrepareTurnInterrupted(merged)
+	} else {
+		prepared = ai.PrepareTurn(merged, true)
+	}
+	last, err := p.finalizePreparedLocked(prepared, !keepInterrupt)
 	if err != nil {
 		return last, err
 	}
@@ -353,8 +368,8 @@ func chatHasToolRequest(m ai.ChatMessage) bool {
 	return false
 }
 
-// persistCancelledRunTurn writes PrepareTurn(cancelled) model/tool rows, seals run_id, marks users.
-// Used by orphan recovery (no live turnPersister).
+// persistCancelledRunTurn seals an orphan run. Interrupted holds are kept for cold resume;
+// otherwise the turn is cancelled like a stopped generation.
 func persistCancelledRunTurn(
 	repo database.AISessionRepository,
 	logger *zap.Logger,
@@ -365,13 +380,20 @@ func persistCancelledRunTurn(
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	prepared := ai.PrepareTurn(&ai.AgentResponse{Turn: modelToolTurn(turn)}, true)
+	raw := &ai.AgentResponse{Turn: modelToolTurn(turn)}
+	keepInterrupt := ai.TurnHasInterrupt(raw.Turn)
+	var prepared *ai.AgentResponse
+	if keepInterrupt {
+		prepared = ai.PrepareTurnInterrupted(raw)
+	} else {
+		prepared = ai.PrepareTurn(raw, true)
+	}
 	if prepared != nil && len(prepared.Turn) > 0 {
 		now := time.Now()
 		out := make([]*database.AIMessage, 0, len(prepared.Turn))
 		for i, m := range prepared.Turn {
 			status := m.Status
-			if m.Role != ai.RoleTool {
+			if !keepInterrupt && m.Role != ai.RoleTool {
 				status = database.MessageStatusCancelled
 			}
 			id := ""
@@ -399,7 +421,7 @@ func persistCancelledRunTurn(
 	if err := repo.SealRunMessages(context.Background(), sessionID, runID); err != nil {
 		return err
 	}
-	if len(userIDs) > 0 {
+	if !keepInterrupt && len(userIDs) > 0 {
 		if err := repo.UpdateMessageStatuses(context.Background(), userIDs, database.MessageStatusCancelled); err != nil {
 			logger.Error("mark orphan user cancelled failed",
 				zap.String("sessionId", sessionID),

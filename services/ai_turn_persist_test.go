@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	genkitAI "github.com/firebase/genkit/go/ai"
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/ai"
@@ -413,6 +414,60 @@ func TestTurnPersisterForceFinalizeCancelled(t *testing.T) {
 	}
 	if userStatus != database.MessageStatusCancelled {
 		t.Fatalf("user status = %q", userStatus)
+	}
+}
+
+func TestTurnPersisterForceFinalizeKeepsInterrupt(t *testing.T) {
+	db := openAITestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+
+	sess := &database.AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	user := &database.AIMessage{
+		SessionID: sess.ID, Role: ai.RoleUser, Content: "q", Parts: "[]", RunID: "run-i",
+	}
+	if err := repo.CreateMessage(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	part := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
+		Name: ai.ToolRunSSHCommand, Ref: "c1", Input: map[string]any{"command": "ls"},
+	})
+	part.Interrupt = &genkitAI.ToolInterrupt{}
+	p := newTurnPersister(repo, zap.NewNop(), sess.ID, "run-i", user.ID)
+	p.Checkpoint([]ai.ChatMessage{{
+		Role: ai.RoleModel, Content: "", Parts: ai.MarshalParts([]*genkitAI.Part{part}),
+	}})
+	if _, err := p.ForceFinalize(); err != nil {
+		t.Fatal(err)
+	}
+	all, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawInterrupt bool
+	for _, m := range all {
+		if m.RunID != "" {
+			t.Fatalf("unsealed after force: %+v", m)
+		}
+		if m.Role == ai.RoleUser && m.Status == database.MessageStatusCancelled {
+			t.Fatal("interrupt pause must not cancel the user message")
+		}
+		if m.Role == ai.RoleModel {
+			for _, part := range ai.UnmarshalParts(m.Parts) {
+				if part != nil && part.IsInterrupt() {
+					sawInterrupt = true
+				}
+			}
+			if m.Status == database.MessageStatusCancelled {
+				t.Fatalf("interrupt model must not be cancelled: %+v", m)
+			}
+		}
+	}
+	if !sawInterrupt {
+		t.Fatal("expected preserved interrupt part")
 	}
 }
 

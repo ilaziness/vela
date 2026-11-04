@@ -131,9 +131,7 @@ const AISideBar = () => {
   const composerValue = useAIAssistantStore((state) => state.composerValue);
   const loadSessions = useAIAssistantStore((state) => state.loadSessions);
   const selectSession = useAIAssistantStore((state) => state.selectSession);
-  const refreshActiveSessionTitle = useAIAssistantStore(
-    (state) => state.refreshActiveSessionTitle,
-  );
+  const messagesRevision = useAIAssistantStore((state) => state.messagesRevision);
   const setSidebarWidth = useAIAssistantStore((state) => state.setSidebarWidth);
   const setComposerValue = useAIAssistantStore(
     (state) => state.setComposerValue,
@@ -286,6 +284,7 @@ const AISideBar = () => {
         >
           {showChat ? (
             <ChatBox
+              key={`${activeSessionId || 'none'}:${messagesRevision}`}
               adapter={adapter}
               currentUser={getCurrentUser()}
               members={[getCurrentUser(), getAiUser()]}
@@ -314,7 +313,6 @@ const AISideBar = () => {
                 },
                 autoScroll: { buffer: 2000 },
               }}
-              onFinish={() => void refreshActiveSessionTitle()}
               onError={(err: any) => {
                 useAIAssistantStore.getState().setStreaming(false);
                 LogService.Error(`[AI Chat] ${err.source}: ${err.message}`);

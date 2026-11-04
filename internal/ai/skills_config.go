@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	skillsDirName       = "skills"
-	skillsStateFileName = "skills-state.json"
-	skillMarkdownName   = "SKILL.md"
+	skillsDirName          = "skills"
+	skillsStateFileName    = "skills-state.json"
+	skillMarkdownName      = "SKILL.md"
+	skillsMissingDescLabel = "No description provided."
 )
 
 // SkillsStateFile stores disabled skill names only.

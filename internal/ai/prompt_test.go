@@ -23,6 +23,9 @@ func TestBuildSystemPromptNoSSH(t *testing.T) {
 	if strings.Contains(got, "run_ssh_command is available") {
 		t.Fatalf("did not expect connected SSH tools blurb:\n%s", got)
 	}
+	if !strings.Contains(got, "No usable SSH session") {
+		t.Fatalf("expected disconnected SSH wording:\n%s", got)
+	}
 }
 
 func TestBuildSystemPromptWithSSH(t *testing.T) {
@@ -57,12 +60,31 @@ func TestBuildSystemPromptOptsFSAndSearch(t *testing.T) {
 	if !strings.Contains(got, `D:\data`) {
 		t.Fatalf("expected allow dir in prompt:\n%s", got)
 	}
+	if !strings.Contains(got, "File tools may only use paths under these directories") {
+		t.Fatalf("expected allowlist rule:\n%s", got)
+	}
 	if !strings.Contains(got, "web_search") {
 		t.Fatalf("expected web_search in prompt:\n%s", got)
 	}
 	off := BuildSystemPromptOpts(PromptOptions{UILanguage: "en"})
 	if strings.Contains(off, "Local file allowlist") {
 		t.Fatalf("unexpected allowlist when FS off:\n%s", off)
+	}
+}
+
+func TestFormatRemoteOS(t *testing.T) {
+	t.Parallel()
+	if got := formatRemoteOS("Ubuntu", "ubuntu", "22.04"); got != "Ubuntu (ubuntu 22.04)" {
+		t.Fatalf("got %q", got)
+	}
+	if got := formatRemoteOS("Ubuntu", "", ""); got != "Ubuntu" {
+		t.Fatalf("got %q", got)
+	}
+	if got := formatRemoteOS("", "ubuntu", "22.04"); got != "ubuntu 22.04" {
+		t.Fatalf("got %q", got)
+	}
+	if got := formatRemoteOS("", "", ""); got != "" {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -87,6 +109,45 @@ func TestBuildSystemPromptEmptyOrInvalidPlanSkipped(t *testing.T) {
 	}
 	if strings.Contains(BuildSystemPromptOpts(PromptOptions{PlanJSON: `{"title":"x","tasks":[]}`, UILanguage: "en"}), "## Current plan") {
 		t.Fatal("empty tasks")
+	}
+}
+
+func TestBuildSystemPromptScopeLimitsToOperations(t *testing.T) {
+	got := BuildSystemPromptOpts(PromptOptions{UILanguage: "en"})
+	for _, want := range []string{
+		"Only answer operations-related questions",
+		"unrelated to operations",
+		"do not use tools",
+		"cannot answer",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected scope wording %q in prompt:\n%s", want, got)
+		}
+	}
+}
+
+func TestFallbackSystemPromptCoversHardRules(t *testing.T) {
+	got := fallbackSystemPrompt(PromptOptions{
+		EnableSSH: true, EnableFS: true, EnableWebSearch: true,
+	}, "zh-CN")
+	for _, want := range []string{
+		"Respond in the user's UI language: zh-CN",
+		"Only answer operations-related questions",
+		"do not use tools",
+		"cannot answer",
+		"run_ssh_command",
+		"read_local_file",
+		"web_search",
+		"passwords",
+		"credentials",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected fallback wording %q:\n%s", want, got)
+		}
+	}
+	off := fallbackSystemPrompt(PromptOptions{}, "en")
+	if strings.Contains(off, "run_ssh_command") || strings.Contains(off, "web_search") || strings.Contains(off, "read_local_file") {
+		t.Fatalf("disabled tools must stay out of fallback:\n%s", off)
 	}
 }
 

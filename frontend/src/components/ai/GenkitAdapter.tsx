@@ -17,7 +17,7 @@ import {
 import { fileToDataURL, localFilePath } from '../../func/aiAttachments';
 import { useMessageStore } from '../../stores/message';
 import { useAIAssistantStore } from '../../stores/aiAssistant';
-import { t } from '../../i18n';
+import { NEW_SESSION_TITLE_ID, sessionTitleFromMessage, t } from '../../i18n';
 import { parseCallServiceError, translateServiceError } from "../../func/service";
 
 const EVENT_AI_STREAM_CHUNK = 'eventAIStreamChunk';
@@ -80,6 +80,14 @@ export class GenkitAdapter implements ChatAdapter {
     }
 
     this.activeSessionId = sessionId;
+
+    // Optimistic sidebar title — do not wait for Chat / GetSession.
+    const store = useAIAssistantStore.getState();
+    const current = store.sessions.find((s) => s.id === sessionId);
+    const curTitle = (current?.title || '').trim();
+    if (!curTitle || curTitle === NEW_SESSION_TITLE_ID) {
+      store.setActiveSessionTitle(sessionTitleFromMessage(newMessage));
+    }
 
     let chatPromise: ReturnType<typeof AIService.Chat>;
     let messageId: string;
@@ -374,15 +382,22 @@ export class GenkitAdapter implements ChatAdapter {
     if (!sessionId) {
       throw new Error(t('ai.chat.session_not_ready'));
     }
+    const wasStreaming = useAIAssistantStore.getState().isStreaming;
     try {
+      const bind = getCurrentSSHBindState();
       await AIService.RespondToolApproval(
         new ToolApprovalRequest({
           session_id: sessionId,
           approval_id: input.id,
           approved: input.approved,
           reason: input.reason,
+          ...(bind.context ? { ssh_context: bind.context } : {}),
         }),
       );
+      // Cold recovery: no live ReadableStream — reload persisted transcript.
+      if (!wasStreaming) {
+        useAIAssistantStore.getState().bumpMessagesRevision();
+      }
     } catch (err) {
       const message = translateServiceError(err);
       useMessageStore.getState().errorMessage(message);
@@ -470,6 +485,15 @@ function parseGenkitParts(raw: string): any[] {
   }
 }
 
+/** Genkit interrupt wire metadata: unresolved hold → MUI approval-requested. */
+function isGenkitInterruptPart(p: { metadata?: Record<string, unknown> }): boolean {
+  const meta = p.metadata;
+  if (!meta || typeof meta !== 'object') return false;
+  if (meta.resolvedInterrupt != null) return false;
+  const interrupt = meta.interrupt;
+  return interrupt === true || (interrupt != null && typeof interrupt === 'object');
+}
+
 function genkitPartsToMui(parts: any[], fallbackText: string, rowStatus?: string): MessageParts {
   const out: any[] = [];
   for (const p of parts) {
@@ -481,14 +505,24 @@ function genkitPartsToMui(parts: any[], fallbackText: string, rowStatus?: string
     if (p.toolRequest) {
       const req = p.toolRequest;
       const toolName = String(req.name || '');
+      const toolCallId = String(req.ref || req.name || '');
+      const interrupted = isGenkitInterruptPart(p);
       out.push({
         type: toolPartType(toolName),
-        toolInvocation: {
-          toolCallId: String(req.ref || req.name || ''),
-          toolName,
-          state: 'input-available',
-          input: sanitizeToolInputForDisplay(toolName, req.input ?? {}),
-        },
+        toolInvocation: interrupted
+          ? {
+              toolCallId,
+              toolName,
+              state: 'approval-requested',
+              input: sanitizeToolInputForDisplay(toolName, req.input ?? {}),
+              approval: { id: toolCallId },
+            }
+          : {
+              toolCallId,
+              toolName,
+              state: 'input-available',
+              input: sanitizeToolInputForDisplay(toolName, req.input ?? {}),
+            },
       });
       continue;
     }

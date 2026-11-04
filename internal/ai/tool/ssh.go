@@ -2,17 +2,13 @@ package tool
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"unicode/utf8"
-	"uuid"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
+	genkitTool "github.com/firebase/genkit/go/ai/tool"
 	"github.com/firebase/genkit/go/genkit"
-
-	"github.com/ilaziness/vela/internal/ai/event"
 )
 
 const (
@@ -31,52 +27,14 @@ func defineSSHTool(g *genkit.Genkit) genkitAI.ToolRef {
 		func(tc *genkitAI.ToolContext, input sshCommandInput) (string, error) {
 			deps := FromCtx(tc)
 			if !deps.EnableSSH() {
-				return "SSH tools unavailable: no active SSH session", nil
+				return "", genkitTool.Fail(tc, errors.New("SSH tools unavailable: no active SSH session"))
 			}
 			cmd := strings.TrimSpace(input.Command)
 			if cmd == "" {
-				return "error: empty command", nil
+				return "", genkitTool.Fail(tc, errors.New("empty command"))
 			}
 			if len(cmd) > 800 {
-				return "error: command too long; call run_ssh_command once per short command", nil
-			}
-			callID := uuid.New().String()
-			approvalID := callID
-			inJSON, _ := json.Marshal(sshCommandInput{Command: cmd})
-
-			emit(deps, event.StreamEvent{Type: event.EventStartStep})
-			emit(deps, event.StreamEvent{Type: event.EventToolInputStart, ToolCallID: callID, ToolName: RunSSHCommand})
-			emit(deps, event.StreamEvent{Type: event.EventToolInputAvailable, ToolCallID: callID, ToolName: RunSSHCommand, Input: inJSON})
-
-			deps.Approval.Open(approvalID)
-			if deps.MarkSSHApproval != nil {
-				deps.MarkSSHApproval(approvalID)
-			}
-			emit(deps, event.StreamEvent{
-				Type: event.EventToolApprovalRequest, ToolCallID: callID, ToolName: RunSSHCommand,
-				ApprovalID: approvalID, Input: inJSON,
-			})
-
-			approved, reason, err := deps.Approval.Wait(tc, approvalID)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				emit(deps, event.StreamEvent{Type: event.EventToolOutputError, ToolCallID: callID, ToolName: RunSSHCommand, ErrorText: err.Error()})
-				emit(deps, event.StreamEvent{Type: event.EventFinishStep})
-				return fmt.Sprintf("approval wait failed: %v", err), nil
-			}
-			if !approved || errors.Is(err, context.Canceled) {
-				if reason == "" {
-					if errors.Is(err, context.Canceled) {
-						reason = "stopped"
-					} else {
-						reason = "user denied"
-					}
-				}
-				emit(deps, event.StreamEvent{
-					Type: event.EventToolOutputDenied, ToolCallID: callID, ToolName: RunSSHCommand,
-					ApprovalID: approvalID, Reason: reason,
-				})
-				emit(deps, event.StreamEvent{Type: event.EventFinishStep})
-				return fmt.Sprintf("User denied command execution: %s", reason), nil
+				return "", genkitTool.Fail(tc, errors.New("command too long; call run_ssh_command once per short command"))
 			}
 
 			if deps.ArmSSHExecCancel != nil {
@@ -85,45 +43,31 @@ func defineSSHTool(g *genkit.Genkit) genkitAI.ToolRef {
 			echoCommand(tc, deps, cmd)
 			out, execErr := deps.SSH.Exec(tc, deps.LinkID, cmd)
 			if errors.Is(execErr, context.Canceled) {
-				return emitSSHCanceled(tc, deps, callID, out), nil
+				return sshCanceledResult(tc, deps, out), nil
 			}
 			echoResult(tc, deps, out, execErr)
-			return finishSSH(deps, callID, out, execErr), nil
+			if execErr != nil {
+				msg := strings.TrimRight(out, "\r\n")
+				if msg != "" {
+					msg += "\n"
+				}
+				msg += "exit/error: " + execErr.Error()
+				return "", genkitTool.Fail(tc, errors.New(msg))
+			}
+			if out == "" {
+				out = "(no output)"
+			}
+			return out, nil
 		})
 }
 
-func emitSSHCanceled(tc *genkitAI.ToolContext, deps Deps, callID, out string) string {
+func sshCanceledResult(tc *genkitAI.ToolContext, deps Deps, out string) string {
 	if tc.Err() != nil {
 		echoResult(tc, deps, out, errors.New(msgGenerationStopped))
-		emit(deps, event.StreamEvent{Type: event.EventToolOutputError, ToolCallID: callID, ToolName: RunSSHCommand, ErrorText: msgGenerationStopped})
-		emit(deps, event.StreamEvent{Type: event.EventFinishStep})
 		return msgGenerationStopped
 	}
 	echoResult(tc, deps, out, errors.New(msgUserStoppedCommand))
-	outJSON, _ := json.Marshal(map[string]string{"output": msgUserStoppedCommand})
-	emit(deps, event.StreamEvent{Type: event.EventToolOutputAvailable, ToolCallID: callID, ToolName: RunSSHCommand, Output: outJSON})
-	emit(deps, event.StreamEvent{Type: event.EventFinishStep})
 	return msgUserStoppedCommand
-}
-
-func finishSSH(deps Deps, callID, out string, execErr error) string {
-	if execErr != nil {
-		msg := strings.TrimRight(out, "\r\n")
-		if msg != "" {
-			msg += "\n"
-		}
-		msg += "exit/error: " + execErr.Error()
-		emit(deps, event.StreamEvent{Type: event.EventToolOutputError, ToolCallID: callID, ToolName: RunSSHCommand, ErrorText: msg})
-		emit(deps, event.StreamEvent{Type: event.EventFinishStep})
-		return msg
-	}
-	if out == "" {
-		out = "(no output)"
-	}
-	outJSON, _ := json.Marshal(map[string]string{"output": out})
-	emit(deps, event.StreamEvent{Type: event.EventToolOutputAvailable, ToolCallID: callID, ToolName: RunSSHCommand, Output: outJSON})
-	emit(deps, event.StreamEvent{Type: event.EventFinishStep})
-	return out
 }
 
 func echoCommand(tc *genkitAI.ToolContext, deps Deps, cmd string) {

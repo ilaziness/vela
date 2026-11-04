@@ -98,20 +98,6 @@ func TestSaveMCPEnabledMissing(t *testing.T) {
 	}
 }
 
-func TestMCPNamespacedToolName(t *testing.T) {
-	t.Parallel()
-	got := mcpNamespacedToolName("mui-mcp", "fetchDocs")
-	want := "mcp__mui-mcp__fetchDocs"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-	got = mcpNamespacedToolName("my server", "a.b/c")
-	want = "mcp__my_server__a_b_c"
-	if got != want {
-		t.Fatalf("sanitize: got %q want %q", got, want)
-	}
-}
-
 func TestMCPServerEntryEnvSlice(t *testing.T) {
 	t.Parallel()
 	e := MCPServerEntry{Env: map[string]string{"B": "2", "A": "1"}}

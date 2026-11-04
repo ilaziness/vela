@@ -18,9 +18,8 @@ export const NEW_SESSION_TITLE_ID = "__new_session__";
 /** Stable tab name for a blank SSH tab (display via displaySSHTabName). */
 export const NEW_CONNECTION_TAB_ID = "__new_connection__";
 
-/** Legacy Chinese defaults still present in older DBs before Go migration. */
+/** Legacy Chinese default group still present in older DBs before Go migration. */
 const LEGACY_DEFAULT_GROUP = "\u9ed8\u8ba4\u4e66\u7b7e";
-const LEGACY_NEW_SESSION = "\u65b0\u4f1a\u8bdd";
 
 let language: AppLanguage = AppLanguage.En;
 let catalog: Record<string, string> = {};
@@ -136,10 +135,19 @@ export function isDefaultBookmarkGroup(name: string | null | undefined): boolean
 
 export function displaySessionTitle(title: string | null | undefined): string {
   const n = (title || "").trim();
-  if (!n || n === NEW_SESSION_TITLE_ID || n === LEGACY_NEW_SESSION) {
+  if (!n || n === NEW_SESSION_TITLE_ID) {
     return t("ai.session.new");
   }
   return n;
+}
+
+/** Truncate first user message for session title (matches Go CreateMessage path). */
+export function sessionTitleFromMessage(text: string): string {
+  const runes = Array.from((text || "").trim());
+  if (runes.length === 0) {
+    return NEW_SESSION_TITLE_ID;
+  }
+  return runes.slice(0, 20).join("");
 }
 
 /** Blank / numbered new-connection tab labels stored as stable ids. */

@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"uuid"
 
+	genkitAI "github.com/firebase/genkit/go/ai"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"go.uber.org/zap"
 
@@ -93,10 +95,11 @@ type ChatResponse struct {
 }
 
 type ToolApprovalRequest struct {
-	SessionID  string `json:"session_id"`
-	ApprovalID string `json:"approval_id"`
-	Approved   bool   `json:"approved"`
-	Reason     string `json:"reason,omitempty"`
+	SessionID  string      `json:"session_id"`
+	ApprovalID string      `json:"approval_id"`
+	Approved   bool        `json:"approved"`
+	Reason     string      `json:"reason,omitempty"`
+	SSHContext *SSHContext `json:"ssh_context,omitempty"`
 }
 
 type approvalDecision struct {
@@ -105,15 +108,14 @@ type approvalDecision struct {
 }
 
 type agentRun struct {
-	runID        string
-	cancel       context.CancelFunc
-	approvals    map[string]chan approvalDecision
-	sshApprovals map[string]struct{} // approvalIDs that will SSH-Exec after approve
-	persister    *turnPersister
-	execCancel   context.CancelFunc // cancels the in-flight run_ssh_command Exec only
-	execPending  bool               // approved, Exec not registered yet (approve→Exec race)
-	execAbort    bool               // CancelSSHExec while execPending
-	mu           sync.Mutex
+	runID       string
+	cancel      context.CancelFunc
+	approvals   map[string]chan approvalDecision
+	persister   *turnPersister
+	execCancel  context.CancelFunc // cancels the in-flight run_ssh_command Exec only
+	execPending bool               // approved, Exec not registered yet (approve→Exec race)
+	execAbort   bool               // CancelSSHExec while execPending
+	mu          sync.Mutex
 }
 
 type AIService struct {
@@ -129,6 +131,8 @@ type AIService struct {
 	runs     map[string]*agentRun
 	// cancelled records run IDs cancelled via CancelChat before (or while) Chat registers.
 	cancelled map[string]struct{}
+	// coldApprovals accumulates MUI decisions when no live Chat is waiting (reload).
+	coldApprovals map[string]map[string]approvalDecision
 }
 
 func NewAIService(app *application.App, logger *zap.Logger, configService *ConfigService, sshService *SSHService, db *database.Database) *AIService {
@@ -137,6 +141,7 @@ func NewAIService(app *application.App, logger *zap.Logger, configService *Confi
 	return &AIService{
 		app: app, logger: logger, configService: configService, sshService: sshService,
 		sessionRepo: db.AISessionRepo, runs: make(map[string]*agentRun), cancelled: make(map[string]struct{}),
+		coldApprovals: make(map[string]map[string]approvalDecision),
 	}
 }
 
@@ -359,11 +364,9 @@ func (s *AIService) resolveWebSearchRuntime(cfg *AIConfig) (tool.WebSearchRuntim
 // UI displays via i18n key ai.session.new.
 const NewSessionTitleID = "__new_session__"
 
-const legacyNewSessionTitle = "新会话"
-
 func isNewSessionTitle(title string) bool {
 	t := strings.TrimSpace(title)
-	return t == "" || t == NewSessionTitleID || t == legacyNewSessionTitle
+	return t == "" || t == NewSessionTitleID
 }
 
 func (s *AIService) CreateSession() (*AISession, error) {
@@ -480,6 +483,9 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	s.waitSessionRunIdle(sessionID, 2*time.Second)
 	s.forceFinalizeSessionRun(sessionID)
 	s.sealOrphanRuns(sessionID)
+	s.runsMu.Lock()
+	delete(s.coldApprovals, sessionID)
+	s.runsMu.Unlock()
 
 	history, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
 	if err != nil {
@@ -493,6 +499,9 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		}
 		// Status is UI-only; Genkit replay uses role/content/parts.
 		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
+	}
+	if ai.TurnHasInterrupt(messages) {
+		return nil, fmt.Errorf("pending tool approval must be resolved before sending a new message")
 	}
 
 	dataDir, err := s.requireUserDataDir()
@@ -526,6 +535,20 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	if err := s.sessionRepo.CreateMessage(context.Background(), userMsg); err != nil {
 		return nil, err
 	}
+	// Title from first user message (before Generate) so sidebar/DB match without racing Chat return.
+	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
+		if len(messages) == 0 && isNewSessionTitle(session.Title) {
+			title := []rune(newMessage)
+			if len(title) > 20 {
+				title = title[:20]
+			}
+			session.Title = string(title)
+			if session.Title == "" {
+				session.Title = NewSessionTitleID
+			}
+			_ = s.sessionRepo.UpdateSession(context.Background(), session)
+		}
+	}
 
 	linkID, sshCtx, remoteInfo := s.resolveSSHContext(req.SSHContext)
 	enableSSH := linkID != ""
@@ -543,17 +566,6 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	planJSON := ""
 	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
 		planJSON = session.PlanJSON
-		if len(messages) == 0 && isNewSessionTitle(session.Title) {
-			title := []rune(newMessage)
-			if len(title) > 20 {
-				title = title[:20]
-			}
-			session.Title = string(title)
-			if session.Title == "" {
-				session.Title = NewSessionTitleID
-			}
-			_ = s.sessionRepo.UpdateSession(context.Background(), session)
-		}
 	}
 	aiReq := &ai.AgentRequest{
 		Messages: messages,
@@ -575,11 +587,10 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	persister := newTurnPersister(s.sessionRepo, s.logger, sessionID, runID, userMsg.ID)
 	run := &agentRun{
-		runID:        runID,
-		cancel:       cancel,
-		approvals:    make(map[string]chan approvalDecision),
-		sshApprovals: make(map[string]struct{}),
-		persister:    persister,
+		runID:     runID,
+		cancel:    cancel,
+		approvals: make(map[string]chan approvalDecision),
+		persister: persister,
 	}
 	s.runsMu.Lock()
 	if _, ok := s.cancelled[runID]; ok {
@@ -615,14 +626,15 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		Tools: tool.Deps{
 			LinkID:           linkID,
 			SSH:              host,
-			Approval:         host,
-			MarkSSHApproval:  host.MarkSSHApproval,
 			ArmSSHExecCancel: host.ArmSSHExecCancel,
 			AllowedDirs:      allowDirs,
 			WebSearch:        webSearch,
 			OnPlanUpsert: func(planJSON string) error {
 				return s.sessionRepo.UpdateSessionPlan(context.Background(), sessionID, planJSON)
 			},
+		},
+		WaitApprovals: func(ctx context.Context, pending []ai.PendingApproval) ([]ai.ApprovalDecision, error) {
+			return s.waitApprovals(ctx, run, pending)
 		},
 		OnCheckpoint: persister.Checkpoint,
 	}
@@ -684,8 +696,11 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 				Delta:     msg,
 			})
 		}
-		errResp := mergeErrorIntoResponse(aiResp, msg)
-		last, perr := persister.Finalize(errResp, false)
+		persistResp := aiResp
+		if aiResp == nil || !ai.TurnHasInterrupt(aiResp.Turn) {
+			persistResp = mergeErrorIntoResponse(aiResp, msg)
+		}
+		last, perr := persister.Finalize(persistResp, false)
 		if perr != nil {
 			s.logger.Error("persist failed AI turn failed",
 				zap.String("sessionId", sessionID),
@@ -925,6 +940,8 @@ func (s *AIService) FlushAndStop() {
 }
 
 // RespondToolApproval unblocks a pending tool approval for the session.
+// With a live Chat it feeds WaitApprovals; otherwise it accumulates cold decisions
+// and Resume until complete or the next interrupt (no stream events without a subscriber).
 func (s *AIService) RespondToolApproval(req *ToolApprovalRequest) error {
 	if req == nil {
 		return fmt.Errorf("request is nil")
@@ -937,31 +954,26 @@ func (s *AIService) RespondToolApproval(req *ToolApprovalRequest) error {
 	s.runsMu.Lock()
 	run := s.runs[sessionID]
 	s.runsMu.Unlock()
-	if run == nil {
-		return fmt.Errorf("no active generation for session")
-	}
-	run.mu.Lock()
-	ch := run.approvals[approvalID]
-	if ch == nil {
+	if run != nil {
+		run.mu.Lock()
+		ch := run.approvals[approvalID]
 		run.mu.Unlock()
-		return fmt.Errorf("unknown or expired approval id")
+		if ch == nil {
+			return fmt.Errorf("unknown or expired approval id")
+		}
+		select {
+		case ch <- approvalDecision{Approved: req.Approved, Reason: req.Reason}:
+			return nil
+		default:
+			return fmt.Errorf("approval already resolved")
+		}
 	}
-	_, isSSH := run.sshApprovals[approvalID]
-	delete(run.sshApprovals, approvalID)
-	// Arm CancelSSHExec as soon as SSH is approved so Stop works before Wait/Exec race.
-	if req.Approved && isSSH {
-		run.execPending = true
-	}
-	run.mu.Unlock()
-	select {
-	case ch <- approvalDecision{Approved: req.Approved, Reason: req.Reason}:
-		return nil
-	default:
-		return fmt.Errorf("approval already resolved")
-	}
+	return s.coldRespondToolApproval(sessionID, approvalID, req.Approved, req.Reason, req.SSHContext)
 }
 
 // StopGeneration cancels the active agent run for a session.
+// While ToolApproval holds are open, soft-deny them so Genkit can Resume; only hard-cancel
+// when there is no pending approval (e.g. mid-stream text).
 func (s *AIService) StopGeneration(sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -973,7 +985,24 @@ func (s *AIService) StopGeneration(sessionID string) error {
 	if run == nil {
 		return nil
 	}
-	s.rejectApprovalsAndCancel(run)
+	run.mu.Lock()
+	pending := len(run.approvals) > 0
+	for _, ch := range run.approvals {
+		select {
+		case ch <- approvalDecision{Approved: false, Reason: "stopped"}:
+		default:
+		}
+	}
+	execCancel := run.execCancel
+	run.execPending = false
+	run.execAbort = false
+	run.mu.Unlock()
+	if execCancel != nil {
+		execCancel()
+	}
+	if !pending {
+		run.cancel()
+	}
 	return nil
 }
 
@@ -1063,7 +1092,6 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 	if run == nil {
 		return
 	}
-	// Prefer delivering denial so tools persist status=denied before ctx cancel races Wait.
 	run.mu.Lock()
 	for _, ch := range run.approvals {
 		select {
@@ -1074,7 +1102,6 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 	execCancel := run.execCancel
 	run.execPending = false
 	run.execAbort = false
-	clear(run.sshApprovals)
 	run.mu.Unlock()
 	if execCancel != nil {
 		execCancel()
@@ -1082,7 +1109,275 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 	run.cancel()
 }
 
-// aiHost adapts SSH + approval for internal/ai ports.
+// waitApprovals registers channels for each hold and blocks until all are decided.
+// On ctx cancel, missing decisions become soft-deny (Reason:stopped) so Resume can finish.
+func (s *AIService) waitApprovals(ctx context.Context, run *agentRun, pending []ai.PendingApproval) ([]ai.ApprovalDecision, error) {
+	if run == nil {
+		return nil, fmt.Errorf("no active generation")
+	}
+	type slot struct {
+		id string
+		ch chan approvalDecision
+	}
+	slots := make([]slot, 0, len(pending))
+	run.mu.Lock()
+	for _, p := range pending {
+		id := strings.TrimSpace(p.ApprovalID)
+		if id == "" {
+			continue
+		}
+		ch := run.approvals[id]
+		if ch == nil {
+			ch = make(chan approvalDecision, 1)
+			run.approvals[id] = ch
+		}
+		slots = append(slots, slot{id: id, ch: ch})
+	}
+	run.mu.Unlock()
+	defer func() {
+		run.mu.Lock()
+		for _, sl := range slots {
+			delete(run.approvals, sl.id)
+		}
+		run.mu.Unlock()
+	}()
+
+	out := make([]ai.ApprovalDecision, 0, len(slots))
+	for i, sl := range slots {
+		select {
+		case d, ok := <-sl.ch:
+			if !ok {
+				out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: false, Reason: "stopped"})
+			} else {
+				out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: d.Approved, Reason: d.Reason})
+			}
+		case <-ctx.Done():
+			// Prefer a decision already buffered; otherwise soft-deny.
+			select {
+			case d, ok := <-sl.ch:
+				if ok {
+					out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: d.Approved, Reason: d.Reason})
+				} else {
+					out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: false, Reason: "stopped"})
+				}
+			default:
+				out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: false, Reason: "stopped"})
+			}
+			for _, rest := range slots[i+1:] {
+				select {
+				case d, ok := <-rest.ch:
+					if ok {
+						out = append(out, ai.ApprovalDecision{ApprovalID: rest.id, Approved: d.Approved, Reason: d.Reason})
+						continue
+					}
+				default:
+				}
+				out = append(out, ai.ApprovalDecision{ApprovalID: rest.id, Approved: false, Reason: "stopped"})
+			}
+			return out, nil
+		}
+	}
+	return out, nil
+}
+
+func (s *AIService) coldRespondToolApproval(sessionID, approvalID string, approved bool, reason string, sshCtx *SSHContext) error {
+	s.runsMu.Lock()
+	if s.coldApprovals[sessionID] == nil {
+		s.coldApprovals[sessionID] = make(map[string]approvalDecision)
+	}
+	s.coldApprovals[sessionID][approvalID] = approvalDecision{Approved: approved, Reason: reason}
+	pendingMap := s.coldApprovals[sessionID]
+	s.runsMu.Unlock()
+
+	history, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
+	if err != nil {
+		return err
+	}
+	messages := make([]ai.ChatMessage, 0, len(history))
+	for _, msg := range history {
+		if msg.RunID != "" {
+			continue
+		}
+		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
+	}
+	holds := ai.PendingInterruptsFromHistory(messages)
+	if len(holds) == 0 {
+		s.runsMu.Lock()
+		delete(s.coldApprovals, sessionID)
+		s.runsMu.Unlock()
+		return fmt.Errorf("no pending tool approval for session")
+	}
+	for _, h := range holds {
+		if _, ok := pendingMap[h.ApprovalID]; !ok {
+			return nil // wait for remaining MUI responses
+		}
+	}
+	decisions := make([]ai.ApprovalDecision, 0, len(holds))
+	for _, h := range holds {
+		d := pendingMap[h.ApprovalID]
+		decisions = append(decisions, ai.ApprovalDecision{
+			ApprovalID: h.ApprovalID, Approved: d.Approved, Reason: d.Reason,
+		})
+	}
+	s.runsMu.Lock()
+	delete(s.coldApprovals, sessionID)
+	s.runsMu.Unlock()
+
+	resumeParts := ai.BuildResumeParts(messages, decisions)
+	if len(resumeParts) == 0 {
+		return fmt.Errorf("unable to build resume parts")
+	}
+	claimIDs := trailingTurnMessageIDs(history)
+	if len(claimIDs) == 0 {
+		return fmt.Errorf("interrupted turn rows missing; cannot reclaim for resume")
+	}
+	return s.runColdResume(sessionID, messages, resumeParts, claimIDs, sshCtx)
+}
+
+// trailingTurnMessageIDs returns sealed model/tool ids after the last user message (interrupted turn).
+func trailingTurnMessageIDs(rows []*database.AIMessage) []string {
+	var ids []string
+	for i := len(rows) - 1; i >= 0; i-- {
+		m := rows[i]
+		if m == nil || m.RunID != "" {
+			continue
+		}
+		switch m.Role {
+		case ai.RoleUser, ai.RoleSystem:
+			slices.Reverse(ids)
+			return ids
+		case ai.RoleModel, ai.RoleTool:
+			ids = append(ids, m.ID)
+		}
+	}
+	slices.Reverse(ids)
+	return ids
+}
+
+func (s *AIService) runColdResume(sessionID string, messages []ai.ChatMessage, resumeParts []*genkitAI.Part, claimIDs []string, sshCtx *SSHContext) error {
+	cfg, err := s.GetConfig()
+	if err != nil {
+		return err
+	}
+	if !cfg.Enabled {
+		return ErrAINotEnabled
+	}
+	if err := s.ensureEngine(cfg); err != nil {
+		return err
+	}
+	s.engineMu.Lock()
+	eng := s.engine
+	s.engineMu.Unlock()
+	if eng == nil {
+		return fmt.Errorf("ai engine not ready")
+	}
+
+	runID := uuid.New().String()
+	ctx, cancel := context.WithCancel(context.Background())
+	persister := newTurnPersister(s.sessionRepo, s.logger, sessionID, runID, "")
+	run := &agentRun{
+		runID:     runID,
+		cancel:    cancel,
+		approvals: make(map[string]chan approvalDecision),
+		persister: persister,
+	}
+	// Take the session slot before claiming rows so two cold resumes cannot race SetMessagesRunID.
+	s.runsMu.Lock()
+	if _, busy := s.runs[sessionID]; busy {
+		s.runsMu.Unlock()
+		cancel()
+		return fmt.Errorf("generation already active for session")
+	}
+	s.runs[sessionID] = run
+	s.runsMu.Unlock()
+	defer func() {
+		cancel()
+		s.runsMu.Lock()
+		if s.runs[sessionID] == run {
+			delete(s.runs, sessionID)
+		}
+		s.runsMu.Unlock()
+		run.mu.Lock()
+		for id, ch := range run.approvals {
+			close(ch)
+			delete(run.approvals, id)
+		}
+		run.mu.Unlock()
+	}()
+
+	if err := s.sessionRepo.SetMessagesRunID(context.Background(), runID, claimIDs); err != nil {
+		return err
+	}
+
+	ctxMCP, cancelMCP := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := eng.EnsureMCPToolsConnected(ctxMCP); err != nil {
+		s.logger.Warn("ensure mcp tools failed (cold resume)", zap.Error(err))
+	}
+	cancelMCP()
+
+	linkID, sshPrompt, remoteInfo := s.resolveSSHContext(sshCtx)
+	snap := eng.Snapshot()
+	webSearch, err := s.resolveWebSearchRuntime(cfg)
+	if err != nil {
+		return err
+	}
+	if !snap.EnableWebSearch {
+		webSearch = tool.WebSearchRuntime{}
+	}
+	enableWebSearch := webSearch.APIKey != "" && tool.ValidSearchProvider(webSearch.Provider)
+	planJSON := ""
+	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
+		planJSON = session.PlanJSON
+	}
+	host := &aiHost{svc: s, run: run}
+	rd := ai.RunDeps{
+		Tools: tool.Deps{
+			LinkID:           linkID,
+			ArmSSHExecCancel: host.ArmSSHExecCancel,
+			SSH:              host,
+			AllowedDirs:      snap.AllowDirs,
+			WebSearch:        webSearch,
+			OnPlanUpsert: func(planJSON string) error {
+				return s.sessionRepo.UpdateSessionPlan(context.Background(), sessionID, planJSON)
+			},
+		},
+		WaitApprovals: func(ctx context.Context, pending []ai.PendingApproval) ([]ai.ApprovalDecision, error) {
+			return s.waitApprovals(ctx, run, pending)
+		},
+		OnCheckpoint: persister.Checkpoint,
+	}
+	aiReq := &ai.AgentRequest{
+		Messages: messages,
+		SystemPrompt: ai.BuildSystemPromptOpts(ai.PromptOptions{
+			SSH:             sshPrompt,
+			Remote:          remoteInfo,
+			EnableSSH:       linkID != "",
+			EnableFS:        snap.EnableFS,
+			AllowDirs:       snap.AllowDirs,
+			EnableWebSearch: enableWebSearch,
+			PlanJSON:        planJSON,
+			UILanguage:      i18n.Language(),
+		}),
+		EnableSSH:   linkID != "",
+		LinkID:      linkID,
+		ResumeParts: resumeParts,
+	}
+
+	aiResp, runErr := eng.Run(ctx, aiReq, rd, func(ai.StreamEvent) error { return nil })
+	cancelled := isChatStopped(runErr, ctx)
+	if _, perr := persister.Finalize(aiResp, cancelled); perr != nil {
+		s.logger.Error("persist cold resume failed", zap.String("sessionId", sessionID), zap.Error(perr))
+	}
+	if runErr != nil && !cancelled {
+		if aiResp != nil && ai.TurnHasInterrupt(aiResp.Turn) {
+			return nil
+		}
+		return runErr
+	}
+	return nil
+}
+
+// aiHost adapts SSH for internal/ai tool ports.
 type aiHost struct {
 	svc *AIService
 	run *agentRun
@@ -1117,69 +1412,6 @@ func (h *aiHost) Exec(ctx context.Context, linkID, command string) (string, erro
 func (h *aiHost) Annotate(ctx context.Context, linkID, notice string) error {
 	_ = ctx
 	return h.svc.sshService.annotateSession(linkID, notice)
-}
-
-func (h *aiHost) Open(approvalID string) {
-	if approvalID == "" || h.run == nil {
-		return
-	}
-	h.run.mu.Lock()
-	defer h.run.mu.Unlock()
-	if _, ok := h.run.approvals[approvalID]; ok {
-		return
-	}
-	h.run.approvals[approvalID] = make(chan approvalDecision, 1)
-}
-
-func (h *aiHost) Wait(ctx context.Context, approvalID string) (bool, string, error) {
-	if h.run == nil {
-		return false, "stopped", fmt.Errorf("no active generation")
-	}
-	h.run.mu.Lock()
-	ch := h.run.approvals[approvalID]
-	if ch == nil {
-		ch = make(chan approvalDecision, 1)
-		h.run.approvals[approvalID] = ch
-	}
-	h.run.mu.Unlock()
-	defer func() {
-		h.run.mu.Lock()
-		delete(h.run.approvals, approvalID)
-		h.run.mu.Unlock()
-	}()
-
-	select {
-	case d, ok := <-ch:
-		if !ok {
-			return false, "stopped", context.Canceled
-		}
-		return d.Approved, d.Reason, nil
-	case <-ctx.Done():
-		select {
-		case d, ok := <-ch:
-			if !ok {
-				return false, "stopped", context.Canceled
-			}
-			return d.Approved, d.Reason, nil
-		default:
-			// Match rejectApprovalsAndCancel / synthetic cancel denials ("stopped").
-			return false, "stopped", ctx.Err()
-		}
-	}
-}
-
-// MarkSSHApproval records that approvalID will SSH-Exec after approve (not MCP).
-func (h *aiHost) MarkSSHApproval(approvalID string) {
-	approvalID = strings.TrimSpace(approvalID)
-	if h.run == nil || approvalID == "" {
-		return
-	}
-	h.run.mu.Lock()
-	if h.run.sshApprovals == nil {
-		h.run.sshApprovals = make(map[string]struct{})
-	}
-	h.run.sshApprovals[approvalID] = struct{}{}
-	h.run.mu.Unlock()
 }
 
 // ArmSSHExecCancel arms CancelSSHExec for the SSH approve→Exec race only.

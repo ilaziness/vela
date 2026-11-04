@@ -67,6 +67,33 @@ func TestReplaceRunMessagesKeepsUserAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSetMessagesRunID(t *testing.T) {
+	db := openTestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+	sess := &AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	m := &AIMessage{SessionID: sess.ID, Role: "model", Content: "x", Parts: "[]", Timestamp: time.Now()}
+	if err := repo.CreateMessage(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if m.ID == "" {
+		t.Fatal("expected CreateMessage to assign id")
+	}
+	if err := repo.SetMessagesRunID(ctx, "cold-run", []string{m.ID}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].RunID != "cold-run" {
+		t.Fatalf("got %+v", all)
+	}
+}
+
 func TestSealRunMessagesClearsRunID(t *testing.T) {
 	db := openTestDB(t)
 	repo := db.AISessionRepo

@@ -7,8 +7,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"uuid"
-
 	genkitAI "github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/compat_oai"
@@ -142,132 +140,6 @@ func (e *AIEngine) Init(ctx context.Context, cfg *Config) error {
 	return nil
 }
 
-// Run executes one agent turn (text + optional tools). onEvent receives stream events.
-func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEvent func(StreamEvent) error) (*AgentResponse, error) {
-	e.mu.RLock()
-	modelName := e.modelName
-	genConfig := e.genConfig
-	g := e.genkit
-	cfg := e.config
-	tools := e.tools
-	userDataDir := e.userDataDir
-	e.mu.RUnlock()
-	snap := e.Snapshot()
-
-	if g == nil || !cfg.Enabled {
-		return nil, fmt.Errorf("ai engine not initialized or not enabled")
-	}
-	if req == nil {
-		return nil, fmt.Errorf("agent request is nil")
-	}
-	if onEvent == nil {
-		onEvent = func(StreamEvent) error { return nil }
-	}
-	if tools.Plan == nil {
-		return nil, fmt.Errorf("ai tools not registered")
-	}
-
-	deps := rd.Tools
-	deps.Emit = func(ev StreamEvent) { _ = onEvent(ev) }
-	deps.Echo = cfg.EchoSSHCommands
-	if !req.EnableSSH {
-		deps.LinkID = ""
-	} else if deps.LinkID == "" {
-		deps.LinkID = req.LinkID
-	}
-	ctx = tool.WithDeps(ctx, deps)
-
-	messages, err := buildGenkitMessages(req.Messages, req.NewParts, req.SystemPrompt, userDataDir)
-	if err != nil {
-		return nil, err
-	}
-	promptLen := len(messages)
-	finish := func(resp *genkitAI.ModelResponse, streamed string, err error) (*AgentResponse, error) {
-		return applyStreamedText(storedTurn(resp, promptLen), streamed), err
-	}
-
-	builtinNames := []string{tool.UpsertPlan}
-	activeTools := []genkitAI.ToolRef{tools.Plan}
-	if deps.EnableSSH() {
-		activeTools = append(activeTools, tools.SSH)
-		builtinNames = append(builtinNames, tool.RunSSHCommand)
-	}
-	if deps.EnableFS() {
-		activeTools = append(activeTools, tools.Read, tools.Write, tools.List)
-		builtinNames = append(builtinNames, tool.ReadLocalFile, tool.WriteLocalFile, tool.ListLocalDirectory)
-	}
-	if deps.EnableWebSearch() {
-		activeTools = append(activeTools, tools.Search)
-		builtinNames = append(builtinNames, tool.WebSearch)
-	}
-	mcpNames := make([]string, 0, len(snap.MCPTools))
-	for _, t := range snap.MCPTools {
-		activeTools = append(activeTools, t)
-		if t != nil {
-			mcpNames = append(mcpNames, t.Name())
-		}
-	}
-	skillNames := make([]string, 0, len(snap.Skills))
-	for _, s := range snap.Skills {
-		skillNames = append(skillNames, s.Name)
-	}
-	e.logger.Debug("ai run tools for genkit",
-		zap.Strings("builtin", builtinNames),
-		zap.Strings("mcp", mcpNames),
-		zap.Strings("skills", skillNames),
-		zap.Bool("use_skill_tool", len(skillNames) > 0),
-		zap.Int("withToolsCount", len(activeTools)),
-	)
-
-	// Soft MCP / invalid-arg paths use tool.Fail (soft-answers without SoftToolErrors).
-	// SoftToolErrors would also soft-answer MCP transport failures and burn MaxAgentTurns.
-	middleware := []genkitAI.Middleware{toolStreamMiddleware{}}
-	if len(snap.Skills) > 0 {
-		middleware = append(middleware, skillsMiddleware{Skills: snap.Skills})
-	}
-	// Checkpoint last so WrapGenerate snapshots after skills/system injection and generate.
-	if rd.OnCheckpoint != nil {
-		middleware = append(middleware, checkpointMiddleware{
-			promptLen:    promptLen,
-			onCheckpoint: rd.OnCheckpoint,
-		})
-	}
-	opts := []genkitAI.GenerateOption{
-		genkitAI.WithModelName(modelName),
-		genkitAI.WithMessages(messages...),
-		genkitAI.WithMaxTurns(cfg.EffectiveMaxAgentTurns()),
-		genkitAI.WithUse(middleware...),
-	}
-	if len(activeTools) > 0 {
-		opts = append(opts, genkitAI.WithTools(activeTools...))
-	}
-	if genConfig != nil {
-		opts = append(opts, genkitAI.WithConfig(genConfig))
-	}
-
-	textID := "text-" + uuid.New().String()
-	reasoningID := "reasoning-" + uuid.New().String()
-
-	resp, streamed, err := e.consumeStream(ctx, g, opts, onEvent, textID, reasoningID)
-	if err != nil && len(activeTools) > 0 && isNoToolSupport(err) {
-		e.logger.Warn("model does not support tools, retrying without tools", zap.Error(err))
-		optsNoTools := []genkitAI.GenerateOption{
-			genkitAI.WithModelName(modelName),
-			genkitAI.WithMessages(messages...),
-			genkitAI.WithMaxTurns(cfg.EffectiveMaxAgentTurns()),
-			genkitAI.WithUse(middleware...),
-		}
-		if genConfig != nil {
-			optsNoTools = append(optsNoTools, genkitAI.WithConfig(genConfig))
-		}
-		resp, streamed, err = e.consumeStream(ctx, g, optsNoTools, onEvent, textID, reasoningID)
-	}
-	if err != nil {
-		return finish(resp, streamed, fmt.Errorf("generate error: %w", err))
-	}
-	return finish(resp, streamed, nil)
-}
-
 func (e *AIEngine) consumeStream(
 	ctx context.Context,
 	g *genkit.Genkit,
@@ -384,7 +256,8 @@ func (e *AIEngine) ReloadMCP(ctx context.Context) error {
 	defer e.mcpMu.Unlock()
 
 	e.mu.RLock()
-	ready := e.genkit != nil
+	g := e.genkit
+	ready := g != nil
 	userDataDir := e.userDataDir
 	mcp := e.mcp
 	e.mu.RUnlock()
@@ -394,7 +267,7 @@ func (e *AIEngine) ReloadMCP(ctx context.Context) error {
 	if mcp == nil {
 		return nil
 	}
-	if err := mcp.Reload(ctx, ready, userDataDir); err != nil {
+	if err := mcp.Reload(ctx, g, ready, userDataDir); err != nil {
 		return err
 	}
 	// genkit may be cleared under e.mu while probes ran (disable does that before waiting on mcpMu).

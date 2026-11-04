@@ -106,20 +106,24 @@ func renderedSystemText(rendered dotprompt.RenderedPrompt) string {
 }
 
 // fallbackSystemPrompt keeps Chat working if Dotprompt compile/render fails.
+// It is a compact copy of the hard rules in agent_system.prompt (scope, tools, security).
 func fallbackSystemPrompt(opts PromptOptions, uiLang string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Current time: %s.\n\n", time.Now().Format("2006-01"))
-	b.WriteString("You are Vela's built-in AI assistant (Agent).\n")
-	fmt.Fprintf(&b, "Respond in the user's UI language: %s.\n", uiLang)
+	b.WriteString("You are Vela's built-in AI assistant (Agent) in an SSH desktop client sidebar.\n")
+	fmt.Fprintf(&b, "Respond in the user's UI language: %s (including refusals).\n", uiLang)
+	b.WriteString("Only answer operations-related questions (Linux/Unix, SSH, servers, networking, processes, services, logs, files, scripts, configs). If a message mixes topics, answer only the operations part. If unrelated, do not answer it, do not use tools, and reply briefly that you cannot answer.\n")
+	b.WriteString("upsert_plan: for ≥2 steps or probe→decide→execute, submit a full snapshot; empty tasks clears the plan. Mark a step running before work and done/failed as soon as that step finishes.\n")
 	if opts.EnableSSH {
-		b.WriteString("SSH tools are enabled (run_ssh_command).\n")
+		b.WriteString("run_ssh_command: user approval required; one short command per call (preferably ≤300 characters, single-line JSON string); prefer read-only probes; call out risk before destructive commands.\n")
 	}
 	if opts.EnableFS {
-		b.WriteString("Local filesystem tools are enabled.\n")
+		b.WriteString("read_local_file / write_local_file / list_local_directory: stay in the allowlisted directories; each call needs chat approval; writes overwrite — state intent first.\n")
 	}
 	if opts.EnableWebSearch {
-		b.WriteString("web_search is enabled.\n")
+		b.WriteString("web_search: only to support an operations question; cite returned URLs; do not invent links.\n")
 	}
+	b.WriteString("Do not invent facts. Never request, output, or guess passwords, private keys, API keys, tokens, or credentials; do not read .env or key material to obtain them; do not log into databases or other services for the user.\n")
 	return b.String()
 }
 
@@ -127,8 +131,18 @@ func appendAllowDirsSection(b *strings.Builder, opts PromptOptions) {
 	if !opts.EnableFS || len(opts.AllowDirs) == 0 {
 		return
 	}
-	b.WriteString("\n\n## Local file allowlist\n")
+	var dirs []string
 	for _, d := range opts.AllowDirs {
+		if d = strings.TrimSpace(d); d != "" {
+			dirs = append(dirs, d)
+		}
+	}
+	if len(dirs) == 0 {
+		return
+	}
+	b.WriteString("\n\n## Local file allowlist\n")
+	b.WriteString("File tools may only use paths under these directories:\n")
+	for _, d := range dirs {
 		fmt.Fprintf(b, "- %s\n", d)
 	}
 }
@@ -138,14 +152,13 @@ func appendSSHContextSection(b *strings.Builder, opts PromptOptions) {
 		b.WriteString(`
 
 ## Current SSH context
-The user has no usable SSH connection (not connected, connecting, or disconnected). Do not call run_ssh_command; do not assume hosts mentioned earlier in chat history are still reachable. Provide general Linux/Unix and SSH troubleshooting help. upsert_plan remains available.`)
+No usable SSH session. Do not call run_ssh_command. Do not assume hosts from earlier chat are reachable. General Linux/Unix and SSH advice is still in scope; upsert_plan remains available.`)
 		return
 	}
 	b.WriteString(`
 
 ## Current SSH context
-Connected to a remote host; run_ssh_command is available (user approval required). Treat the user's questions as related to this environment by default.
-Use the connection in this system prompt as authoritative; if chat history mentions other hosts, do not assume commands still run there.
+Connected; run_ssh_command is available (user approval required). Operations questions default to this host. This connection is authoritative — do not assume commands still run on hosts mentioned only in chat history.
 `)
 	fmt.Fprintf(b, "- Connection: %s@%s:%d\n", opts.SSH.User, opts.SSH.Host, opts.SSH.Port)
 
@@ -155,8 +168,8 @@ Use the connection in this system prompt as authoritative; if chat history menti
 		if remote.Hostname != "" {
 			fmt.Fprintf(b, "- Hostname: %s\n", remote.Hostname)
 		}
-		if remote.OSPretty != "" || remote.OSID != "" || remote.OSVersion != "" {
-			fmt.Fprintf(b, "- OS: %s (%s %s)\n", remote.OSPretty, remote.OSID, remote.OSVersion)
+		if osLine := formatRemoteOS(remote.OSPretty, remote.OSID, remote.OSVersion); osLine != "" {
+			fmt.Fprintf(b, "- OS: %s\n", osLine)
 		}
 		if remote.Kernel != "" {
 			fmt.Fprintf(b, "- Kernel: %s\n", remote.Kernel)
@@ -164,7 +177,20 @@ Use the connection in this system prompt as authoritative; if chat history menti
 		if remote.Arch != "" {
 			fmt.Fprintf(b, "- Arch: %s\n", remote.Arch)
 		}
-		fmt.Fprintf(b, "\nThe above came from a one-shot probe of host %s; confirm details not listed here with the user.", opts.SSH.Host)
+		fmt.Fprintf(b, "\nOne-shot probe of %s; confirm anything not listed here.", opts.SSH.Host)
+	}
+}
+
+func formatRemoteOS(pretty, id, version string) string {
+	pretty = strings.TrimSpace(pretty)
+	extra := strings.TrimSpace(strings.TrimSpace(id) + " " + strings.TrimSpace(version))
+	switch {
+	case pretty != "" && extra != "":
+		return pretty + " (" + extra + ")"
+	case pretty != "":
+		return pretty
+	default:
+		return extra
 	}
 }
 
@@ -178,7 +204,7 @@ func appendCurrentPlanSection(b *strings.Builder, planJSON string) {
 		return
 	}
 	b.WriteString("\n\n## Current plan\n")
-	b.WriteString("Authoritative plan snapshot (this section wins). Changes require another upsert_plan call.\n")
+	b.WriteString("Authoritative plan snapshot (this section wins over chat history). Change it only with upsert_plan. If the user's message is unrelated to operations, do not continue this plan.\n")
 	fmt.Fprintf(b, "- Title: %s\n", snap.Title)
 	b.WriteString("- Tasks:\n")
 	for _, t := range snap.Tasks {

@@ -5,7 +5,7 @@ import {
 import type { AISession } from '../../bindings/github.com/ilaziness/vela/services/models';
 import { useMessageStore } from './message';
 import { loadStoredSidebarWidth, persistSidebarWidth, clampSidebarWidth } from '../func/aiSidebar';
-import { t } from '../i18n';
+import { NEW_SESSION_TITLE_ID, t } from '../i18n';
 import { translateServiceError } from "../func/service";
 
 export interface AISessionItem {
@@ -30,6 +30,8 @@ interface AIAssistantState {
   loadingSessions: boolean;
   isStreaming: boolean;
   composerValue: string;
+  /** Bumped after cold tool-approval resume so ChatBox reloads listMessages. */
+  messagesRevision: number;
 
   toggleSidebarOpen: () => void;
   setSidebarOpen: (open: boolean) => void;
@@ -41,7 +43,8 @@ interface AIAssistantState {
   selectSession: (id: string) => void;
   createSession: () => Promise<boolean>;
   deleteSession: (id: string) => Promise<void>;
-  refreshActiveSessionTitle: () => Promise<void>;
+  setActiveSessionTitle: (title: string) => void;
+  bumpMessagesRevision: () => void;
 }
 
 export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
@@ -52,6 +55,7 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
   loadingSessions: false,
   isStreaming: false,
   composerValue: '',
+  messagesRevision: 0,
 
   toggleSidebarOpen: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
 
@@ -154,20 +158,21 @@ export const useAIAssistantStore = create<AIAssistantState>((set, get) => ({
     }
   },
 
-  refreshActiveSessionTitle: async () => {
+  setActiveSessionTitle: (title) => {
     const { activeSessionId } = get();
     if (!activeSessionId) return;
-    try {
-      const session = await AIService.GetSession(activeSessionId);
-      if (!session) return;
-      const item = mapSession(session);
-      set((state) => ({
-        sessions: state.sessions
-          .map((s) => (s.id === item.id ? item : s))
-          .sort((a, b) => b.updatedAt - a.updatedAt),
-      }));
-    } catch {
-      // ignore title refresh errors
-    }
+    const next = (title || '').trim() || NEW_SESSION_TITLE_ID;
+    set((state) => ({
+      sessions: state.sessions
+        .map((s) =>
+          s.id === activeSessionId
+            ? { ...s, title: next, updatedAt: Math.floor(Date.now() / 1000) }
+            : s,
+        )
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    }));
   },
+
+  bumpMessagesRevision: () =>
+    set((state) => ({ messagesRevision: state.messagesRevision + 1 })),
 }));

@@ -132,11 +132,11 @@
 
 ### 2. AI集成
 
-- 使用 `Genkit` 实现，禁止直接调用 LLM 厂商 API。
-- `internal/ai`：引擎 Init、`Run`（含 tools / MaxTurns）、工具定义、结构化流事件；会话按 Genkit Message（`user` / `model` / `tool`）落库并原样回放，不 flatten。通过 `SSHExecutor` / `ApprovalGate` 端口访问 SSH，不 import `services`。
-- `services/ai_service`：会话 RPC、流事件、`RespondToolApproval` / `StopGeneration`；适配 SSH `Exec` 与终端注解回显。
-- 前端：`MUI X Chat` + `GenkitAdapter`（Genkit transcript → Chat 气泡）；tool approval / step / 计划列表用库能力，不自造聊天协议。
-- `run_ssh_command` 走独立 Exec 回传模型，须用户批准；`echo_ssh_commands`（默认关）仅向终端 `OutputChan` 写注解，不写 Stdin、不重复执行。
+- 使用 `Genkit` 实现，禁止直接调用 LLM 厂商 API，AI后端功能使用`Genkit`提供的功能组件实现，前端UI使用`MUI X Chat`提供的功能组件实现，尽量不要另外自行单独造。
+- `internal/ai`：引擎 Init、`Run`（Genkit `ToolApproval` interrupt → `WithResume` 循环、共享剩余 `MaxTurns`）、`plugins/mcp`、磁盘 `Skills`（`SkillPaths` + enabled overlay，不用 `SkillFS`）、工具定义与 `tool.Fail`、结构化流事件；会话按 Genkit Message（`user` / `model` / `tool`）落库并原样回放，不 flatten。通过 `SSHExecutor` 访问 SSH，不 import `services`。
+- `services/ai_service`：`Chat` 作为 Genkit application 在 RPC 内 Resume；流事件、`RespondToolApproval`（含冷恢复 Resume）/ `StopGeneration`（soft-deny 未决 interrupt）；适配 SSH `Exec` 与终端注解回显。不向前端暴露 `ResumeGeneration`。
+- 前端：`MUI X Chat` + `GenkitAdapter`（同流 `tool-approval-request` → `addToolApprovalResponse`）；首条用户消息即时写侧栏标题；冷恢复 `listMessages` 还原 `approval-requested`。不自造聊天协议。
+- `run_ssh_command` 走独立 Exec 回传模型，经 Genkit ToolApproval 须用户批准；`echo_ssh_commands`（默认关）仅向终端 `OutputChan` 写注解，不写 Stdin、不重复执行。
 - 前端UI/交互尽量使用`MUI X Chat`内置提供支持的功能，不要自己重复造。
 
 ---

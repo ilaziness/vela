@@ -3,8 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
+
 	"uuid"
 
 	genkitAI "github.com/firebase/genkit/go/ai"
@@ -12,8 +11,8 @@ import (
 	"github.com/ilaziness/vela/internal/ai/tool"
 )
 
-// toolStreamMiddleware emits stream events and requires approval for MCP tools
-// (everything except built-ins / use_skill, which handle themselves or need no approval).
+// toolStreamMiddleware emits MUI-aligned tool stream events around actual tool execution.
+// Approval gating is handled by Genkit middleware.ToolApproval (interrupt / resume).
 type toolStreamMiddleware struct{}
 
 func (t toolStreamMiddleware) Name() string { return "vela/tool-stream" }
@@ -34,14 +33,10 @@ func wrapToolCall(
 		return next(ctx, params)
 	}
 	name := params.Tool.Name()
-	if tool.IsBuiltin(name) || name == useSkillToolName {
-		return next(ctx, params)
-	}
-
 	deps := tool.FromCtx(ctx)
-	callID := uuid.New().String()
-	if params.Request != nil && params.Request.Ref != "" {
-		callID = params.Request.Ref
+	callID := toolRequestRef(params.Request)
+	if callID == "" {
+		callID = uuid.New().String()
 	}
 	inJSON := toolInputJSON(params)
 
@@ -49,43 +44,8 @@ func wrapToolCall(
 	emitDeps(deps, StreamEvent{Type: EventToolInputStart, ToolCallID: callID, ToolName: name})
 	emitDeps(deps, StreamEvent{Type: EventToolInputAvailable, ToolCallID: callID, ToolName: name, Input: inJSON})
 
-	if deps.Approval == nil {
-		msg := "MCP tool approval unavailable"
-		emitDeps(deps, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: name, ErrorText: msg})
-		emitDeps(deps, StreamEvent{Type: EventFinishStep})
-		return &genkitAI.MultipartToolResponse{Output: msg}, nil
-	}
-	approvalID := callID
-	deps.Approval.Open(approvalID)
-	emitDeps(deps, StreamEvent{
-		Type: EventToolApprovalRequest, ToolCallID: callID, ToolName: name,
-		ApprovalID: approvalID, Input: inJSON,
-	})
-	approved, reason, err := deps.Approval.Wait(ctx, approvalID)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		emitDeps(deps, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: name, ErrorText: err.Error()})
-		emitDeps(deps, StreamEvent{Type: EventFinishStep})
-		return &genkitAI.MultipartToolResponse{Output: fmt.Sprintf("approval wait failed: %v", err)}, nil
-	}
-	if !approved || errors.Is(err, context.Canceled) {
-		if reason == "" {
-			if errors.Is(err, context.Canceled) {
-				reason = "stopped"
-			} else {
-				reason = "user denied"
-			}
-		}
-		emitDeps(deps, StreamEvent{
-			Type: EventToolOutputDenied, ToolCallID: callID, ToolName: name,
-			ApprovalID: approvalID, Reason: reason,
-		})
-		emitDeps(deps, StreamEvent{Type: EventFinishStep})
-		return &genkitAI.MultipartToolResponse{Output: fmt.Sprintf("User denied tool execution: %s", reason)}, nil
-	}
-
 	resp, err := next(ctx, params)
 	if err != nil {
-		// tool.Fail soft-answers the model; surface that as tool output, not a hard UI error.
 		if genkitAI.IsToolFailError(err) {
 			outJSON, _ := json.Marshal(map[string]any{"error": err.Error()})
 			emitDeps(deps, StreamEvent{Type: EventToolOutputAvailable, ToolCallID: callID, ToolName: name, Output: outJSON})

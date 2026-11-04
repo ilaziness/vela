@@ -7,8 +7,6 @@ import (
 
 	genkitAI "github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/genkit"
-
-	"github.com/ilaziness/vela/internal/ai/event"
 )
 
 // PlanTask is one step in the authoritative session plan snapshot.
@@ -45,12 +43,6 @@ func definePlanTool(g *genkit.Genkit) genkitAI.ToolRef {
 					return input, err
 				}
 			}
-			callID := uuid.New().String()
-			emit(deps, event.StreamEvent{Type: event.EventStartStep})
-			emit(deps, event.StreamEvent{Type: event.EventToolInputStart, ToolCallID: callID, ToolName: UpsertPlan})
-			emit(deps, event.StreamEvent{Type: event.EventToolInputAvailable, ToolCallID: callID, ToolName: UpsertPlan, Input: inJSON})
-			emit(deps, event.StreamEvent{Type: event.EventToolOutputAvailable, ToolCallID: callID, ToolName: UpsertPlan, Output: inJSON})
-			emit(deps, event.StreamEvent{Type: event.EventFinishStep})
 			return input, nil
 		})
 }
