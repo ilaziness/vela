@@ -49,6 +49,7 @@ func (s *SyncService) UploadSync() error {
 	if !config.IsConfigured() {
 		return ErrSyncNotConfigured
 	}
+	s.progress.Reset()
 	s.progress.UpdateProgress("preparing", 0, 0)
 	manager := internalsync.NewSyncManager(config)
 	err := s.uploadWithRetry(manager, s.configService.userDataDir(), 3)
@@ -83,6 +84,7 @@ func (s *SyncService) DownloadSync(version int) error {
 	if !config.IsConfigured() {
 		return ErrSyncNotConfigured
 	}
+	s.progress.Reset()
 	s.progress.UpdateProgress("preparing", 0, 0)
 	manager := internalsync.NewSyncManager(config)
 	err := s.downloadWithRetry(manager, s.configService.userDataDir(), version, 3)
@@ -135,10 +137,3 @@ func (s *SyncService) HealthCheck() error {
 	}
 	return internalsync.NewSyncManager(config).HealthCheck()
 }
-
-func (s *SyncService) CancelSync() {
-	s.progress.SetError("cancelled by user")
-}
-
-func (s *SyncService) StartSyncContext()  {}
-func (s *SyncService) CancelSyncContext() {}

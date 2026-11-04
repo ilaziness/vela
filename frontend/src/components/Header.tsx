@@ -5,11 +5,6 @@ import {
   AppBar,
   Toolbar,
   Typography,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Backdrop,
   IconButton,
 } from "@mui/material";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -17,7 +12,7 @@ import AddBoxIcon from "@mui/icons-material/AddBox";
 import BookmarksIcon from "@mui/icons-material/Bookmarks";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import CloseIcon from "@mui/icons-material/Close";
-import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import SettingsBackupRestoreIcon from "@mui/icons-material/SettingsBackupRestore";
 import HandymanIcon from "@mui/icons-material/Handyman";
 import TerminalIcon from "@mui/icons-material/Terminal";
 import AddToQueueIcon from "@mui/icons-material/AddToQueue";
@@ -31,12 +26,11 @@ import {
   ToolService,
   NewVersion,
 } from "../../bindings/github.com/ilaziness/vela/services";
-import { UploadSync } from "../../bindings/github.com/ilaziness/vela/services/syncservice";
 import { ReadConfig } from "../../bindings/github.com/ilaziness/vela/services/configservice";
 import { useSSHTabsStore } from "../stores/ssh";
 import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useUIStore } from "../stores/ui";
-import { genTabIndex, translateServiceError } from "../func/service";
+import { genTabIndex } from "../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
 import { ShortcutAction } from "../func/shortcuts";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -47,7 +41,7 @@ import { Events } from "@wailsio/runtime";
 import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import BookmarkManager from "./Bookmark";
 import BookmarkConnectPanel from "./BookmarkConnectPanel";
-import Loading from "./Loading";
+import BackupRestoreDialogs from "./BackupRestoreDialogs";
 import { newConnectionTabName, t, useLanguage } from "../i18n";
 
 const UpdateAvailableDialog = React.lazy(
@@ -56,7 +50,7 @@ const UpdateAvailableDialog = React.lazy(
 
 export default function Header() {
   const { sshTabs, pushTab } = useSSHTabsStore();
-  const { errorMessage, successMessage } = useMessageStore();
+  const { errorMessage } = useMessageStore();
   const { toggleSidebarOpen } = useAIAssistantStore();
   const bookmarkManageOpen = useUIStore((s) => s.bookmarkManageOpen);
   const setBookmarkManageOpen = useUIStore((s) => s.setBookmarkManageOpen);
@@ -64,8 +58,7 @@ export default function Header() {
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
   const frameless = useFrameless();
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [newVersion, setNewVersion] = useState<NewVersion | null>(null);
   const lang = useLanguage();
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
@@ -86,6 +79,7 @@ export default function Header() {
   }, [sshTabs.length, pushTab]);
 
   const handleBackupClick = useCallback(async () => {
+    if (backupDialogOpen) return;
     try {
       const config = await ReadConfig();
       const syncConfig = config?.Sync;
@@ -97,12 +91,12 @@ export default function Header() {
         errorMessage(t("header.sync_config_required"));
         return;
       }
-      setConfirmDialogOpen(true);
+      setBackupDialogOpen(true);
     } catch (error) {
       LogService.Error("Failed to read config: " + String(error));
       errorMessage(t("header.read_config_failed"));
     }
-  }, [errorMessage]);
+  }, [backupDialogOpen, errorMessage]);
 
   const menuItems = useMemo(() => {
     void lang;
@@ -149,9 +143,9 @@ export default function Header() {
         shortcutAction: ShortcutAction.PanelAI,
       },
       {
-        id: "upload_backup",
-        title: t("header.upload_backup"),
-        icon: <CloudUploadIcon />,
+        id: "backup_restore",
+        title: t("header.backup_restore"),
+        icon: <SettingsBackupRestoreIcon />,
         onClick: () => void handleBackupClick(),
       },
       {
@@ -184,19 +178,6 @@ export default function Header() {
       unsubscribeUpdate();
     };
   }, []);
-
-  const handleUpload = async () => {
-    setUploading(true);
-    try {
-      await UploadSync();
-      successMessage(t("header.upload_success"));
-    } catch (error) {
-      LogService.Error("Upload failed: " + String(error));
-      errorMessage(t("header.upload_failed", translateServiceError(error)));
-    } finally {
-      setUploading(false);
-    }
-  };
 
   return (
     <Box
@@ -318,41 +299,10 @@ export default function Header() {
         </Box>
       </Dialog>
 
-      <Dialog
-        open={confirmDialogOpen}
-        onClose={() => setConfirmDialogOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>{t("header.confirm_upload_title")}</DialogTitle>
-        <DialogContent>
-          <Typography>{t("header.confirm_upload_message")}</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmDialogOpen(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              setConfirmDialogOpen(false);
-              void handleUpload();
-            }}
-          >
-            {t("common.ok")}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Backdrop
-        open={uploading}
-        sx={(theme) => ({
-          zIndex: theme.zIndex.modal + 1,
-          backgroundColor: "rgba(0, 0, 0, 0.5)",
-        })}
-      >
-        <Loading message={t("header.uploading_backup")} size={60} />
-      </Backdrop>
+      <BackupRestoreDialogs
+        open={backupDialogOpen}
+        onClose={() => setBackupDialogOpen(false)}
+      />
     </Box>
   );
 }

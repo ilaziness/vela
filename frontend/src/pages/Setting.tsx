@@ -59,7 +59,7 @@ const Setting: React.FC = () => {
     try {
       await ConfigService.SaveSyncConfig(syncConfig);
       setConfig((prev) =>
-        prev ? { ...prev, Sync: { ...prev.Sync, ...syncConfig } } : prev
+        prev ? { ...prev, Sync: { ...prev.Sync, ...syncConfig } } : prev,
       );
       successMessage(t("settings.sync.save_success"));
     } catch (error) {
@@ -67,6 +67,7 @@ const Setting: React.FC = () => {
       errorMessage(
         translateServiceError(error) || t("settings.sync.save_failed"),
       );
+      throw error;
     }
   };
 

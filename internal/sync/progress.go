@@ -23,6 +23,12 @@ func NewProgressReporter(onUpdate func(Progress)) *ProgressReporter {
 	return &ProgressReporter{onUpdate: onUpdate}
 }
 
+func (p *ProgressReporter) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.progress = Progress{}
+}
+
 func (p *ProgressReporter) UpdateProgress(stage string, done, total int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
