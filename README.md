@@ -1,4 +1,4 @@
-# Vela — 跨平台 SSH & SFTP GUI 客户端
+# Vela — 跨平台 SSH & SFTP AI GUI 客户端
 
 [中文](README.md) | [English](README.en.md)
 
@@ -9,13 +9,13 @@
 [![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
-一款基于 Go 和 Wails v3 构建的现代化、跨平台 SSH 和 SFTP 桌面 GUI 应用。
+一款基于 Go 和 Wails v3 构建的现代化、跨平台 SSH & SFTP AI GUI 应用。
 
 ---
 
 ## 📖 简介
 
-**Vela** 是一个简洁、响应迅速的桌面应用程序，将 SSH 和 SFTP 的强大功能带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vela 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问和文件管理工具。界面支持英语、简体中文和繁体中文。
+**Vela** 是一个简洁、响应迅速的桌面应用程序，将 SSH、SFTP 与 AI 助手带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vela 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问、文件管理与 AI 排障工具。AI 助手可分析问题并在批准后执行命令，支持远程命令、本地文件系统（目录白名单）、网络搜索，以及自定义 MCP 与 Skill 扩展。界面支持英语、简体中文和繁体中文。
 
 ---
 
@@ -54,7 +54,7 @@
 - 主题切换：亮色、暗色、护眼等方案
 - 加密远程备份与多设备恢复，支持历史版本
 - 自动更新检查，自动下载安装新版
-- AI 侧边栏：分析问题并自动执行命令（需批准），内置远程命令执行工具，本地文件系统工具（目录白名单），网络搜索，并支持自定义MCP和Skill扩展
+- AI 助手：分析问题并自动执行命令（需批准），内置远程命令执行工具，本地文件系统工具（目录白名单），网络搜索，并支持自定义 MCP 和 Skill 扩展
 
 ---
 
@@ -84,9 +84,9 @@ _服务器连接配置管理_
 
 ![命令库](screenshots/command.png)
 
-### AI侧边栏
+### AI 助手
 
-![AI侧边栏](screenshots/ai.png)
+![AI 助手](screenshots/ai.png)
 
 ### 设置
 

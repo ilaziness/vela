@@ -1,4 +1,4 @@
-# Vela — Cross-platform SSH & SFTP GUI client
+# Vela — Cross-platform SSH & SFTP AI GUI client
 
 [English](README.en.md) | [中文](README.md)
 
@@ -9,13 +9,13 @@
 [![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
-A modern, cross-platform SSH and SFTP desktop GUI built with Go and Wails v3.
+A modern, cross-platform SSH & SFTP AI GUI built with Go and Wails v3.
 
 ---
 
 ## 📖 Overview
 
-**Vela** is a fast, compact desktop app that puts SSH and SFTP in a native GUI. Built with [Wails v3](https://wails.io) and Go, it runs on Windows, macOS, and Linux, giving developers and operators a single tool for remote access and file management. The UI is available in English, Simplified Chinese, and Traditional Chinese.
+**Vela** is a fast, compact desktop app that puts SSH, SFTP, and an AI assistant in a native GUI. Built with [Wails v3](https://wails.io) and Go, it runs on Windows, macOS, and Linux, giving developers and operators a single tool for remote access, file management, and AI-assisted troubleshooting. The assistant can diagnose issues and run commands after approval, with remote exec, local filesystem tools (directory allowlist), web search, and custom MCP / Skill extensions. The UI is available in English, Simplified Chinese, and Traditional Chinese.
 
 ---
 
@@ -54,7 +54,7 @@ A modern, cross-platform SSH and SFTP desktop GUI built with Go and Wails v3.
 - Themes: light, dark, eye-care
 - Encrypted remote backup and restore across devices, with version history
 - Automatic update check, download, and install
-- AI sidebar: diagnose issues and run commands (with approval), plus remote exec, local filesystem tools (directory allowlist), web search, and custom MCP / Skill extensions
+- AI assistant: diagnose issues and run commands (with approval), plus remote exec, local filesystem tools (directory allowlist), web search, and custom MCP / Skill extensions
 
 ---
 
@@ -84,9 +84,9 @@ _Saved connection settings_
 
 ![Command library](screenshots/command.png)
 
-### AI sidebar
+### AI assistant
 
-![AI sidebar](screenshots/ai.png)
+![AI assistant](screenshots/ai.png)
 
 ### Settings
 
