@@ -59,7 +59,7 @@ func TestSaveLoadLocalState(t *testing.T) {
 	if err := store.SetLastDialogDir(sub); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetSftpLocalDir("host-a", sub); err != nil {
+	if err := store.SetLastSftpLocalDir(sub); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,8 +75,8 @@ func TestSaveLoadLocalState(t *testing.T) {
 	if store2.LastDialogDir() != sub {
 		t.Fatalf("dialog dir got %q", store2.LastDialogDir())
 	}
-	if store2.SftpLocalDir("host-a") != sub {
-		t.Fatalf("sftp dir got %q", store2.SftpLocalDir("host-a"))
+	if store2.LastSftpLocalDir() != sub {
+		t.Fatalf("sftp dir got %q", store2.LastSftpLocalDir())
 	}
 }
 
@@ -93,7 +93,7 @@ func TestSaveWindowPreservesDirs(t *testing.T) {
 	if err := store.SetLastDialogDir(sub); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetSftpLocalDir("bk1", sub); err != nil {
+	if err := store.SetLastSftpLocalDir(sub); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SaveWindow(WindowGeometry{Width: 1000, Height: 800}); err != nil {
@@ -102,8 +102,8 @@ func TestSaveWindowPreservesDirs(t *testing.T) {
 	if store.LastDialogDir() != sub {
 		t.Fatalf("dialog lost: %q", store.LastDialogDir())
 	}
-	if store.SftpLocalDir("bk1") != sub {
-		t.Fatalf("sftp lost: %q", store.SftpLocalDir("bk1"))
+	if store.LastSftpLocalDir() != sub {
+		t.Fatalf("sftp lost: %q", store.LastSftpLocalDir())
 	}
 }
 
@@ -119,13 +119,10 @@ func TestSetDirsSkipInvalid(t *testing.T) {
 	if store.LastDialogDir() != "" {
 		t.Fatalf("expected empty, got %q", store.LastDialogDir())
 	}
-	if err := store.SetSftpLocalDir("", dir); err != nil {
+	if err := store.SetLastSftpLocalDir(filepath.Join(dir, "nope")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetSftpLocalDir("x", filepath.Join(dir, "nope")); err != nil {
-		t.Fatal(err)
-	}
-	if store.SftpLocalDir("x") != "" {
+	if store.LastSftpLocalDir() != "" {
 		t.Fatalf("expected empty sftp dir")
 	}
 }

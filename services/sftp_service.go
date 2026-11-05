@@ -51,24 +51,23 @@ func (s *SftpService) ListFiles(sessionID, path string, showHidden bool) ([]File
 	return s.mgr.ListFiles(sessionID, path, showHidden)
 }
 
-// ListLocal reads a local directory. An empty dir uses the remembered path for
-// ownerKey when set, otherwise the user home directory. Successful listings
-// update the per-host remembered directory.
-func (s *SftpService) ListLocal(dir string, showHidden bool, ownerKey string) (localfs.Listing, error) {
-	if dir == "" && ownerKey != "" {
-		dir = s.store.SftpLocalDir(ownerKey)
+// ListLocal reads a local directory. An empty dir uses the remembered path when
+// set, otherwise the user home directory. Successful listings update the shared
+// remembered directory.
+func (s *SftpService) ListLocal(dir string, showHidden bool) (localfs.Listing, error) {
+	if dir == "" {
+		dir = s.store.LastSftpLocalDir()
 	}
 	listing, err := localfs.List(dir, showHidden)
 	if err != nil {
 		return listing, err
 	}
-	if ownerKey != "" {
-		if saveErr := s.store.SetSftpLocalDir(ownerKey, listing.Dir); saveErr != nil {
-			s.logger.Debug("remember sftp local dir failed", zap.Error(saveErr))
-		}
+	if saveErr := s.store.SetLastSftpLocalDir(listing.Dir); saveErr != nil {
+		s.logger.Debug("remember sftp local dir failed", zap.Error(saveErr))
 	}
 	return listing, nil
 }
+
 func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	localPath, err := promptOpenFile(s.app, s.store, i18n.T("dialog.select_file"))
 	if dialogCancelled(err) || localPath == "" {
@@ -79,6 +78,7 @@ func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	}
 	return s.mgr.UploadFile(sessionID, localPath, remotePath)
 }
+
 func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error {
 	localPathFile, err := promptSaveFile(s.app, s.store, i18n.T("dialog.save_file"), remotePathFile)
 	if dialogCancelled(err) || localPathFile == "" {
@@ -89,6 +89,7 @@ func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error
 	}
 	return s.mgr.DownloadFile(sessionID, localPathFile, remotePathFile)
 }
+
 func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error {
 	localPath, err := promptOpenDirectory(s.app, s.store, i18n.T("dialog.select_dir"))
 	if dialogCancelled(err) || localPath == "" {
@@ -99,6 +100,7 @@ func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error 
 	}
 	return s.mgr.UploadDirectory(sessionID, localPath, remotePath)
 }
+
 func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) error {
 	dest, err := promptSaveFile(s.app, s.store, i18n.T("dialog.save_dir"), remotePath)
 	if dialogCancelled(err) || dest == "" {
@@ -109,6 +111,7 @@ func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) erro
 	}
 	return s.mgr.DownloadDirectoryTo(sessionID, dest, remotePath)
 }
+
 func (s *SftpService) UploadPaths(sessionID, remotePath string, localPaths []string) error {
 	return s.mgr.UploadPaths(sessionID, remotePath, localPaths)
 }
@@ -128,36 +131,47 @@ func (s *SftpService) DownloadPathsDialog(sessionID string, remotePaths []string
 	}
 	return s.mgr.DownloadPaths(sessionID, localDir, remotePaths)
 }
+
 func (s *SftpService) DeleteFiles(sessionID string, paths []string) error {
 	return s.mgr.DeleteFiles(sessionID, paths)
 }
+
 func (s *SftpService) RenameFile(sessionID, oldPath, newPath string) error {
 	return s.mgr.RenameFile(sessionID, oldPath, newPath)
 }
+
 func (s *SftpService) Chmod(sessionID, path string, modeBits uint32) error {
 	return s.mgr.Chmod(sessionID, path, modeBits)
 }
+
 func (s *SftpService) Chown(sessionID, path string, uid, gid int) error {
 	return s.mgr.Chown(sessionID, path, uid, gid)
 }
+
 func (s *SftpService) GetWd(sessionID string) (string, error) {
 	return s.mgr.GetWd(sessionID)
 }
+
 func (s *SftpService) CreateFile(sessionID, path string) error {
 	return s.mgr.CreateFile(sessionID, path)
 }
+
 func (s *SftpService) CreateDirectory(sessionID, path string) error {
 	return s.mgr.CreateDirectory(sessionID, path)
 }
+
 func (s *SftpService) CancelTransfer(transferID string) error {
 	return s.mgr.CancelTransfer(transferID)
 }
+
 func (s *SftpService) ListPendingTransfers(ownerKey string) ([]ProgressData, error) {
 	return s.mgr.ListPendingTransfers(ownerKey)
 }
+
 func (s *SftpService) RetryTransfer(sessionID, transferID string) error {
 	return s.mgr.RetryTransfer(sessionID, transferID)
 }
+
 func (s *SftpService) DismissTransfer(transferID string) error {
 	return s.mgr.DismissTransfer(transferID)
 }

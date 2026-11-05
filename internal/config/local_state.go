@@ -20,9 +20,9 @@ const (
 
 // LocalState is machine-local UI state (not synced).
 type LocalState struct {
-	Window        WindowGeometry    `toml:"window"`
-	LastDialogDir string            `toml:"last_dialog_dir,omitempty"`
-	SftpLocalDirs map[string]string `toml:"sftp_local_dirs,omitempty"`
+	Window           WindowGeometry `toml:"window"`
+	LastDialogDir    string         `toml:"last_dialog_dir,omitempty"`
+	LastSftpLocalDir string         `toml:"last_sftp_local_dir,omitempty"`
 }
 
 // WindowGeometry is main-window size/maximised flag.
@@ -77,16 +77,10 @@ func (s *Store) LastDialogDir() string {
 	return ""
 }
 
-// SftpLocalDir returns the remembered local SFTP browse dir for ownerKey if still valid.
-func (s *Store) SftpLocalDir(ownerKey string) string {
-	if ownerKey == "" {
-		return ""
-	}
+// LastSftpLocalDir returns the remembered local SFTP browse directory if it still exists.
+func (s *Store) LastSftpLocalDir() string {
 	s.localMu.Lock()
-	var dir string
-	if s.local.SftpLocalDirs != nil {
-		dir = s.local.SftpLocalDirs[ownerKey]
-	}
+	dir := s.local.LastSftpLocalDir
 	s.localMu.Unlock()
 	if isExistingDir(dir) {
 		return dir
@@ -166,19 +160,16 @@ func (s *Store) SetLastDialogDir(dir string) error {
 	return s.writeLocalStateLocked()
 }
 
-// SetSftpLocalDir persists the local SFTP browse directory for ownerKey.
-func (s *Store) SetSftpLocalDir(ownerKey, dir string) error {
-	if ownerKey == "" || !isExistingDir(dir) {
+// SetLastSftpLocalDir persists the local SFTP browse directory when it exists.
+func (s *Store) SetLastSftpLocalDir(dir string) error {
+	if !isExistingDir(dir) {
 		return nil
 	}
 	s.localMu.Lock()
 	defer s.localMu.Unlock()
-	if s.local.SftpLocalDirs == nil {
-		s.local.SftpLocalDirs = make(map[string]string)
-	}
-	if s.local.SftpLocalDirs[ownerKey] == dir {
+	if s.local.LastSftpLocalDir == dir {
 		return nil
 	}
-	s.local.SftpLocalDirs[ownerKey] = dir
+	s.local.LastSftpLocalDir = dir
 	return s.writeLocalStateLocked()
 }
