@@ -68,6 +68,16 @@ func (s *SftpService) ListLocal(dir string, showHidden bool) (localfs.Listing, e
 	return listing, nil
 }
 
+// ListUploadConflicts returns destination basenames under remotePath that already exist.
+func (s *SftpService) ListUploadConflicts(sessionID, remotePath string, localPaths []string) ([]string, error) {
+	return s.mgr.UploadConflicts(sessionID, remotePath, localPaths)
+}
+
+// ListDownloadConflicts returns destination basenames under localDir that already exist.
+func (s *SftpService) ListDownloadConflicts(sessionID, localDir string, remotePaths []string) ([]string, error) {
+	return s.mgr.DownloadConflicts(sessionID, localDir, remotePaths)
+}
+
 func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	localPath, err := promptOpenFile(s.app, s.store, i18n.T("dialog.select_file"))
 	if dialogCancelled(err) || localPath == "" {
@@ -75,6 +85,13 @@ func (s *SftpService) UploadFileDialog(sessionID, remotePath string) error {
 	}
 	if err != nil {
 		return err
+	}
+	ok, err := s.confirmConflicts(s.mgr.UploadConflicts(sessionID, remotePath, []string{localPath}))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
 	}
 	return s.mgr.UploadFile(sessionID, localPath, remotePath)
 }
@@ -87,6 +104,13 @@ func (s *SftpService) DownloadFileDialog(sessionID, remotePathFile string) error
 	if err != nil {
 		return err
 	}
+	ok, err := s.confirmLocalPathOverwrite(localPathFile)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
 	return s.mgr.DownloadFile(sessionID, localPathFile, remotePathFile)
 }
 
@@ -98,6 +122,13 @@ func (s *SftpService) UploadDirectoryDialog(sessionID, remotePath string) error 
 	if err != nil {
 		return err
 	}
+	ok, err := s.confirmConflicts(s.mgr.UploadConflicts(sessionID, remotePath, []string{localPath}))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
 	return s.mgr.UploadDirectory(sessionID, localPath, remotePath)
 }
 
@@ -108,6 +139,13 @@ func (s *SftpService) DownloadDirectoryDialog(sessionID, remotePath string) erro
 	}
 	if err != nil {
 		return err
+	}
+	ok, err := s.confirmLocalPathOverwrite(dest)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
 	}
 	return s.mgr.DownloadDirectoryTo(sessionID, dest, remotePath)
 }
@@ -128,6 +166,13 @@ func (s *SftpService) DownloadPathsDialog(sessionID string, remotePaths []string
 	}
 	if err != nil {
 		return err
+	}
+	ok, err := s.confirmConflicts(s.mgr.DownloadConflicts(sessionID, localDir, remotePaths))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
 	}
 	return s.mgr.DownloadPaths(sessionID, localDir, remotePaths)
 }

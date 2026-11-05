@@ -220,16 +220,13 @@ func (sft *Manager) stopTracker(t *transfer.Tracker, err error) {
 // uploadFile uploads a local file; remoteDir is the remote parent directory.
 func (sft *Manager) uploadFile(sessionID string, localPathFile, remoteDir string, tracker *transfer.Tracker) error {
 	sft.logger.Debug("uploadFile", zap.String("sessionID", sessionID), zap.String("localPathFile", localPathFile), zap.String("remoteDir", remoteDir))
+	if tracker == nil {
+		return errors.New(ErrTrackerRequired)
+	}
 	ftpClient, err := sft.getSftpClient(sessionID)
 	if err != nil {
 		return err
 	}
-
-	localInfo, err := os.Stat(localPathFile)
-	if err != nil {
-		return err
-	}
-	sourceSize := localInfo.Size()
 
 	localFile, err := os.Open(localPathFile)
 	if err != nil {
@@ -245,55 +242,25 @@ func (sft *Manager) uploadFile(sessionID string, localPathFile, remoteDir string
 	}
 
 	remoteFilePath := joinRemotePath(remoteDir, filepath.Base(localPathFile))
-	if tracker != nil && tracker.Overwrite() {
+	if tracker.Overwrite() {
 		if tracker.RemoteFile() != "" {
 			remoteFilePath = tracker.RemoteFile()
 		}
 		return sft.uploadFileReplace(ftpClient, localFile, remoteFilePath, tracker)
 	}
 
-	var destSize int64
-	if st, statErr := ftpClient.Stat(remoteFilePath); statErr == nil && !st.IsDir() {
-		destSize = st.Size()
+	if st, statErr := ftpClient.Stat(remoteFilePath); statErr == nil && st.IsDir() {
+		if err := ftpClient.RemoveAll(remoteFilePath); err != nil {
+			return err
+		}
 	}
 
-	action, offset := DecideResume(destSize, sourceSize)
-	if action == ResumeSkip {
-		if tracker != nil {
-			tracker.AddTransferred(sourceSize)
-		}
-		return nil
-	}
-
-	var remoteFile *sftp.File
-	if action == ResumeContinue {
-		remoteFile, err = ftpClient.OpenFile(remoteFilePath, os.O_WRONLY)
-		if err != nil {
-			return err
-		}
-		if _, err = remoteFile.Seek(offset, io.SeekStart); err != nil {
-			_ = remoteFile.Close()
-			return err
-		}
-		if _, err = localFile.Seek(offset, io.SeekStart); err != nil {
-			_ = remoteFile.Close()
-			return err
-		}
-		if tracker != nil {
-			tracker.AddTransferred(offset)
-		}
-	} else {
-		sft.logger.Debug("uploadFile Create File", zap.String("file", remoteFilePath))
-		remoteFile, err = ftpClient.Create(remoteFilePath)
-		if err != nil {
-			return err
-		}
+	sft.logger.Debug("uploadFile Create File", zap.String("file", remoteFilePath))
+	remoteFile, err := ftpClient.Create(remoteFilePath)
+	if err != nil {
+		return err
 	}
 	defer remoteFile.Close()
-
-	if tracker == nil {
-		return errors.New(ErrTrackerRequired)
-	}
 
 	progressReader := &transfer.Reader{Reader: localFile, Tracker: tracker}
 	_, err = io.Copy(remoteFile, progressReader)
@@ -321,7 +288,7 @@ type stagingReplacer interface {
 }
 
 // uploadFileReplace writes a sibling temp file, then replaces the original.
-// It does not truncate the original first and does not call DecideResume.
+// It does not truncate the original first (edit-safe staging path).
 func (sft *Manager) uploadFileReplace(client *sftp.Client, local *os.File, remoteFinal string, tracker *transfer.Tracker) error {
 	if tracker == nil {
 		return errors.New(ErrTrackerRequired)
@@ -425,24 +392,6 @@ func (sft *Manager) removeStaging(client stagingReplacer, staging string) {
 	}
 }
 
-func (sft *Manager) downloadFileTruncate(client *sftp.Client, localPathFile, remotePathFile string, tracker *transfer.Tracker) error {
-	if tracker == nil {
-		return errors.New(ErrTrackerRequired)
-	}
-	remoteFile, err := client.Open(remotePathFile)
-	if err != nil {
-		return err
-	}
-	defer remoteFile.Close()
-	localFile, err := os.OpenFile(localPathFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer localFile.Close()
-	_, err = io.Copy(&transfer.Writer{Writer: localFile, Tracker: tracker}, remoteFile)
-	return err
-}
-
 func (sft *Manager) UploadFile(sessionID, localPath, remotePath string) error {
 	info, err := os.Stat(localPath)
 	if err != nil {
@@ -488,32 +437,19 @@ func (sft *Manager) downloadFile(sessionID string, localPathFile, remotePathFile
 	if err != nil {
 		return err
 	}
-
-	remoteInfo, err := ftpClient.Stat(remotePathFile)
-	if err != nil {
-		return err
+	if tracker == nil {
+		return errors.New(ErrTrackerRequired)
 	}
-	sourceSize := remoteInfo.Size()
 
 	localDir := filepath.Dir(localPathFile)
 	if err := os.MkdirAll(localDir, 0755); err != nil {
 		return err
 	}
-	if tracker != nil && tracker.Overwrite() {
-		return sft.downloadFileTruncate(ftpClient, localPathFile, remotePathFile, tracker)
-	}
-
-	var destSize int64
-	if st, statErr := os.Stat(localPathFile); statErr == nil && !st.IsDir() {
-		destSize = st.Size()
-	}
-
-	action, offset := DecideResume(destSize, sourceSize)
-	if action == ResumeSkip {
-		if tracker != nil {
-			tracker.AddTransferred(sourceSize)
+	// Type conflict: local path is a directory but we need a file.
+	if st, statErr := os.Stat(localPathFile); statErr == nil && st.IsDir() {
+		if err := os.RemoveAll(localPathFile); err != nil {
+			return err
 		}
-		return nil
 	}
 
 	remoteFile, err := ftpClient.Open(remotePathFile)
@@ -521,38 +457,12 @@ func (sft *Manager) downloadFile(sessionID string, localPathFile, remotePathFile
 		return err
 	}
 	defer remoteFile.Close()
-
-	var localFile *os.File
-	if action == ResumeContinue {
-		localFile, err = os.OpenFile(localPathFile, os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		if _, err = localFile.Seek(offset, io.SeekStart); err != nil {
-			_ = localFile.Close()
-			return err
-		}
-		if _, err = remoteFile.Seek(offset, io.SeekStart); err != nil {
-			_ = localFile.Close()
-			return err
-		}
-		if tracker != nil {
-			tracker.AddTransferred(offset)
-		}
-	} else {
-		localFile, err = os.OpenFile(localPathFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		if err != nil {
-			return err
-		}
+	localFile, err := os.OpenFile(localPathFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
 	}
 	defer localFile.Close()
-
-	if tracker == nil {
-		return errors.New(ErrTrackerRequired)
-	}
-
-	progressWriter := &transfer.Writer{Writer: localFile, Tracker: tracker}
-	_, err = io.Copy(progressWriter, remoteFile)
+	_, err = io.Copy(&transfer.Writer{Writer: localFile, Tracker: tracker}, remoteFile)
 	return err
 }
 
@@ -634,6 +544,65 @@ type uploadJob struct {
 	size  int64
 }
 
+// UploadConflicts returns basenames under remoteDir that already exist for the given local paths.
+func (sft *Manager) UploadConflicts(sessionID, remoteDir string, localPaths []string) ([]string, error) {
+	if sessionID == "" || remoteDir == "" || len(localPaths) == 0 {
+		return nil, usererr.Coded("sftp.invalid_upload", "Invalid upload parameters")
+	}
+	ftpClient, err := sft.getSftpClient(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	conflicts := make([]string, 0)
+	seen := make(map[string]struct{}, len(localPaths))
+	for _, p := range localPaths {
+		name := filepath.Base(p)
+		if name == "" || name == "." {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		dest := joinRemotePath(remoteDir, name)
+		if _, statErr := ftpClient.Stat(dest); statErr == nil {
+			conflicts = append(conflicts, name)
+		} else if !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
+	}
+	return conflicts, nil
+}
+
+// DownloadConflicts returns basenames under localDir that already exist for the given remote paths.
+func (sft *Manager) DownloadConflicts(sessionID, localDir string, remotePaths []string) ([]string, error) {
+	if sessionID == "" || localDir == "" || len(remotePaths) == 0 {
+		return nil, usererr.Coded("sftp.invalid_download", "Invalid download parameters")
+	}
+	if _, err := sft.getSftpClient(sessionID); err != nil {
+		return nil, err
+	}
+	conflicts := make([]string, 0)
+	seen := make(map[string]struct{}, len(remotePaths))
+	for _, rp := range remotePaths {
+		name := path.Base(rp)
+		if name == "" || name == "." || name == "/" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		dest := filepath.Join(localDir, name)
+		if _, statErr := os.Stat(dest); statErr == nil {
+			conflicts = append(conflicts, name)
+		} else if !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
+	}
+	return conflicts, nil
+}
+
 func (sft *Manager) UploadPaths(sessionID, remotePath string, localPaths []string) error {
 	if sessionID == "" || remotePath == "" || len(localPaths) == 0 {
 		return usererr.Coded("sftp.invalid_upload", "Invalid upload parameters")
@@ -703,14 +672,21 @@ func (sft *Manager) uploadDirectory(sessionID string, localPath, remotePath stri
 }
 
 func (sft *Manager) ensureRemoteDirExists(ftpClient *sftp.Client, remoteDir string) error {
-	_, err := ftpClient.Stat(remoteDir)
-	if err != nil && !os.IsNotExist(err) {
+	st, err := ftpClient.Stat(remoteDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ftpClient.MkdirAll(remoteDir)
+		}
 		return err
 	}
-	if os.IsNotExist(err) {
-		return ftpClient.MkdirAll(remoteDir)
+	if st.IsDir() {
+		return nil
 	}
-	return nil
+	// Type conflict: remote path is a file but we need a directory.
+	if err := ftpClient.Remove(remoteDir); err != nil {
+		return err
+	}
+	return ftpClient.MkdirAll(remoteDir)
 }
 
 func (sft *Manager) processDirectoryEntries(sessionID, localPath, remoteDir string, tracker *transfer.Tracker) error {
@@ -785,6 +761,11 @@ func (sft *Manager) downloadDirectory(sessionID string, localPath, remotePath st
 		return usererr.Coded("sftp.not_directory", "Path is not a directory")
 	}
 
+	if st, statErr := os.Stat(localPath); statErr == nil && !st.IsDir() {
+		if err := os.Remove(localPath); err != nil {
+			return err
+		}
+	}
 	if err := os.MkdirAll(localPath, 0755); err != nil {
 		return err
 	}

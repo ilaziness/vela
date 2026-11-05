@@ -120,6 +120,9 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [filesToDelete, setFilesToDelete] = useState<FileInfo[]>([]);
+  const [overwriteConfirmOpen, setOverwriteConfirmOpen] = useState(false);
+  const [overwriteNames, setOverwriteNames] = useState<string[]>([]);
+  const overwriteResolveRef = useRef<((ok: boolean) => void) | null>(null);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renamingItem, setRenamingItem] = useState<FileInfo | null>(null);
   const [renamingName, setRenamingName] = useState("");
@@ -241,6 +244,38 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const refreshLocalRef = useRef(refreshLocal);
   refreshLocalRef.current = refreshLocal;
   const enqueueUploadRef = useRef<(paths: string[]) => void>(() => {});
+
+  const askOverwrite = (names: string[]) =>
+    new Promise<boolean>((resolve) => {
+      if (names.length === 0) {
+        resolve(true);
+        return;
+      }
+      // A newer confirm supersedes any still-open one.
+      overwriteResolveRef.current?.(false);
+      overwriteResolveRef.current = resolve;
+      setOverwriteNames(names);
+      setOverwriteConfirmOpen(true);
+    });
+
+  const resolveOverwrite = (ok: boolean) => {
+    setOverwriteConfirmOpen(false);
+    setOverwriteNames([]);
+    const resolve = overwriteResolveRef.current;
+    overwriteResolveRef.current = null;
+    resolve?.(ok);
+  };
+
+  const overwriteMessage = () => {
+    if (overwriteNames.length === 1) {
+      return tf("sftp.confirm_overwrite_one", overwriteNames[0]);
+    }
+    const limit = 5;
+    const shown = overwriteNames.slice(0, limit);
+    const list =
+      overwriteNames.length > limit ? `${shown.join(", ")}…` : shown.join(", ");
+    return tf("sftp.confirm_overwrite_many", overwriteNames.length, list);
+  };
 
   const loadPending = async () => {
     if (!ownerKey) return;
@@ -706,12 +741,19 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       showMessageError(t("sftp.remote_dir_switching"));
       return;
     }
-    SftpService.UploadPaths(linkID, currentPathRef.current, paths).catch(
-      (err) => {
+    const remoteDir = currentPathRef.current;
+    void (async () => {
+      try {
+        const conflicts =
+          (await SftpService.ListUploadConflicts(linkID, remoteDir, paths)) ??
+          [];
+        if (!(await askOverwrite(conflicts))) return;
+        await SftpService.UploadPaths(linkID, remoteDir, paths);
+      } catch (err: any) {
         showMessageError(translateServiceError(err));
         LogService.Error(`Failed to upload paths: ${err.message || err}`);
-      },
-    );
+      }
+    })();
   };
   enqueueUploadRef.current = enqueueUpload;
 
@@ -721,12 +763,22 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       showMessageError(t("sftp.local_dir_switching"));
       return;
     }
-    SftpService.DownloadPaths(linkID, localDirRef.current, paths).catch(
-      (err) => {
+    const localDir = localDirRef.current;
+    void (async () => {
+      try {
+        const conflicts =
+          (await SftpService.ListDownloadConflicts(
+            linkID,
+            localDir,
+            paths,
+          )) ?? [];
+        if (!(await askOverwrite(conflicts))) return;
+        await SftpService.DownloadPaths(linkID, localDir, paths);
+      } catch (err: any) {
         showMessageError(translateServiceError(err));
         LogService.Error(`Failed to download paths: ${err.message || err}`);
-      },
-    );
+      }
+    })();
   };
 
   const handlePaneDrop = (target: PaneSide, event: React.DragEvent) => {
@@ -1257,6 +1309,24 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
           <Button onClick={() => setDeleteConfirmOpen(false)}>{t("common.cancel")}</Button>
           <Button onClick={() => void handleDelete()} color="error">
                     {t("common.delete")}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={overwriteConfirmOpen}
+        onClose={() => resolveOverwrite(false)}
+      >
+        <DialogTitle>{t("sftp.confirm_overwrite_title")}</DialogTitle>
+        <DialogContent>
+          <Typography>{overwriteMessage()}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => resolveOverwrite(false)}>
+            {t("dialog.no")}
+          </Button>
+          <Button onClick={() => resolveOverwrite(true)} variant="contained">
+            {t("dialog.yes")}
           </Button>
         </DialogActions>
       </Dialog>
