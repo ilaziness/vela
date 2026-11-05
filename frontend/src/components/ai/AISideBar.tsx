@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
   Box,
   Avatar,
@@ -132,6 +132,7 @@ const AISideBar = () => {
   const loadSessions = useAIAssistantStore((state) => state.loadSessions);
   const selectSession = useAIAssistantStore((state) => state.selectSession);
   const messagesRevision = useAIAssistantStore((state) => state.messagesRevision);
+  const isStreaming = useAIAssistantStore((state) => state.isStreaming);
   const setSidebarWidth = useAIAssistantStore((state) => state.setSidebarWidth);
   const setComposerValue = useAIAssistantStore(
     (state) => state.setComposerValue,
@@ -153,6 +154,7 @@ const AISideBar = () => {
   const [animateWidth, setAnimateWidth] = useState(false);
   const [visibleWidth, setVisibleWidth] = useState(0);
   const openRef = useRef(false);
+  const chatPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -229,6 +231,28 @@ const AISideBar = () => {
 
   const showChat = Boolean(activeSessionId);
 
+  // Overlay history menu has no slot. Block activation (React resets DOM disabled
+  // on stream renders) and close an already-open drawer before paint.
+  useLayoutEffect(() => {
+    if (!showChat || !isStreaming) return;
+    chatPaneRef.current
+      ?.querySelector<HTMLButtonElement>('[role="dialog"] button')
+      ?.click();
+  }, [isStreaming, showChat]);
+
+  const blockHistoryMenu = (e: React.SyntheticEvent) => {
+    if (!isStreaming) return;
+    if ("key" in e) {
+      const key = (e as React.KeyboardEvent).key;
+      if (key !== "Enter" && key !== " ") return;
+    }
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("button[aria-haspopup='dialog']")) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
   return (
     <Box
       aria-hidden={!sidebarOpen}
@@ -270,6 +294,9 @@ const AISideBar = () => {
           }}
         />
         <Box
+          ref={chatPaneRef}
+          onClickCapture={blockHistoryMenu}
+          onKeyDownCapture={blockHistoryMenu}
           sx={{
             flex: 1,
             display: "flex",
@@ -280,6 +307,13 @@ const AISideBar = () => {
             overflow: "hidden",
             position: "relative",
             bgcolor: "background.default",
+            ...(isStreaming
+              ? {
+                  "& button[aria-haspopup='dialog']": {
+                    opacity: (theme) => theme.palette.action.disabledOpacity,
+                  },
+                }
+              : null),
           }}
         >
           {showChat ? (
