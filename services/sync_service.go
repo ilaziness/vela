@@ -49,10 +49,14 @@ func (s *SyncService) UploadSync() error {
 	if !config.IsConfigured() {
 		return ErrSyncNotConfigured
 	}
+	password, err := s.configService.unlockedPassword()
+	if err != nil {
+		return err
+	}
 	s.progress.Reset()
 	s.progress.UpdateProgress("preparing", 0, 0)
 	manager := internalsync.NewSyncManager(config)
-	err := s.uploadWithRetry(manager, s.configService.userDataDir(), 3)
+	err = s.uploadWithRetry(manager, s.configService.userDataDir(), password, 3)
 	if err != nil {
 		s.progress.SetError(err.Error())
 		return err
@@ -61,7 +65,7 @@ func (s *SyncService) UploadSync() error {
 	return nil
 }
 
-func (s *SyncService) uploadWithRetry(manager *internalsync.SyncManager, userDataDir string, maxRetries int) error {
+func (s *SyncService) uploadWithRetry(manager *internalsync.SyncManager, userDataDir, password string, maxRetries int) error {
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
 		if i > 0 {
@@ -69,7 +73,7 @@ func (s *SyncService) uploadWithRetry(manager *internalsync.SyncManager, userDat
 			time.Sleep(time.Second * time.Duration(i))
 		}
 		s.progress.SetStage("packing")
-		err := manager.Upload(userDataDir)
+		err := manager.Upload(userDataDir, password)
 		if err == nil {
 			return nil
 		}
@@ -84,10 +88,14 @@ func (s *SyncService) DownloadSync(version int) error {
 	if !config.IsConfigured() {
 		return ErrSyncNotConfigured
 	}
+	password, err := s.configService.unlockedPassword()
+	if err != nil {
+		return err
+	}
 	s.progress.Reset()
 	s.progress.UpdateProgress("preparing", 0, 0)
 	manager := internalsync.NewSyncManager(config)
-	err := s.downloadWithRetry(manager, s.configService.userDataDir(), version, 3)
+	err = s.downloadWithRetry(manager, s.configService.userDataDir(), version, password, 3)
 	if err != nil {
 		s.progress.SetError(err.Error())
 		return usererr.Coded("sync.restore_failed", "Data restore failed; please restart the app manually")
@@ -96,22 +104,27 @@ func (s *SyncService) DownloadSync(version int) error {
 	return nil
 }
 
-func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userDataDir string, version int, maxRetries int) error {
+func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userDataDir string, version int, password string, maxRetries int) error {
 	var lastErr error
+	attempts := 0
 	for i := 0; i < maxRetries; i++ {
 		if i > 0 {
 			s.progress.SetStage(fmt.Sprintf("retrying (%d/%d)", i, maxRetries))
 			time.Sleep(time.Second * time.Duration(i))
 		}
 		s.progress.SetStage("downloading")
-		err := manager.Download(userDataDir, version, s.db)
+		attempts = i + 1
+		err := manager.Download(userDataDir, version, s.db, password)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
-		s.logger.Error("Download failed, will retry", zap.Int("attempt", i+1), zap.Error(err))
+		s.logger.Error("Download failed", zap.Int("attempt", attempts), zap.Error(err))
+		if !s.db.IsOpen() {
+			break
+		}
 	}
-	return usererr.Coded("sync.download_failed", "Download failed after %d attempts: %s", strconv.Itoa(maxRetries), lastErr.Error())
+	return usererr.Coded("sync.download_failed", "Download failed after %d attempts: %s", strconv.Itoa(attempts), lastErr.Error())
 }
 
 func (s *SyncService) ListSyncVersions(limit, offset int) ([]internalsync.VersionInfo, error) {

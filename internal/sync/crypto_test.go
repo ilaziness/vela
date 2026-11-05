@@ -2,6 +2,7 @@ package sync
 
 import (
 	"bytes"
+	"io"
 	"testing"
 )
 
@@ -30,12 +31,11 @@ func TestDeriveKey(t *testing.T) {
 }
 
 func TestEncryptDecryptStream(t *testing.T) {
-	userKey := "test-encryption-key"
+	password := "test-encryption-key"
 	originalData := []byte("Hello, World! This is a test message for encryption and decryption.")
 
-	// 加密
 	var encryptedBuffer bytes.Buffer
-	encryptStream, err := NewEncryptStream(&encryptedBuffer, userKey)
+	encryptStream, err := NewEncryptStream(&encryptedBuffer, password)
 	if err != nil {
 		t.Fatalf("failed to create encrypt stream: %v", err)
 	}
@@ -55,8 +55,7 @@ func TestEncryptDecryptStream(t *testing.T) {
 		t.Fatal("encrypted data should not be empty")
 	}
 
-	// 解密
-	decryptStream, err := NewDecryptStream(bytes.NewReader(encryptedData), userKey)
+	decryptStream, err := NewDecryptStream(bytes.NewReader(encryptedData), password)
 	if err != nil {
 		t.Fatalf("failed to create decrypt stream: %v", err)
 	}
@@ -70,6 +69,35 @@ func TestEncryptDecryptStream(t *testing.T) {
 	decryptedData := decryptedBuffer.Bytes()
 	if !bytes.Equal(originalData, decryptedData) {
 		t.Errorf("decrypted data mismatch: expected %s, got %s", originalData, decryptedData)
+	}
+}
+
+func TestEncryptDecryptMultiFrame(t *testing.T) {
+	password := "multi-frame-key"
+	originalData := bytes.Repeat([]byte("abcdefgh"), plainChunkSize) // > 1 frame
+
+	var encryptedBuffer bytes.Buffer
+	enc, err := NewEncryptStream(&encryptedBuffer, password)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	if _, err := enc.Write(originalData); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	dec, err := NewDecryptStream(bytes.NewReader(encryptedBuffer.Bytes()), password)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	got, err := io.ReadAll(dec)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !bytes.Equal(originalData, got) {
+		t.Fatalf("mismatch: got %d bytes want %d", len(got), len(originalData))
 	}
 }
 

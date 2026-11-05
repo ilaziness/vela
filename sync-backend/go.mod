@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/pelletier/go-toml/v2 v2.4.3
+	golang.org/x/crypto v0.58.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.2
 )

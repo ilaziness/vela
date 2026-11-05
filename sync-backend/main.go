@@ -158,7 +158,7 @@ func (c *GenUserCommand) printUserCredentials(syncID, userKey string) {
 	fmt.Printf("User Key: %s\n", userKey)
 	fmt.Println()
 	fmt.Println("Please save these credentials securely.")
-	fmt.Println("The User Key will be used to derive the encryption key.")
+	fmt.Println("The User Key is used only for API authentication.")
 }
 
 // Application 应用程序

@@ -115,3 +115,8 @@ func (d *Database) Close() error {
 	}
 	return nil
 }
+
+// IsOpen reports whether the underlying SQL connection is still available.
+func (d *Database) IsOpen() bool {
+	return d != nil && d.db != nil
+}

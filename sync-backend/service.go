@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+const userKeyBcryptCost = 12
 
 // SyncService 同步服务
 type SyncService struct {
@@ -22,11 +26,15 @@ func NewSyncService(db *DB, storage *Storage, maxVersions int) *SyncService {
 	}
 }
 
-// CreateUser 创建用户
+// CreateUser 创建用户（userKey 明文仅用于生成 bcrypt 哈希后丢弃）
 func (s *SyncService) CreateUser(id, userKey string) (*User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(userKey), userKeyBcryptCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash user key: %w", err)
+	}
 	user := &User{
 		ID:        id,
-		UserKey:   userKey,
+		UserKey:   string(hash),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -51,7 +59,7 @@ func (s *SyncService) VerifyUser(id, userKey string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	if user.UserKey != userKey {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.UserKey), []byte(userKey)); err != nil {
 		return nil, fmt.Errorf("invalid user key")
 	}
 	return user, nil

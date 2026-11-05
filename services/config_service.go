@@ -222,6 +222,15 @@ func (cs *ConfigService) isUnlocked() bool {
 	return err == nil
 }
 
+// unlockedPassword returns the in-memory master password or an unlock-required error.
+func (cs *ConfigService) unlockedPassword() (string, error) {
+	password, err := cs.vault.Get()
+	if err != nil {
+		return "", usererr.Coded("error.password_not_entered", "Password not entered")
+	}
+	return password, nil
+}
+
 // NeedsUnlock is true when encrypted secrets or a verifier exist and the vault is locked.
 func (cs *ConfigService) NeedsUnlock() bool {
 	if cs.isUnlocked() {

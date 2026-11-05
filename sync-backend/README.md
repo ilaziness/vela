@@ -2,13 +2,15 @@
 
 Vela 数据同步服务端，用于存储和管理用户数据的多版本备份。
 
+客户端把备份打成 zip（加密载荷 `payload.bin` + SHA-256 清单 `manifest.json`）后上传。服务端原样存储，不解密、不校验哈希。用户密钥仅用于 API 认证，库中保存 bcrypt 哈希。备份加密密钥由客户端主密码派生，不经过本服务。
+
 ## 功能特性
 
-- **多用**户支持: 每个用户通过 sync\_id 隔离数据
-- **多版本管理**: 保留最多 500 个历史版本，支持版本恢复和删除
-- **数据加密**: 客户端加密后传输，服务端仅存储加密数据
-- **频率控制**: 限制每分钟最多同步 1 次，防止滥用
-- **流式处理**: 支持大文件流式上传下载，低内存占用
+- **多用户支持**: 每个用户通过 sync_id 隔离数据
+- **多版本管理**: 默认保留最多 500 个历史版本，支持版本恢复和删除
+- **密文存储**: 服务端只存客户端上传的备份包，无法还原明文
+- **频率控制**: 上传间隔最少 1 分钟
+- **流式处理**: 支持大文件流式上传下载
 - **版本列表分页**: 支持 limit/offset 分页查询历史版本
 
 ## 快速开始
@@ -26,6 +28,8 @@ go build -o sync-backend .
 ./sync-backend gen-user
 ```
 
+默认读取当前目录的 `config.toml`（不存在则按默认值创建）。可用 `-config` 指定路径。
+
 输出示例：
 
 ```
@@ -35,8 +39,10 @@ Sync ID:  550e8400-e29b-41d4-a716-446655440000
 User Key: a1b2c3d4e5f6...
 
 Please save these credentials securely.
-The User Key will be used to derive the encryption key.
+The User Key is used only for API authentication.
 ```
+
+User Key 只在生成时打印一次明文，之后数据库里只有 bcrypt 哈希。请妥善保存。
 
 ### 3. 启动服务
 
@@ -44,7 +50,7 @@ The User Key will be used to derive the encryption key.
 ./sync-backend server
 ```
 
-服务默认监听 `0.0.0.0:8080`。
+同样可用 `-config` 指定配置文件。服务默认监听 `0.0.0.0:8080`。
 
 ## 配置说明
 
@@ -59,7 +65,7 @@ port = 8080
 
 [data]
 data_dir = "./data/files"
-max_versions = 5
+max_versions = 500
 
 [data.database]
 type = "sqlite"
@@ -75,7 +81,7 @@ port = 8080
 
 [data]
 data_dir = "./data/files"
-max_versions = 5
+max_versions = 500
 
 [data.database]
 type = "mysql"
@@ -88,19 +94,19 @@ name = "vela_sync"
 
 ### 配置项说明
 
-| 配置项                      | 默认值              | 说明                      |
-| ------------------------ | ---------------- | ----------------------- |
-| `server.host`            | "0.0.0.0"        | HTTP 服务监听地址             |
-| `server.port`            | 8080             | HTTP 服务监听端口             |
-| `data.data_dir`          | "./data/files"   | 数据文件存储目录                |
-| `data.max_versions`      | 500              | 每个用户最大版本数               |
-| `data.database.type`     | "sqlite"         | 数据库类型: sqlite 或 mysql   |
-| `data.database.db_path`  | "./data/sync.db" | SQLite 数据库路径（SQLite 使用） |
-| `data.database.host`     | "localhost"      | MySQL 主机（MySQL 使用）      |
-| `data.database.port`     | 3306             | MySQL 端口（MySQL 使用）      |
-| `data.database.user`     | ""               | MySQL 用户名（MySQL 使用）     |
-| `data.database.password` | ""               | MySQL 密码（MySQL 使用）      |
-| `data.database.name`     | ""               | MySQL 数据库名（MySQL 使用）    |
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `server.host` | "0.0.0.0" | HTTP 服务监听地址 |
+| `server.port` | 8080 | HTTP 服务监听端口 |
+| `data.data_dir` | "./data/files" | 数据文件存储目录 |
+| `data.max_versions` | 500 | 每个用户最大版本数 |
+| `data.database.type` | "sqlite" | 数据库类型: sqlite 或 mysql |
+| `data.database.db_path` | "./data/sync.db" | SQLite 数据库路径（SQLite 使用） |
+| `data.database.host` | "localhost" | MySQL 主机（MySQL 使用） |
+| `data.database.port` | 3306 | MySQL 端口（MySQL 使用） |
+| `data.database.user` | "" | MySQL 用户名（MySQL 使用） |
+| `data.database.password` | "" | MySQL 密码（MySQL 使用） |
+| `data.database.name` | "" | MySQL 数据库名（MySQL 使用） |
 
 ## API 接口
 
@@ -112,6 +118,8 @@ name = "vela_sync"
 X-Sync-ID: <sync_id>
 X-User-Key: <user_key>
 ```
+
+`X-User-Key` 为 `gen-user` 打印的明文密钥。服务端用 bcrypt 校验，不保存明文。
 
 ### 接口列表
 
@@ -136,9 +144,11 @@ POST /upload
 Headers:
   X-Sync-ID: <sync_id>
   X-User-Key: <user_key>
-  X-File-Hash: <file_hash>
-Body: <加密后的数据流>
+  Content-Type: application/octet-stream
+Body: <备份 zip 字节流>
 ```
+
+服务端不解析 zip 内容，按版本号存为 `data/files/<sync_id>/v<n>.dat`。
 
 响应：
 
@@ -159,11 +169,13 @@ Headers:
   X-User-Key: <user_key>
 ```
 
-响应：数据流
+`version` 可省略，省略时下载最新版本。
 
-Headers:
+响应：备份包字节流（`Content-Type: application/octet-stream`）
 
-- `X-Version-Number`: 版本号
+响应头：
+
+- `X-Version-Number`: 实际返回的版本号
 
 #### 获取版本列表
 
@@ -176,7 +188,7 @@ Headers:
 
 参数：
 
-- `limit`: 返回数量限制（0 表示不分页，返回全部）
+- `limit`: 返回数量限制（0 或不传表示不分页，返回全部）
 - `offset`: 偏移量，用于分页
 
 响应：
@@ -186,13 +198,11 @@ Headers:
   "versions": [
     {
       "version_number": 2,
-      "file_hash": "sha256_hash",
       "file_size": 2048,
       "created_at": "2024-01-02T00:00:00Z"
     },
     {
       "version_number": 1,
-      "file_hash": "sha256_hash",
       "file_size": 1024,
       "created_at": "2024-01-01T00:00:00Z"
     }
@@ -264,7 +274,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # 大文件上传配置
         client_max_body_size 1G;
         proxy_request_buffering off;
@@ -276,7 +286,7 @@ server {
 ### Docker 部署
 
 ```dockerfile
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN go build -o sync-backend .
@@ -318,10 +328,11 @@ mysqldump -u vela -p vela_sync > backup-$(date +%Y%m%d).sql
 
 ## 安全建议
 
-1. **使用 HTTPS**: 生产环境务必使用 HTTPS 加密传输
+1. **使用 HTTPS**: 生产环境务必使用 HTTPS；User Key 走请求头，明文 HTTP 会被窃听
 2. **防火墙限制**: 仅允许可信 IP 访问同步端口
 3. **定期备份**: 定期备份数据库和数据文件
 4. **监控告警**: 设置磁盘空间监控，避免存储耗尽
+5. **保管 User Key**: 丢失后无法认证；服务端不能还原明文密钥
 
 ## 故障排查
 
@@ -333,7 +344,6 @@ journalctl -u vela-sync -f
 
 ### 常见问题
 
-1. **上传失败**: 检查 `client_max_body_size` 是否足够大
+1. **上传失败**: 检查 `client_max_body_size` 是否足够大，以及是否触发 1 分钟上传间隔
 2. **磁盘空间不足**: 清理旧版本或扩展存储
-3. **数据库锁定**: 确保只有一个服务实例访问数据库
-
+3. **数据库锁定**: 确保只有一个服务实例访问 SQLite

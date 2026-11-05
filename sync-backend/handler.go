@@ -23,7 +23,6 @@ const (
 const (
 	HeaderSyncID        = "X-Sync-ID"
 	HeaderUserKey       = "X-User-Key"
-	HeaderFileHash      = "X-File-Hash"
 	HeaderVersionNumber = "X-Version-Number"
 	HeaderContentType   = "Content-Type"
 )
