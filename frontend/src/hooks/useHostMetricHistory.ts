@@ -3,6 +3,9 @@ import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal
 import { metricPct } from "../func/hostMetrics";
 
 export const HOST_METRIC_HISTORY_MAX = 60;
+export const HOST_METRIC_POLL_MS = 5000;
+export const HOST_METRIC_WINDOW_MS =
+  (HOST_METRIC_HISTORY_MAX - 1) * HOST_METRIC_POLL_MS;
 
 export interface DualRateHistory {
   a: number[];
@@ -10,6 +13,7 @@ export interface DualRateHistory {
 }
 
 export interface MetricHistory {
+  times: number[];
   cpu: number[];
   mem: number[];
   net: Record<string, DualRateHistory>;
@@ -17,6 +21,7 @@ export interface MetricHistory {
 }
 
 const emptyHistory = (): MetricHistory => ({
+  times: [],
   cpu: [],
   mem: [],
   net: {},
@@ -33,6 +38,7 @@ export const appendHostMetricHistory = (
   prev: MetricHistory,
   resources: HostResources,
 ): MetricHistory => {
+  const times = pushCapped(prev.times, Date.now());
   let cpu = prev.cpu;
   let mem = prev.mem;
   let net = prev.net;
@@ -77,7 +83,7 @@ export const appendHostMetricHistory = (
     diskIO = {};
   }
 
-  return { cpu, mem, net, diskIO };
+  return { times, cpu, mem, net, diskIO };
 };
 
 /**

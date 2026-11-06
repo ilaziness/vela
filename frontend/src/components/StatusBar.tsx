@@ -9,9 +9,9 @@ import HostResourcesPanel from "./HostResourcesPanel";
 import { SSHService } from "../../bindings/github.com/ilaziness/vela/services";
 import { HostResources } from "../../bindings/github.com/ilaziness/vela/internal/ssh/models";
 import { parseServiceErrorPayload, parseCallServiceError } from "../func/service";
+import { HOST_METRIC_POLL_MS } from "../hooks/useHostMetricHistory";
 import { t } from "../i18n";
 
-const HOST_RESOURCES_POLL_MS = 5000;
 /** Wait after terminal WS ready so PTY welcome/MOTD is not stolen by metrics Exec. */
 const HOST_RESOURCES_INITIAL_DELAY_MS = 1500;
 
@@ -154,7 +154,7 @@ const StatusBar: React.FC<StatusBarProps> = ({
         }
         // Keep last good snapshot on transient errors.
       } finally {
-        scheduleNext(HOST_RESOURCES_POLL_MS);
+        scheduleNext(HOST_METRIC_POLL_MS);
       }
     };
 

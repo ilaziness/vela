@@ -1,3 +1,5 @@
+import type { Theme } from "@mui/material/styles";
+
 export const chartFrameSx = {
   width: "100%",
   border: 1,
@@ -7,9 +9,14 @@ export const chartFrameSx = {
   overflow: "hidden",
 } as const;
 
-export const chartPlotSx = {
-  "& .MuiChartsAxis-root": { display: "none" },
-  "& .MuiChartsGrid-line": { strokeDasharray: "2 4" },
-} as const;
-
-export const CHART_HEIGHT = 88;
+export const hostChartColors = (theme: Theme) => {
+  const { primary, secondary, warning, error } = theme.palette;
+  return {
+    cpu: primary.main,
+    mem: warning.main,
+    netRx: primary.main,
+    netTx: warning.main,
+    diskRead: secondary.main,
+    diskWrite: error.main,
+  };
+};
