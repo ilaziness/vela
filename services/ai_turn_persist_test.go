@@ -369,6 +369,50 @@ func TestWaitSessionRunIdle(t *testing.T) {
 	}
 }
 
+func TestTurnPersisterFinalizeCancelledUsesCheckpoint(t *testing.T) {
+	db := openAITestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+
+	sess := &database.AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	user := &database.AIMessage{
+		SessionID: sess.ID, Role: ai.RoleUser, Content: "q", Parts: "[]", RunID: "run-fin",
+	}
+	if err := repo.CreateMessage(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	part := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
+		Name: ai.ToolRunSSHCommand, Ref: "c1", Input: map[string]any{"command": "ls"},
+	})
+	part.Interrupt = &genkitAI.ToolInterrupt{}
+	p := newTurnPersister(repo, zap.NewNop(), sess.ID, "run-fin", user.ID)
+	p.Checkpoint([]ai.ChatMessage{{
+		Role: ai.RoleModel, Content: "", Parts: ai.MarshalParts([]*genkitAI.Part{part}),
+	}})
+	if _, err := p.Finalize(nil, true); err != nil {
+		t.Fatal(err)
+	}
+	all, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turn []ai.ChatMessage
+	for _, m := range all {
+		if m.RunID != "" {
+			t.Fatalf("unsealed: %+v", m)
+		}
+		if m.Role == ai.RoleModel || m.Role == ai.RoleTool {
+			turn = append(turn, ai.ChatMessage{Role: m.Role, Content: m.Content, Parts: m.Parts})
+		}
+	}
+	if ai.TurnHasInterrupt(turn) {
+		t.Fatal("Finalize(cancelled) must resolve checkpoint interrupt")
+	}
+}
+
 func TestTurnPersisterForceFinalizeCancelled(t *testing.T) {
 	db := openAITestDB(t)
 	repo := db.AISessionRepo
@@ -389,7 +433,7 @@ func TestTurnPersisterForceFinalizeCancelled(t *testing.T) {
 		Role: ai.RoleModel, Content: "partial", Parts: ai.UserTextPartsJSON("partial"),
 	}})
 	p.UpsertStreamingText(" more")
-	last, err := p.ForceFinalize()
+	last, err := p.ForceFinalize(true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +484,7 @@ func TestTurnPersisterForceFinalizeKeepsInterrupt(t *testing.T) {
 	p.Checkpoint([]ai.ChatMessage{{
 		Role: ai.RoleModel, Content: "", Parts: ai.MarshalParts([]*genkitAI.Part{part}),
 	}})
-	if _, err := p.ForceFinalize(); err != nil {
+	if _, err := p.ForceFinalize(false); err != nil {
 		t.Fatal(err)
 	}
 	all, err := repo.ListMessages(ctx, sess.ID)
@@ -468,6 +512,71 @@ func TestTurnPersisterForceFinalizeKeepsInterrupt(t *testing.T) {
 	}
 	if !sawInterrupt {
 		t.Fatal("expected preserved interrupt part")
+	}
+}
+
+func TestTurnPersisterForceFinalizeStopDeniesInterrupt(t *testing.T) {
+	db := openAITestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+
+	sess := &database.AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	user := &database.AIMessage{
+		SessionID: sess.ID, Role: ai.RoleUser, Content: "q", Parts: "[]", RunID: "run-stop",
+	}
+	if err := repo.CreateMessage(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	part := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
+		Name: ai.ToolRunSSHCommand, Ref: "c1", Input: map[string]any{"command": "ls"},
+	})
+	part.Interrupt = &genkitAI.ToolInterrupt{}
+	p := newTurnPersister(repo, zap.NewNop(), sess.ID, "run-stop", user.ID)
+	p.Checkpoint([]ai.ChatMessage{{
+		Role: ai.RoleModel, Content: "", Parts: ai.MarshalParts([]*genkitAI.Part{part}),
+	}})
+	if _, err := p.ForceFinalize(true); err != nil {
+		t.Fatal(err)
+	}
+	all, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turn []ai.ChatMessage
+	var userStatus string
+	for _, m := range all {
+		if m.RunID != "" {
+			t.Fatalf("unsealed after force: %+v", m)
+		}
+		if m.Role == ai.RoleUser {
+			userStatus = m.Status
+		}
+		if m.Role == ai.RoleModel || m.Role == ai.RoleTool {
+			turn = append(turn, ai.ChatMessage{Role: m.Role, Content: m.Content, Parts: m.Parts, Status: m.Status})
+		}
+	}
+	if userStatus != database.MessageStatusCancelled {
+		t.Fatalf("user status = %q", userStatus)
+	}
+	if ai.TurnHasInterrupt(turn) {
+		t.Fatal("user stop must not leave unresolved interrupt")
+	}
+	var sawDenied bool
+	for _, m := range turn {
+		if m.Role != ai.RoleTool {
+			continue
+		}
+		for _, part := range ai.UnmarshalParts(m.Parts) {
+			if part != nil && part.IsToolResponse() && part.ToolResponse != nil {
+				sawDenied = true
+			}
+		}
+	}
+	if !sawDenied {
+		t.Fatal("expected synthetic denied tool response")
 	}
 }
 
@@ -562,5 +671,66 @@ func TestFlushAndStopForceFinalizes(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected model content after FlushAndStop")
+	}
+}
+
+func TestFlushAndStopKeepsInterrupt(t *testing.T) {
+	db := openAITestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+
+	sess := &database.AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	user := &database.AIMessage{
+		SessionID: sess.ID, Role: ai.RoleUser, Content: "q", Parts: "[]", RunID: "run-flush-i",
+	}
+	if err := repo.CreateMessage(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	part := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{
+		Name: ai.ToolRunSSHCommand, Ref: "c1", Input: map[string]any{"command": "ls"},
+	})
+	part.Interrupt = &genkitAI.ToolInterrupt{}
+	p := newTurnPersister(repo, zap.NewNop(), sess.ID, "run-flush-i", user.ID)
+	p.Checkpoint([]ai.ChatMessage{{
+		Role: ai.RoleModel, Content: "", Parts: ai.MarshalParts([]*genkitAI.Part{part}),
+	}})
+	ch := make(chan approvalDecision, 1)
+	_, cancel := context.WithCancel(context.Background())
+	s := &AIService{
+		logger:      zap.NewNop(),
+		sessionRepo: repo,
+		runs: map[string]*agentRun{
+			sess.ID: {
+				runID:     "run-flush-i",
+				cancel:    cancel,
+				persister: p,
+				approvals: map[string]chan approvalDecision{"c1": ch},
+			},
+		},
+		cancelled: make(map[string]struct{}),
+	}
+	s.FlushAndStop()
+	all, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turn []ai.ChatMessage
+	var userStatus string
+	for _, m := range all {
+		if m.Role == ai.RoleUser {
+			userStatus = m.Status
+		}
+		if m.Role == ai.RoleModel || m.Role == ai.RoleTool {
+			turn = append(turn, ai.ChatMessage{Role: m.Role, Content: m.Content, Parts: m.Parts})
+		}
+	}
+	if userStatus == database.MessageStatusCancelled {
+		t.Fatal("shutdown must not cancel a paused approval turn")
+	}
+	if !ai.TurnHasInterrupt(turn) {
+		t.Fatal("shutdown must keep interrupt for cold resume")
 	}
 }

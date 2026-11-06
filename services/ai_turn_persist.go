@@ -138,6 +138,11 @@ func (p *turnPersister) Finalize(resp *ai.AgentResponse, cancelled bool) (*datab
 		return nil, nil
 	}
 	merged := cloneAgentResponse(resp)
+	// Cancelled stop with no engine return: rewrite from last checkpoint so interrupt
+	// holds are denied instead of sealed as still-pending.
+	if cancelled && (merged == nil || len(merged.Turn) == 0) && len(p.lastTurn) > 0 {
+		merged = &ai.AgentResponse{Turn: append([]ai.ChatMessage(nil), p.lastTurn...)}
+	}
 	if p.streamBuf != "" {
 		merged = mergeStreamSegment(merged, p.streamBuf)
 	}
@@ -159,7 +164,9 @@ func (p *turnPersister) Finalize(resp *ai.AgentResponse, cancelled bool) (*datab
 }
 
 // ForceFinalize seals using lastCheckpoint + streamBuf when Run never returned a response.
-func (p *turnPersister) ForceFinalize() (*database.AIMessage, error) {
+// stopPendingTools is true after the user hits stop: unanswered interrupts become denials.
+// When false (crash / hung pause), interrupt holds are kept for cold RespondToolApproval.
+func (p *turnPersister) ForceFinalize(stopPendingTools bool) (*database.AIMessage, error) {
 	if p == nil {
 		return nil, nil
 	}
@@ -169,7 +176,7 @@ func (p *turnPersister) ForceFinalize() (*database.AIMessage, error) {
 		return nil, nil
 	}
 	merged := mergeStreamSegment(&ai.AgentResponse{Turn: append([]ai.ChatMessage(nil), p.lastTurn...)}, p.streamBuf)
-	keepInterrupt := ai.TurnHasInterrupt(merged.Turn)
+	keepInterrupt := !stopPendingTools && ai.TurnHasInterrupt(merged.Turn)
 	var prepared *ai.AgentResponse
 	if keepInterrupt {
 		// Preserve Genkit interrupt holds so cold RespondToolApproval can resume.

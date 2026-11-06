@@ -65,6 +65,61 @@ func TestCancelChatOnlyStopsMatchingRun(t *testing.T) {
 	}
 }
 
+func TestCancelChatSoftDeniesPendingApproval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan approvalDecision, 1)
+	run := &agentRun{
+		runID:     "run-1",
+		cancel:    cancel,
+		approvals: map[string]chan approvalDecision{"appr-1": ch},
+	}
+	s := &AIService{
+		runs:      map[string]*agentRun{"sess": run},
+		cancelled: make(map[string]struct{}),
+	}
+	if err := s.CancelChat("sess", "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("pending approval stop must soft-deny without cancelling the run context")
+	}
+	run.mu.Lock()
+	stopped := run.userStopped
+	run.mu.Unlock()
+	if !stopped {
+		t.Fatal("expected userStopped")
+	}
+	select {
+	case d := <-ch:
+		if d.Approved || d.Reason != "stopped" {
+			t.Fatalf("decision=%+v", d)
+		}
+	default:
+		t.Fatal("expected soft-deny on approval channel")
+	}
+}
+
+func TestStopGenerationHardCancelsWithoutApproval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	run := &agentRun{
+		runID:     "run-1",
+		cancel:    cancel,
+		approvals: make(map[string]chan approvalDecision),
+	}
+	s := &AIService{
+		runs:      map[string]*agentRun{"sess": run},
+		cancelled: make(map[string]struct{}),
+	}
+	if err := s.StopGeneration("sess"); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("stop without pending approval should cancel the run")
+	}
+}
+
 func TestClearCancelledRun(t *testing.T) {
 	s := &AIService{
 		runs:      make(map[string]*agentRun),

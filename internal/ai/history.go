@@ -392,14 +392,37 @@ func completeTurn(turn []ChatMessage) []ChatMessage {
 	return genkitToChatMessages(msgs, nil)
 }
 
-// completeTurnOnCancel keeps unanswered tool requests by synthesizing denied tool responses.
+// completeTurnOnCancel keeps unanswered tool requests by synthesizing denied tool responses
+// and marks Genkit interrupt holds resolved so the next Chat is not blocked.
 func completeTurnOnCancel(turn []ChatMessage) []ChatMessage {
 	if len(turn) == 0 {
 		return turn
 	}
 	msgs := dropOrphanTools(chatMessagesToGenkit(turn))
+	resolveInterruptParts(msgs)
 	msgs, deniedIdx := fillUnansweredToolRequests(msgs, "stopped")
 	return genkitToChatMessages(msgs, deniedIdx)
+}
+
+// resolveInterruptParts marks unresolved ToolApproval holds as resolved (Genkit wire:
+// interrupt → resolvedInterrupt) so TurnHasInterrupt is false after a user stop.
+func resolveInterruptParts(msgs []*genkitAI.Message) {
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		for _, p := range m.Content {
+			if p == nil || !p.IsInterrupt() {
+				continue
+			}
+			if p.Interrupt != nil {
+				p.Interrupt.Resolved = true
+				continue
+			}
+			// Metadata-only interrupt: lift into the typed field as resolved.
+			p.Interrupt = &genkitAI.ToolInterrupt{Resolved: true}
+		}
+	}
 }
 
 func chatMessagesToGenkit(turn []ChatMessage) []*genkitAI.Message {

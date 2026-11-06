@@ -319,12 +319,23 @@ export class GenkitAdapter implements ChatAdapter {
           return;
         }
 
+        const reloadAfterStop = () => {
+          // Abort closes the stream before tool-output-denied arrives; reload sealed history
+          // so pending approval cards become output-denied from listMessages.
+          if (useAIAssistantStore.getState().activeSessionId === capturedSessionId) {
+            useAIAssistantStore.getState().bumpMessagesRevision();
+          }
+        };
+
         chatPromise
           .then(() => {
             chatDone = true;
-            if (aborted) return;
             unsubscribe();
             signal.removeEventListener('abort', onAbort);
+            if (aborted) {
+              reloadAfterStop();
+              return;
+            }
             if (useAIAssistantStore.getState().activeSessionId !== capturedSessionId) {
               endStreaming();
               controller.close();
@@ -338,10 +349,16 @@ export class GenkitAdapter implements ChatAdapter {
           })
           .catch((err: any) => {
             chatDone = true;
-            if (aborted) return;
+            if (aborted) {
+              unsubscribe();
+              signal.removeEventListener('abort', onAbort);
+              reloadAfterStop();
+              return;
+            }
             const rawErr = parseCallServiceError(err);
             if (signal.aborted || /generation stopped/i.test(rawErr)) {
               closeAsAborted();
+              reloadAfterStop();
               return;
             }
             unsubscribe();

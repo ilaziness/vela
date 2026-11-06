@@ -91,6 +91,24 @@ func TestCompleteTurnOnCancelSynthesizesDeniedTools(t *testing.T) {
 	}
 }
 
+func TestCompleteTurnOnCancelResolvesInterrupt(t *testing.T) {
+	reqPart := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "c1"})
+	reqPart.Interrupt = &genkitAI.ToolInterrupt{}
+	turn := []ChatMessage{
+		{Role: RoleModel, Content: "[" + ToolRunSSHCommand + "]", Parts: MarshalParts([]*genkitAI.Part{reqPart})},
+	}
+	if !TurnHasInterrupt(turn) {
+		t.Fatal("setup: expected unresolved interrupt")
+	}
+	got := completeTurnOnCancel(turn)
+	if TurnHasInterrupt(got) {
+		t.Fatal("cancel must resolve interrupt holds")
+	}
+	if len(got) != 2 || got[1].Role != RoleTool {
+		t.Fatalf("got=%+v", got)
+	}
+}
+
 func TestCompleteTurnOnCancelKeepsAnsweredAndSynthesizesRest(t *testing.T) {
 	reqA := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "a"})
 	reqB := genkitAI.NewToolRequestPart(&genkitAI.ToolRequest{Name: ToolRunSSHCommand, Ref: "b"})

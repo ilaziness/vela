@@ -114,6 +114,7 @@ type agentRun struct {
 	execCancel  context.CancelFunc // cancels the in-flight run_ssh_command Exec only
 	execPending bool               // approved, Exec not registered yet (approve→Exec race)
 	execAbort   bool               // CancelSSHExec while execPending
+	userStopped bool               // user hit stop; soft-deny pending tools, mark turn cancelled
 	mu          sync.Mutex
 }
 
@@ -668,8 +669,12 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		})
 		return nil
 	})
+	run.mu.Lock()
+	userStopped := run.userStopped
+	run.mu.Unlock()
+
 	if err != nil {
-		if isChatStopped(err, ctx) {
+		if isChatStopped(err, ctx) || userStopped {
 			s.logger.Info("AI generation stopped",
 				zap.String("sessionId", sessionID),
 				zap.String("runId", runID),
@@ -720,7 +725,8 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		return &ChatResponse{Message: *toAIMessage(last)}, nil
 	}
 
-	last, persistErr := persister.Finalize(aiResp, false)
+	// Soft-deny stop lets Genkit Resume finish successfully; still mark the turn cancelled.
+	last, persistErr := persister.Finalize(aiResp, userStopped)
 	if persistErr != nil {
 		return nil, persistErr
 	}
@@ -803,17 +809,19 @@ func (s *AIService) forceFinalizeSessionRun(sessionID string) {
 	delete(s.runs, sessionID)
 	s.runsMu.Unlock()
 
-	s.rejectApprovalsAndCancel(run)
-	if run.persister == nil {
-		return
+	s.stopAgentRun(run, true)
+	if run.persister != nil {
+		// Steal abandons the turn for a new Chat; deny leftover approval holds.
+		if _, err := run.persister.ForceFinalize(true); err != nil {
+			s.logger.Error("force finalize superseded AI turn failed",
+				zap.String("sessionId", sessionID),
+				zap.String("runId", run.runID),
+				zap.Error(err),
+			)
+		}
 	}
-	if _, err := run.persister.ForceFinalize(); err != nil {
-		s.logger.Error("force finalize superseded AI turn failed",
-			zap.String("sessionId", sessionID),
-			zap.String("runId", run.runID),
-			zap.Error(err),
-		)
-	}
+	// Soft-deny may have left the engine ctx live (resume in flight); abort leftover work.
+	run.cancel()
 }
 
 func (s *AIService) markMessageCancelled(sessionID, msgID string) {
@@ -903,7 +911,7 @@ func (s *AIService) FlushAndStop() {
 	}
 	s.runsMu.Unlock()
 	for _, run := range runs {
-		s.rejectApprovalsAndCancel(run)
+		s.stopAgentRun(run, false)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -925,15 +933,16 @@ func (s *AIService) FlushAndStop() {
 	}
 	s.runsMu.Unlock()
 	for _, run := range leftover {
-		if run.persister == nil {
-			continue
+		if run.persister != nil {
+			// Shutdown is not a user stop: keep interrupt holds for cold resume.
+			if _, err := run.persister.ForceFinalize(false); err != nil {
+				s.logger.Error("force finalize AI turn failed",
+					zap.String("runId", run.runID),
+					zap.Error(err),
+				)
+			}
 		}
-		if _, err := run.persister.ForceFinalize(); err != nil {
-			s.logger.Error("force finalize AI turn failed",
-				zap.String("runId", run.runID),
-				zap.Error(err),
-			)
-		}
+		run.cancel()
 	}
 	s.RecoverOrphanTurns()
 }
@@ -981,27 +990,7 @@ func (s *AIService) StopGeneration(sessionID string) error {
 	s.runsMu.Lock()
 	run := s.runs[sessionID]
 	s.runsMu.Unlock()
-	if run == nil {
-		return nil
-	}
-	run.mu.Lock()
-	pending := len(run.approvals) > 0
-	for _, ch := range run.approvals {
-		select {
-		case ch <- approvalDecision{Approved: false, Reason: "stopped"}:
-		default:
-		}
-	}
-	execCancel := run.execCancel
-	run.execPending = false
-	run.execAbort = false
-	run.mu.Unlock()
-	if execCancel != nil {
-		execCancel()
-	}
-	if !pending {
-		run.cancel()
-	}
+	s.stopAgentRun(run, true)
 	return nil
 }
 
@@ -1034,8 +1023,9 @@ func (s *AIService) CancelSSHExec(sessionID string) error {
 	return nil
 }
 
-// CancelChat stops a specific send. If the run is already registered it is cancelled;
-// otherwise runID is marked so Chat can refuse to start.
+// CancelChat stops a specific send. If the run is already registered it is stopped
+// (soft-deny pending ToolApproval holds so Genkit can Resume; hard-cancel otherwise).
+// Otherwise runID is marked so Chat can refuse to start.
 func (s *AIService) CancelChat(sessionID, runID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
@@ -1046,7 +1036,7 @@ func (s *AIService) CancelChat(sessionID, runID string) error {
 	run := s.runs[sessionID]
 	if run != nil && run.runID == runID {
 		s.runsMu.Unlock()
-		s.rejectApprovalsAndCancel(run)
+		s.stopAgentRun(run, true)
 		return nil
 	}
 	// Not registered yet (or a different run is active): remember for Chat's start checks.
@@ -1087,11 +1077,19 @@ func (s *AIService) clearCancelledRun(runID string) {
 	s.runsMu.Unlock()
 }
 
-func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
+// stopAgentRun is the shared stop path for CancelChat / StopGeneration / shutdown.
+// Pending ToolApproval holds get a soft-deny so Genkit WithResume can finish; the
+// run context is only cancelled when there is no hold (mid-stream text stop).
+// userStop is true for the composer Stop button (mark the turn cancelled).
+func (s *AIService) stopAgentRun(run *agentRun, userStop bool) {
 	if run == nil {
 		return
 	}
 	run.mu.Lock()
+	if userStop {
+		run.userStopped = true
+	}
+	pending := len(run.approvals) > 0
 	for _, ch := range run.approvals {
 		select {
 		case ch <- approvalDecision{Approved: false, Reason: "stopped"}:
@@ -1105,7 +1103,9 @@ func (s *AIService) rejectApprovalsAndCancel(run *agentRun) {
 	if execCancel != nil {
 		execCancel()
 	}
-	run.cancel()
+	if !pending {
+		run.cancel()
+	}
 }
 
 // waitApprovals registers channels for each hold and blocks until all are decided.
