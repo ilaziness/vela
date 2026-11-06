@@ -1,7 +1,9 @@
 import { Box, Stack } from "@mui/material";
 import AddBoxIcon from "@mui/icons-material/AddBox";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import { useSSHTabsStore } from "../../stores/ssh";
+import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { genTabIndex } from "../../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../../func/aiSidebar";
 import { ShortcutAction } from "../../func/shortcuts";
@@ -19,6 +21,7 @@ export default function Header() {
   const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
+  const toggleSidebarOpen = useAIAssistantStore((s) => s.toggleSidebarOpen);
   const handleAddTab = useCallback(() => {
     const number = sshTabs.length + 1;
     pushTab({
@@ -44,8 +47,21 @@ export default function Header() {
         active: bookmarkConnectOpen,
         shortcutAction: ShortcutAction.PanelBookmarkConnect,
       },
+      {
+        id: "ai_assistant",
+        title: t("header.ai_assistant"),
+        icon: <AutoAwesomeIcon />,
+        onClick: () => toggleSidebarOpen(),
+        shortcutAction: ShortcutAction.PanelAI,
+      },
     ];
-  }, [lang, handleAddTab, toggleBookmarkConnect, bookmarkConnectOpen]);
+  }, [
+    lang,
+    handleAddTab,
+    toggleBookmarkConnect,
+    bookmarkConnectOpen,
+    toggleSidebarOpen,
+  ]);
 
   return (
     <Box
