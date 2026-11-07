@@ -14,9 +14,6 @@ func TestNewStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create storage: %v", err)
 	}
-	if storage == nil {
-		t.Fatal("storage should not be nil")
-	}
 	if storage.baseDir != tmpDir {
 		t.Errorf("expected baseDir %s, got %s", tmpDir, storage.baseDir)
 	}
@@ -30,11 +27,10 @@ func TestStorageSaveAndOpen(t *testing.T) {
 	}
 
 	userID := "test-user"
-	version := 1
+	name := "vela-backup-20261107T010203Z-abcd.zip"
 	data := []byte("test data content")
 
-	// 测试保存
-	filePath, size, err := storage.Save(userID, version, bytes.NewReader(data))
+	size, err := storage.Save(userID, name, bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to save file: %v", err)
 	}
@@ -42,14 +38,12 @@ func TestStorageSaveAndOpen(t *testing.T) {
 		t.Errorf("expected size %d, got %d", len(data), size)
 	}
 
-	// 验证文件存在
-	expectedPath := filepath.Join(tmpDir, userID, "v1.dat")
-	if filePath != expectedPath {
-		t.Errorf("expected path %s, got %s", expectedPath, filePath)
+	expectedPath := filepath.Join(tmpDir, userID, name)
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Fatalf("file missing: %v", err)
 	}
 
-	// 测试打开
-	reader, err := storage.Open(userID, version)
+	reader, err := storage.Open(userID, name)
 	if err != nil {
 		t.Fatalf("failed to open file: %v", err)
 	}
@@ -60,11 +54,22 @@ func TestStorageSaveAndOpen(t *testing.T) {
 		t.Fatalf("failed to read file: %v", err)
 	}
 	if !bytes.Equal(content, data) {
-		t.Errorf("content mismatch: expected %s, got %s", data, content)
+		t.Errorf("content mismatch")
 	}
 }
 
-func TestStorageDelete(t *testing.T) {
+func TestStorageRejectsBadName(t *testing.T) {
+	tmpDir := t.TempDir()
+	storage, err := NewStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create storage: %v", err)
+	}
+	if _, err := storage.Save("u", "payload.bin", bytes.NewReader([]byte("x"))); err == nil {
+		t.Fatal("expected reject")
+	}
+}
+
+func TestStorageDeleteAndList(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, err := NewStorage(tmpDir)
 	if err != nil {
@@ -72,24 +77,20 @@ func TestStorageDelete(t *testing.T) {
 	}
 
 	userID := "test-user"
-	version := 1
-	data := []byte("test data")
-
-	// 保存文件
-	_, _, err = storage.Save(userID, version, bytes.NewReader(data))
-	if err != nil {
+	name := "vela-backup-1.zip"
+	if _, err := storage.Save(userID, name, bytes.NewReader([]byte("test data"))); err != nil {
 		t.Fatalf("failed to save file: %v", err)
 	}
 
-	// 删除文件
-	err = storage.Delete(userID, version)
-	if err != nil {
-		t.Fatalf("failed to delete file: %v", err)
+	files, err := storage.List(userID)
+	if err != nil || len(files) != 1 || files[0].Name != name {
+		t.Fatalf("list=%v err=%v", files, err)
 	}
 
-	// 验证文件不存在
-	_, err = storage.Open(userID, version)
-	if err == nil {
+	if err := storage.Delete(userID, name); err != nil {
+		t.Fatalf("failed to delete file: %v", err)
+	}
+	if _, err := storage.Open(userID, name); err == nil {
 		t.Error("should not be able to open deleted file")
 	}
 }
@@ -102,25 +103,13 @@ func TestStorageDeleteUserDir(t *testing.T) {
 	}
 
 	userID := "test-user"
-	data := []byte("test data")
-
-	// 保存多个版本
-	for i := 1; i <= 3; i++ {
-		_, _, err = storage.Save(userID, i, bytes.NewReader(data))
-		if err != nil {
-			t.Fatalf("failed to save file: %v", err)
-		}
+	if _, err := storage.Save(userID, "a.zip", bytes.NewReader([]byte("a"))); err != nil {
+		t.Fatalf("failed to save file: %v", err)
 	}
-
-	// 删除用户目录
-	err = storage.DeleteUserDir(userID)
-	if err != nil {
+	if err := storage.DeleteUserDir(userID); err != nil {
 		t.Fatalf("failed to delete user dir: %v", err)
 	}
-
-	// 验证目录不存在
-	userDir := filepath.Join(tmpDir, userID)
-	if _, err := os.Stat(userDir); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmpDir, userID)); !os.IsNotExist(err) {
 		t.Error("user directory should be deleted")
 	}
 }

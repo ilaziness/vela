@@ -1,17 +1,17 @@
 # Vela Sync Backend
 
-Vela 数据同步服务端，用于存储和管理用户数据的多版本备份。
+Vela 数据同步服务端，用于存储用户上传的备份 zip。
 
 客户端把备份打成 zip（加密载荷 `payload.bin` + SHA-256 清单 `manifest.json`）后上传。服务端原样存储，不解密、不校验哈希。用户密钥仅用于 API 认证，库中保存 bcrypt 哈希。备份加密密钥由客户端主密码派生，不经过本服务。
 
 ## 功能特性
 
 - **多用户支持**: 每个用户通过 sync_id 隔离数据
-- **多版本管理**: 默认保留最多 500 个历史版本，支持版本恢复和删除
+- **原样存储**: 按客户端 zip 文件名保存，不改名、不分配版本号
 - **密文存储**: 服务端只存客户端上传的备份包，无法还原明文
 - **频率控制**: 上传间隔最少 1 分钟
 - **流式处理**: 支持大文件流式上传下载
-- **版本列表分页**: 支持 limit/offset 分页查询历史版本
+- **备份列表分页**: 支持 limit/offset 分页查询
 
 ## 快速开始
 
@@ -65,7 +65,7 @@ port = 8080
 
 [data]
 data_dir = "./data/files"
-max_versions = 500
+max_files = 500
 
 [data.database]
 type = "sqlite"
@@ -81,7 +81,7 @@ port = 8080
 
 [data]
 data_dir = "./data/files"
-max_versions = 500
+max_files = 500
 
 [data.database]
 type = "mysql"
@@ -99,7 +99,7 @@ name = "vela_sync"
 | `server.host` | "0.0.0.0" | HTTP 服务监听地址 |
 | `server.port` | 8080 | HTTP 服务监听端口 |
 | `data.data_dir` | "./data/files" | 数据文件存储目录 |
-| `data.max_versions` | 500 | 每个用户最大版本数 |
+| `data.max_files` | 500 | 每个用户最多保留的备份文件数 |
 | `data.database.type` | "sqlite" | 数据库类型: sqlite 或 mysql |
 | `data.database.db_path` | "./data/sync.db" | SQLite 数据库路径（SQLite 使用） |
 | `data.database.host` | "localhost" | MySQL 主机（MySQL 使用） |
@@ -137,10 +137,10 @@ GET /health
 }
 ```
 
-#### 上传数据
+#### 上传备份
 
 ```
-POST /upload
+POST /upload?name=<zip_filename>
 Headers:
   X-Sync-ID: <sync_id>
   X-User-Key: <user_key>
@@ -148,39 +148,33 @@ Headers:
 Body: <备份 zip 字节流>
 ```
 
-服务端不解析 zip 内容，按版本号存为 `data/files/<sync_id>/v<n>.dat`。
+服务端不解析 zip 内容，按 `name` 原样存为 `data/files/<sync_id>/<name>`。
 
 响应：
 
 ```json
 {
-  "version_number": 1,
+  "name": "vela-backup-20261107T010203Z-abcd.zip",
   "file_size": 1024,
-  "created_at": "2024-01-01T00:00:00Z"
+  "created_at": "2026-11-07T01:02:03Z"
 }
 ```
 
-#### 下载数据
+#### 下载备份
 
 ```
-GET /download?version=<version_number>
+GET /download?name=<zip_filename>
 Headers:
   X-Sync-ID: <sync_id>
   X-User-Key: <user_key>
 ```
 
-`version` 可省略，省略时下载最新版本。
-
 响应：备份包字节流（`Content-Type: application/octet-stream`）
 
-响应头：
-
-- `X-Version-Number`: 实际返回的版本号
-
-#### 获取版本列表
+#### 备份列表
 
 ```
-GET /versions?limit=<limit>&offset=<offset>
+GET /backups?limit=<limit>&offset=<offset>
 Headers:
   X-Sync-ID: <sync_id>
   X-User-Key: <user_key>
@@ -195,25 +189,20 @@ Headers:
 
 ```json
 {
-  "versions": [
+  "backups": [
     {
-      "version_number": 2,
+      "name": "vela-backup-20261107T010203Z-abcd.zip",
       "file_size": 2048,
-      "created_at": "2024-01-02T00:00:00Z"
-    },
-    {
-      "version_number": 1,
-      "file_size": 1024,
-      "created_at": "2024-01-01T00:00:00Z"
+      "created_at": "2026-11-07T01:02:03Z"
     }
   ]
 }
 ```
 
-#### 删除版本
+#### 删除备份
 
 ```
-DELETE /versions?version=<version_number>
+DELETE /backups?name=<zip_filename>
 Headers:
   X-Sync-ID: <sync_id>
   X-User-Key: <user_key>
@@ -223,7 +212,7 @@ Headers:
 
 ```json
 {
-  "message": "version deleted successfully"
+  "message": "backup deleted"
 }
 ```
 

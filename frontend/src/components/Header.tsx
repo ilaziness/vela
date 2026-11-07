@@ -31,6 +31,7 @@ import { useSSHTabsStore } from "../stores/ssh";
 import { useAIAssistantStore } from "../stores/aiAssistant";
 import { useUIStore } from "../stores/ui";
 import { genTabIndex } from "../func/service";
+import { isSyncConfigured } from "../func/sync";
 import { APP_HEADER_RAIL_WIDTH } from "../func/aiSidebar";
 import { ShortcutAction } from "../func/shortcuts";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -82,12 +83,7 @@ export default function Header() {
     if (backupDialogOpen) return;
     try {
       const config = await ReadConfig();
-      const syncConfig = config?.Sync;
-      if (
-        !syncConfig?.serverUrl ||
-        !syncConfig?.syncId ||
-        !syncConfig?.userKey
-      ) {
+      if (!isSyncConfigured(config?.Sync)) {
         errorMessage(t("header.sync_config_required"));
         return;
       }

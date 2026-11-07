@@ -18,17 +18,18 @@ import {
 } from "@mui/material";
 import CloudDownload from "@mui/icons-material/CloudDownload";
 import CloudUpload from "@mui/icons-material/CloudUpload";
-import {
-  DownloadSync,
-  GetSyncProgress,
-  ListSyncVersions,
-  UploadSync,
-} from "../../bindings/github.com/ilaziness/vela/services/syncservice";
+import { BackupInfo } from "../../bindings/github.com/ilaziness/vela/internal/sync/models";
 import {
   LogService,
   SyncProgress,
 } from "../../bindings/github.com/ilaziness/vela/services";
-import { formatDateTime, t, tf } from "../i18n";
+import {
+  DownloadSync,
+  GetSyncProgress,
+  ListBackups,
+  UploadSync,
+} from "../../bindings/github.com/ilaziness/vela/services/syncservice";
+import { formatDateTime, t } from "../i18n";
 import { formatFileSize, translateServiceError } from "../func/service";
 import { useMessageStore } from "../stores/message";
 
@@ -43,12 +44,6 @@ type Step =
 
 type BusyKind = "upload" | "download";
 
-interface VersionInfo {
-  version_number: number;
-  file_size: number;
-  created_at: string;
-}
-
 interface BackupRestoreDialogsProps {
   open: boolean;
   onClose: () => void;
@@ -62,8 +57,8 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
   const [step, setStep] = useState<Step>("closed");
   const [busyKind, setBusyKind] = useState<BusyKind>("upload");
   const [progress, setProgress] = useState<SyncProgress | null>(null);
-  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
-  const [restoreVersions, setRestoreVersions] = useState<VersionInfo[]>([]);
+  const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
+  const [restoreBackups, setRestoreBackups] = useState<BackupInfo[]>([]);
   const [restorePage, setRestorePage] = useState(0);
   const [restoreHasMore, setRestoreHasMore] = useState(true);
   const [restoreLoading, setRestoreLoading] = useState(false);
@@ -73,8 +68,8 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
       setStep("closed");
       setBusyKind("upload");
       setProgress(null);
-      setSelectedVersion(null);
-      setRestoreVersions([]);
+      setSelectedBackup(null);
+      setRestoreBackups([]);
       setRestorePage(0);
       setRestoreHasMore(true);
       setRestoreLoading(false);
@@ -111,24 +106,24 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
     onClose();
   };
 
-  const loadRestoreVersions = async (page: number) => {
+  const loadRestoreBackups = async (page: number) => {
     // Only block pagination overlap; page 0 must always be allowed to (re)load.
     if (page > 0 && restoreLoading) return;
     setRestoreLoading(true);
     try {
       const limit = 50;
-      const result = (await ListSyncVersions(limit, page * limit)) || [];
+      const result = (await ListBackups(limit, page * limit)) || [];
       if (page === 0) {
-        setRestoreVersions(result);
+        setRestoreBackups(result);
       } else {
-        setRestoreVersions((prev) => [...prev, ...result]);
+        setRestoreBackups((prev) => [...prev, ...result]);
       }
       setRestoreHasMore(result.length === limit);
       setRestorePage(page);
     } catch (error) {
-      LogService.Error("Failed to load restore versions: " + String(error));
+      LogService.Error("Failed to load backups: " + String(error));
       errorMessage(
-        t("settings.sync.load_versions_failed", translateServiceError(error)),
+        t("settings.sync.load_backups_failed", translateServiceError(error)),
       );
     } finally {
       setRestoreLoading(false);
@@ -136,12 +131,12 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
   };
 
   const openRestoreList = () => {
-    setSelectedVersion(null);
-    setRestoreVersions([]);
+    setSelectedBackup(null);
+    setRestoreBackups([]);
     setRestorePage(0);
     setRestoreHasMore(true);
     setStep("restoreList");
-    void loadRestoreVersions(0);
+    void loadRestoreBackups(0);
   };
 
   const handleRestoreScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -151,7 +146,7 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
       restoreHasMore &&
       !restoreLoading
     ) {
-      void loadRestoreVersions(restorePage + 1);
+      void loadRestoreBackups(restorePage + 1);
     }
   };
 
@@ -171,15 +166,15 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
   };
 
   const runDownload = async () => {
-    if (selectedVersion == null) {
-      errorMessage(t("settings.sync.pick_version"));
+    if (selectedBackup == null) {
+      errorMessage(t("settings.sync.pick_backup"));
       return;
     }
     setBusyKind("download");
     setStep("busy");
     setProgress(null);
     try {
-      await DownloadSync(selectedVersion);
+      await DownloadSync(selectedBackup);
       setStep("restart");
     } catch (error) {
       LogService.Error("Download failed: " + String(error));
@@ -256,11 +251,11 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
         <DialogTitle>{t("settings.sync.restore_dialog_title")}</DialogTitle>
         <DialogContent>
           <Typography gutterBottom>
-            {t("settings.sync.restore_pick_version")}
+            {t("settings.sync.restore_pick_backup")}
           </Typography>
-          {restoreVersions.length === 0 && !restoreLoading ? (
+          {restoreBackups.length === 0 && !restoreLoading ? (
             <Typography color="text.secondary">
-              {t("settings.sync.no_versions")}
+              {t("settings.sync.no_backups")}
             </Typography>
           ) : (
             <Box
@@ -268,19 +263,16 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
               onScroll={handleRestoreScroll}
             >
               <List>
-                {restoreVersions.map((version) => (
+                {restoreBackups.map((backup) => (
                   <ListItemButton
-                    key={version.version_number}
-                    selected={selectedVersion === version.version_number}
-                    onClick={() => setSelectedVersion(version.version_number)}
+                    key={backup.name}
+                    selected={selectedBackup === backup.name}
+                    onClick={() => setSelectedBackup(backup.name)}
                   >
                     <ListItemText
-                      primary={tf(
-                        "settings.sync.version_n",
-                        version.version_number,
-                      )}
-                      secondary={`${formatFileSize(version.file_size)} • ${formatDateTime(
-                        version.created_at,
+                      primary={backup.name}
+                      secondary={`${formatFileSize(backup.file_size)} • ${formatDateTime(
+                        backup.created_at,
                       )}`}
                     />
                   </ListItemButton>
@@ -291,13 +283,13 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
                   <CircularProgress size={24} />
                 </Box>
               )}
-              {!restoreHasMore && restoreVersions.length > 0 && (
+              {!restoreHasMore && restoreBackups.length > 0 && (
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   sx={{ display: "block", textAlign: "center", py: 1 }}
                 >
-                  {t("settings.sync.all_versions_loaded")}
+                  {t("settings.sync.all_backups_loaded")}
                 </Typography>
               )}
             </Box>
@@ -308,7 +300,7 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
           <Button
             variant="contained"
             onClick={() => setStep("confirmOverwrite")}
-            disabled={selectedVersion == null}
+            disabled={selectedBackup == null}
             startIcon={<CloudDownload />}
           >
             {t("settings.sync.restore")}
@@ -327,9 +319,9 @@ const BackupRestoreDialogs: React.FC<BackupRestoreDialogsProps> = ({
           <Alert severity="warning" sx={{ mb: 1 }}>
             {t("header.confirm_restore_message")}
           </Alert>
-          {selectedVersion != null && (
+          {selectedBackup != null && (
             <Typography variant="body2" color="text.secondary">
-              {tf("settings.sync.version_n", selectedVersion)}
+              {selectedBackup}
             </Typography>
           )}
         </DialogContent>

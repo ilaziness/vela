@@ -52,7 +52,7 @@ A modern, cross-platform SSH & SFTP AI GUI built with Go and Wails v3.
 - Command library: snippets sent to multiple sessions in one click
 - Languages: English, Simplified Chinese, Traditional Chinese
 - Themes: light, dark, eye-care
-- Encrypted remote backup and restore across devices, with version history
+- Encrypted remote backup and restore across devices. Backups are encrypted on your computer before upload, and you can list, restore, or delete them anytime. Store them on your own backup server, a WebDAV drive (Nutstore, Nextcloud, NAS, and similar), or S3-compatible storage (MinIO, Cloudflare R2, Aliyun OSS, Tencent COS, and similar)
 - Automatic update check, download, and install
 - AI assistant: diagnose issues and run commands (with approval), plus remote exec, local filesystem tools (directory allowlist), web search, and custom MCP / Skill extensions
 

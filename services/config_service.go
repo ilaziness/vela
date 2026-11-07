@@ -143,9 +143,96 @@ func (cs *ConfigService) GetSyncConfig() *internalsync.SyncConfig {
 	return &cs.current().Sync
 }
 
-func (cs *ConfigService) SaveSyncConfig(syncConfig internalsync.SyncConfig) error {
-	cs.current().Sync = syncConfig
+func (cs *ConfigService) SaveSyncConfig(incoming internalsync.SyncConfig) error {
+	prev := cs.current().Sync
+	cfg := incoming
+
+	switch cfg.Provider {
+	case internalsync.ProviderSelfHosted:
+		enc, err := cs.encryptOrKeepSecret(
+			cfg.SelfHosted.UserKey,
+			cfg.SelfHosted.UserKeyEncrypted,
+			prev.SelfHosted.UserKeyEncrypted,
+			i18n.T("password.encrypt_sync"),
+		)
+		if err != nil {
+			return err
+		}
+		cfg.SelfHosted.UserKey = ""
+		cfg.SelfHosted.UserKeyEncrypted = enc
+	case internalsync.ProviderWebDAV:
+		enc, err := cs.encryptOrKeepSecret(
+			cfg.WebDAV.Password,
+			cfg.WebDAV.PasswordEncrypted,
+			prev.WebDAV.PasswordEncrypted,
+			i18n.T("password.encrypt_sync"),
+		)
+		if err != nil {
+			return err
+		}
+		cfg.WebDAV.Password = ""
+		cfg.WebDAV.PasswordEncrypted = enc
+	case internalsync.ProviderS3:
+		enc, err := cs.encryptOrKeepSecret(
+			cfg.S3.SecretKey,
+			cfg.S3.SecretKeyEncrypted,
+			prev.S3.SecretKeyEncrypted,
+			i18n.T("password.encrypt_sync"),
+		)
+		if err != nil {
+			return err
+		}
+		cfg.S3.SecretKey = ""
+		cfg.S3.SecretKeyEncrypted = enc
+	}
+
+	cs.current().Sync = cfg
 	return cs.store.Save()
+}
+
+// encryptOrKeepSecret encrypts plaintext when present; otherwise keeps previous ciphertext.
+// Incoming encrypted (from UI round-trip) wins over previous when plaintext is empty.
+func (cs *ConfigService) encryptOrKeepSecret(plain, incomingEnc, previousEnc, reason string) (string, error) {
+	plain = strings.TrimSpace(plain)
+	if plain != "" {
+		return cs.encryptValue(plain, reason)
+	}
+	if strings.TrimSpace(incomingEnc) != "" {
+		return strings.TrimSpace(incomingEnc), nil
+	}
+	return strings.TrimSpace(previousEnc), nil
+}
+
+// decryptSyncConfig returns a copy of cfg with provider secrets decrypted into plaintext fields.
+func (cs *ConfigService) decryptSyncConfig(cfg internalsync.SyncConfig) (internalsync.SyncConfig, error) {
+	out := cfg
+	switch out.Provider {
+	case internalsync.ProviderSelfHosted:
+		if strings.TrimSpace(out.SelfHosted.UserKey) == "" && strings.TrimSpace(out.SelfHosted.UserKeyEncrypted) != "" {
+			plain, err := cs.decryptValue(out.SelfHosted.UserKeyEncrypted, i18n.T("password.decrypt_sync"))
+			if err != nil {
+				return out, err
+			}
+			out.SelfHosted.UserKey = plain
+		}
+	case internalsync.ProviderWebDAV:
+		if strings.TrimSpace(out.WebDAV.Password) == "" && strings.TrimSpace(out.WebDAV.PasswordEncrypted) != "" {
+			plain, err := cs.decryptValue(out.WebDAV.PasswordEncrypted, i18n.T("password.decrypt_sync"))
+			if err != nil {
+				return out, err
+			}
+			out.WebDAV.Password = plain
+		}
+	case internalsync.ProviderS3:
+		if strings.TrimSpace(out.S3.SecretKey) == "" && strings.TrimSpace(out.S3.SecretKeyEncrypted) != "" {
+			plain, err := cs.decryptValue(out.S3.SecretKeyEncrypted, i18n.T("password.decrypt_sync"))
+			if err != nil {
+				return out, err
+			}
+			out.S3.SecretKey = plain
+		}
+	}
+	return out, nil
 }
 
 func (cs *ConfigService) SaveGeneralConfig(generalConfig GeneralConfig) error {

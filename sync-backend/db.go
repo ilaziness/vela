@@ -43,7 +43,7 @@ func NewDB(config Database) (*DB, error) {
 
 // Migrate 执行数据库迁移
 func (db *DB) Migrate() error {
-	return db.AutoMigrate(&User{}, &SyncVersion{})
+	return db.AutoMigrate(&User{})
 }
 
 // Close 关闭数据库连接

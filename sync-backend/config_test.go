@@ -17,8 +17,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected port 8080, got %d", config.Server.Port)
 	}
 
-	if config.Data.MaxVersions != 5 {
-		t.Errorf("expected max_versions 5, got %d", config.Data.MaxVersions)
+	if config.Data.MaxFiles != 500 {
+		t.Errorf("expected max_files 500, got %d", config.Data.MaxFiles)
 	}
 }
 
@@ -57,8 +57,8 @@ func TestSaveConfig(t *testing.T) {
 				Type:   "sqlite",
 				DBPath: "./test.db",
 			},
-			DataDir:     "./test_files",
-			MaxVersions: 3,
+			DataDir:  "./test_files",
+			MaxFiles: 3,
 		},
 	}
 
@@ -77,7 +77,7 @@ func TestSaveConfig(t *testing.T) {
 		t.Errorf("expected port 9090, got %d", loaded.Server.Port)
 	}
 
-	if loaded.Data.MaxVersions != 3 {
-		t.Errorf("expected max_versions 3, got %d", loaded.Data.MaxVersions)
+	if loaded.Data.MaxFiles != 3 {
+		t.Errorf("expected max_files 3, got %d", loaded.Data.MaxFiles)
 	}
 }

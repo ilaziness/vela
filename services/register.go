@@ -175,6 +175,12 @@ func vaultHasEncryptedSecrets(cfgStore *config.Store, db *database.Database) boo
 		if strings.TrimSpace(aiCfg.APIKeyEncrypted) != "" || strings.TrimSpace(aiCfg.WebSearch.APIKeyEncrypted) != "" {
 			return true
 		}
+		syncCfg := cfgStore.Config.Sync
+		if strings.TrimSpace(syncCfg.SelfHosted.UserKeyEncrypted) != "" ||
+			strings.TrimSpace(syncCfg.WebDAV.PasswordEncrypted) != "" ||
+			strings.TrimSpace(syncCfg.S3.SecretKeyEncrypted) != "" {
+			return true
+		}
 	}
 	if db == nil {
 		return false
@@ -216,6 +222,12 @@ func vaultProbePassword(cfgStore *config.Store, db *database.Database, password 
 	if cfgStore != nil && cfgStore.Config != nil {
 		aiCfg := cfgStore.Config.AI
 		if try(aiCfg.APIKeyEncrypted) || try(aiCfg.WebSearch.APIKeyEncrypted) {
+			return true
+		}
+		syncCfg := cfgStore.Config.Sync
+		if try(syncCfg.SelfHosted.UserKeyEncrypted) ||
+			try(syncCfg.WebDAV.PasswordEncrypted) ||
+			try(syncCfg.S3.SecretKeyEncrypted) {
 			return true
 		}
 	}

@@ -44,10 +44,26 @@ func (s *SyncService) GetSyncProgress() SyncProgress {
 	return s.progress.GetProgress()
 }
 
+func (s *SyncService) openManager() (*internalsync.SyncManager, error) {
+	cfg := s.configService.GetSyncConfig()
+	if !cfg.IsConfigured() {
+		return nil, ErrSyncNotConfigured
+	}
+	plain, err := s.configService.decryptSyncConfig(*cfg)
+	if err != nil {
+		return nil, err
+	}
+	st, err := internalsync.OpenStore(&plain)
+	if err != nil {
+		return nil, err
+	}
+	return internalsync.NewSyncManager(st), nil
+}
+
 func (s *SyncService) UploadSync() error {
-	config := s.configService.GetSyncConfig()
-	if !config.IsConfigured() {
-		return ErrSyncNotConfigured
+	manager, err := s.openManager()
+	if err != nil {
+		return err
 	}
 	password, err := s.configService.unlockedPassword()
 	if err != nil {
@@ -55,7 +71,6 @@ func (s *SyncService) UploadSync() error {
 	}
 	s.progress.Reset()
 	s.progress.UpdateProgress("preparing", 0, 0)
-	manager := internalsync.NewSyncManager(config)
 	err = s.uploadWithRetry(manager, s.configService.userDataDir(), password, 3)
 	if err != nil {
 		s.progress.SetError(err.Error())
@@ -83,10 +98,10 @@ func (s *SyncService) uploadWithRetry(manager *internalsync.SyncManager, userDat
 	return usererr.Coded("sync.upload_failed", "Upload failed after %d attempts: %s", strconv.Itoa(maxRetries), lastErr.Error())
 }
 
-func (s *SyncService) DownloadSync(version int) error {
-	config := s.configService.GetSyncConfig()
-	if !config.IsConfigured() {
-		return ErrSyncNotConfigured
+func (s *SyncService) DownloadSync(name string) error {
+	manager, err := s.openManager()
+	if err != nil {
+		return err
 	}
 	password, err := s.configService.unlockedPassword()
 	if err != nil {
@@ -94,8 +109,7 @@ func (s *SyncService) DownloadSync(version int) error {
 	}
 	s.progress.Reset()
 	s.progress.UpdateProgress("preparing", 0, 0)
-	manager := internalsync.NewSyncManager(config)
-	err = s.downloadWithRetry(manager, s.configService.userDataDir(), version, password, 3)
+	err = s.downloadWithRetry(manager, s.configService.userDataDir(), name, password, 3)
 	if err != nil {
 		s.progress.SetError(err.Error())
 		return usererr.Coded("sync.restore_failed", "Data restore failed; please restart the app manually")
@@ -104,7 +118,7 @@ func (s *SyncService) DownloadSync(version int) error {
 	return nil
 }
 
-func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userDataDir string, version int, password string, maxRetries int) error {
+func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userDataDir, name, password string, maxRetries int) error {
 	var lastErr error
 	attempts := 0
 	for i := 0; i < maxRetries; i++ {
@@ -114,7 +128,7 @@ func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userD
 		}
 		s.progress.SetStage("downloading")
 		attempts = i + 1
-		err := manager.Download(userDataDir, version, s.db, password)
+		err := manager.Download(userDataDir, name, password, s.db)
 		if err == nil {
 			return nil
 		}
@@ -127,26 +141,26 @@ func (s *SyncService) downloadWithRetry(manager *internalsync.SyncManager, userD
 	return usererr.Coded("sync.download_failed", "Download failed after %d attempts: %s", strconv.Itoa(attempts), lastErr.Error())
 }
 
-func (s *SyncService) ListSyncVersions(limit, offset int) ([]internalsync.VersionInfo, error) {
-	config := s.configService.GetSyncConfig()
-	if !config.IsConfigured() {
-		return nil, ErrSyncNotConfigured
+func (s *SyncService) ListBackups(limit, offset int) ([]internalsync.BackupInfo, error) {
+	manager, err := s.openManager()
+	if err != nil {
+		return nil, err
 	}
-	return internalsync.NewSyncManager(config).ListVersions(limit, offset)
+	return manager.ListBackups(limit, offset)
 }
 
-func (s *SyncService) DeleteSyncVersion(version int) error {
-	config := s.configService.GetSyncConfig()
-	if !config.IsConfigured() {
-		return ErrSyncNotConfigured
+func (s *SyncService) DeleteBackup(name string) error {
+	manager, err := s.openManager()
+	if err != nil {
+		return err
 	}
-	return internalsync.NewSyncManager(config).DeleteVersion(version)
+	return manager.DeleteBackup(name)
 }
 
 func (s *SyncService) HealthCheck() error {
-	config := s.configService.GetSyncConfig()
-	if !config.IsConfigured() {
-		return ErrSyncNotConfigured
+	manager, err := s.openManager()
+	if err != nil {
+		return err
 	}
-	return internalsync.NewSyncManager(config).HealthCheck()
+	return manager.HealthCheck()
 }

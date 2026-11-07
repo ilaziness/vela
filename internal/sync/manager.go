@@ -1,36 +1,32 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/sync/store"
 )
 
-// SyncManager 同步管理器
+// BackupInfo is re-exported for RPC bindings.
+type BackupInfo = store.BackupInfo
+
+// SyncManager orchestrates pack/encrypt and transport.
 type SyncManager struct {
-	config *SyncConfig
-	client *Client
+	store store.Store
 }
 
-// NewSyncManager 创建同步管理器
-func NewSyncManager(config *SyncConfig) *SyncManager {
-	return &SyncManager{
-		config: config,
-		client: NewClient(config),
-	}
-}
-
-// IsConfigured 检查是否已配置
-func (sm *SyncManager) IsConfigured() bool {
-	return sm.config.IsConfigured()
+// NewSyncManager creates a manager with an already-opened store.
+func NewSyncManager(st store.Store) *SyncManager {
+	return &SyncManager{store: st}
 }
 
 // Upload packs, encrypts with password, wraps payload+manifest in a zip, then uploads.
 func (sm *SyncManager) Upload(srcDir, password string) error {
-	if !sm.IsConfigured() {
+	if sm.store == nil {
 		return fmt.Errorf("sync not configured")
 	}
 	if password == "" {
@@ -74,19 +70,22 @@ func (sm *SyncManager) Upload(srcDir, password string) error {
 		return fmt.Errorf("failed to create backup zip: %w", err)
 	}
 
+	zipInfo, err := os.Stat(zipPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat backup zip: %w", err)
+	}
 	zipFile, err := os.Open(zipPath)
 	if err != nil {
 		return fmt.Errorf("failed to open backup zip: %w", err)
 	}
 	defer zipFile.Close()
 
-	if _, err := sm.client.Upload(zipFile); err != nil {
+	if _, err := sm.store.Upload(context.Background(), zipName, zipFile, zipInfo.Size()); err != nil {
 		return fmt.Errorf("failed to upload: %w", err)
 	}
 	return nil
 }
 
-// copyDir 递归复制目录内容
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -139,15 +138,15 @@ func restoreBackup(backupDir, dstDir string) error {
 }
 
 // Download downloads a backup zip, verifies the payload hash, then decrypts over local data.
-func (sm *SyncManager) Download(dstDir string, version int, db *database.Database, password string) error {
-	if !sm.IsConfigured() {
+func (sm *SyncManager) Download(dstDir, name, password string, db *database.Database) error {
+	if sm.store == nil {
 		return fmt.Errorf("sync not configured")
 	}
 	if password == "" {
 		return fmt.Errorf("password required")
 	}
 
-	reader, err := sm.client.Download(version)
+	reader, err := sm.store.Download(context.Background(), name)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
@@ -236,29 +235,26 @@ func (sm *SyncManager) Download(dstDir string, version int, db *database.Databas
 	return nil
 }
 
-// ListVersions 获取版本列表（支持分页，limit=0表示不分页）
-func (sm *SyncManager) ListVersions(limit, offset int) ([]VersionInfo, error) {
-	if !sm.IsConfigured() {
+// ListBackups returns stored backup zips (limit=0 means no limit).
+func (sm *SyncManager) ListBackups(limit, offset int) ([]BackupInfo, error) {
+	if sm.store == nil {
 		return nil, fmt.Errorf("sync not configured")
 	}
-
-	return sm.client.ListVersions(limit, offset)
+	return sm.store.ListBackups(context.Background(), limit, offset)
 }
 
-// DeleteVersion 删除指定版本
-func (sm *SyncManager) DeleteVersion(version int) error {
-	if !sm.IsConfigured() {
+// DeleteBackup deletes a backup zip by name.
+func (sm *SyncManager) DeleteBackup(name string) error {
+	if sm.store == nil {
 		return fmt.Errorf("sync not configured")
 	}
-
-	return sm.client.DeleteVersion(version)
+	return sm.store.DeleteBackup(context.Background(), name)
 }
 
-// HealthCheck 健康检查
+// HealthCheck probes the active store.
 func (sm *SyncManager) HealthCheck() error {
-	if !sm.IsConfigured() {
+	if sm.store == nil {
 		return fmt.Errorf("sync not configured")
 	}
-
-	return sm.client.HealthCheck()
+	return sm.store.HealthCheck(context.Background())
 }

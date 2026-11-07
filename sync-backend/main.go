@@ -148,7 +148,7 @@ func (c *GenUserCommand) initializeService(configPath string) (*SyncService, err
 		return nil, fmt.Errorf("failed to create storage: %w", err)
 	}
 
-	return NewSyncService(db, storage, config.Data.MaxVersions), nil
+	return NewSyncService(db, storage, config.Data.MaxFiles), nil
 }
 
 func (c *GenUserCommand) printUserCredentials(syncID, userKey string) {
@@ -174,7 +174,7 @@ type Application struct {
 
 // NewApplication 创建应用程序
 func NewApplication(config *ServerConfig, db *DB, storage *Storage) *Application {
-	service := NewSyncService(db, storage, config.Data.MaxVersions)
+	service := NewSyncService(db, storage, config.Data.MaxFiles)
 	rateLimiter := DefaultRateLimiter(service)
 	handler := NewHandler(service, rateLimiter)
 	server := NewHTTPServer(config, handler.Routes())

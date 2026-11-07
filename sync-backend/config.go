@@ -33,9 +33,9 @@ type Database struct {
 
 // Data 数据存储配置
 type Data struct {
-	Database    Database `toml:"database"`     // 数据库配置
-	DataDir     string   `toml:"data_dir"`     // 数据文件存储目录
-	MaxVersions int      `toml:"max_versions"` // 每个用户最大版本数
+	Database Database `toml:"database"`  // 数据库配置
+	DataDir  string   `toml:"data_dir"`  // 数据文件存储目录
+	MaxFiles int      `toml:"max_files"` // 每个用户最多保留的备份文件数
 }
 
 // DefaultConfig 返回默认配置
@@ -50,8 +50,8 @@ func DefaultConfig() *ServerConfig {
 				Type:   "sqlite",
 				DBPath: "./data/sync.db",
 			},
-			DataDir:     "./data/files",
-			MaxVersions: 500,
+			DataDir:  "./data/files",
+			MaxFiles: 500,
 		},
 	}
 }

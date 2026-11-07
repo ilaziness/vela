@@ -58,8 +58,9 @@ const Setting: React.FC = () => {
     if (!config) return;
     try {
       await ConfigService.SaveSyncConfig(syncConfig);
+      const saved = await ConfigService.ReadConfig();
       setConfig((prev) =>
-        prev ? { ...prev, Sync: { ...prev.Sync, ...syncConfig } } : prev,
+        prev && saved ? { ...prev, Sync: saved.Sync } : prev,
       );
       successMessage(t("settings.sync.save_success"));
     } catch (error) {
