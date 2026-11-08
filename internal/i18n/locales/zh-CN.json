@@ -13,6 +13,8 @@
   "ai.chat.open_file": "用系统默认应用打开 %s",
   "ai.chat.placeholder": "输入消息…（Enter 发送，Shift+Enter 换行）",
   "ai.chat.preview_image": "预览 %s",
+  "ai.chat.screenshot": "截取终端",
+  "ai.chat.screenshot_unavailable": "无法截取当前终端。",
   "ai.chat.session_not_ready": "会话未就绪",
   "ai.chat.state.awaiting_approval": "等待批准",
   "ai.chat.state.denied": "已拒绝",

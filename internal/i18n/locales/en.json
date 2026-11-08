@@ -13,6 +13,8 @@
   "ai.chat.open_file": "Open %s with default app",
   "ai.chat.placeholder": "Type a message… (Enter to send, Shift+Enter for a new line)",
   "ai.chat.preview_image": "Preview %s",
+  "ai.chat.screenshot": "Capture terminal",
+  "ai.chat.screenshot_unavailable": "Cannot capture the current terminal.",
   "ai.chat.session_not_ready": "Session is not ready",
   "ai.chat.state.awaiting_approval": "Awaiting approval",
   "ai.chat.state.denied": "Denied",

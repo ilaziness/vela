@@ -494,10 +494,11 @@ function Terminal(props: {
     term.current?.loadAddon(new mods.ClipboardAddon());
 
     if (isWebgl2Supported()) {
-      const webglAddon = new mods.WebglAddon();
+      const webglAddon = new mods.WebglAddon(true);
       webglAddon.onContextLoss(() => {
-        console.warn("WebGL context lost. Falling back to DOM rendering.");
+        LogService.Warn("WebGL context lost. Falling back to DOM rendering.");
         webglAddon.dispose();
+        webglRef.current = null;
       });
       webglRef.current = webglAddon;
       term.current?.loadAddon(webglAddon);

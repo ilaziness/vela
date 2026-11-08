@@ -13,6 +13,8 @@
   "ai.chat.open_file": "用系統預設應用程式開啟 %s",
   "ai.chat.placeholder": "輸入訊息…（Enter 傳送，Shift+Enter 換行）",
   "ai.chat.preview_image": "預覽 %s",
+  "ai.chat.screenshot": "擷取終端",
+  "ai.chat.screenshot_unavailable": "無法擷取目前終端。",
   "ai.chat.session_not_ready": "工作階段未就緒",
   "ai.chat.state.awaiting_approval": "等待核准",
   "ai.chat.state.denied": "已拒絕",
