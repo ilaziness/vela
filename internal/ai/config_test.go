@@ -99,6 +99,28 @@ func TestBuildGenConfigOpenAICompatibleSkipsReasoningEffort(t *testing.T) {
 	if !got.MaxTokens.Valid() || got.MaxTokens.Or(0) != 512 {
 		t.Fatalf("MaxTokens=%#v", got.MaxTokens)
 	}
+	if got.Temperature.Valid() {
+		t.Fatalf("Temperature=0 should be unset for provider default, got %#v", got.Temperature)
+	}
+}
+
+func TestBuildGenConfigTemperatureZeroOmitsParam(t *testing.T) {
+	t.Parallel()
+
+	openaiCfg := (&Config{Provider: ProviderOpenAI, Model: "gpt-4o"}).buildGenConfig().(*openai.ChatCompletionNewParams)
+	if openaiCfg.Temperature.Valid() {
+		t.Fatalf("OpenAI Temperature should be unset, got %#v", openaiCfg.Temperature)
+	}
+
+	ollamaCfg := (&Config{Provider: ProviderOllama, Model: "llama3.2"}).buildGenConfig().(*ollama.GenerateContentConfig)
+	if ollamaCfg.Temperature != nil {
+		t.Fatalf("Ollama Temperature should be unset, got %#v", ollamaCfg.Temperature)
+	}
+
+	googleCfg := (&Config{Provider: ProviderGoogle, Model: "gemini-2.0-flash"}).buildGenConfig().(*genai.GenerateContentConfig)
+	if googleCfg.Temperature != nil {
+		t.Fatalf("Google Temperature should be unset, got %#v", googleCfg.Temperature)
+	}
 }
 
 func TestBuildGenConfigOpenAICompatibleReasoningUsesMaxCompletionTokens(t *testing.T) {

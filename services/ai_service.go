@@ -281,7 +281,7 @@ func (s *AIService) saveConfig(cfg AIConfig, reset bool) error {
 func (s *AIService) ResetConfig() error {
 	return s.saveConfig(AIConfig{
 		Enabled: false, Provider: ai.ProviderOllama, Model: "llama3.2",
-		Endpoint: "http://localhost:11434", Temperature: 0.7, MaxTokens: 2048,
+		Endpoint: "http://localhost:11434", Temperature: 0, MaxTokens: 2048,
 		EchoSSHCommands: false, MaxAgentTurns: ai.DefaultMaxAgentTurns,
 		Filesystem: ai.FileSystemConfig{AllowedDirs: nil},
 		WebSearch:  ai.WebSearchConfig{},

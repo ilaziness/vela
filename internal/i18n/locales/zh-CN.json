@@ -440,6 +440,8 @@
   "settings.ai.skills_empty": "尚未安装技能",
   "settings.ai.tab_general": "常规",
   "settings.ai.tab_tools": "工具",
+  "settings.ai.temperature": "Temperature",
+  "settings.ai.temperature_help": "0 表示使用服务商默认值",
   "settings.ai.title": "AI助手",
   "settings.ai.unavailable": "不可用",
   "settings.general.font": "字体",

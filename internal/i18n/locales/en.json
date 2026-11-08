@@ -440,6 +440,8 @@
   "settings.ai.skills_empty": "No skills installed",
   "settings.ai.tab_general": "General",
   "settings.ai.tab_tools": "Tools",
+  "settings.ai.temperature": "Temperature",
+  "settings.ai.temperature_help": "0 means the provider default",
   "settings.ai.title": "AI Assistant",
   "settings.ai.unavailable": "Unavailable",
   "settings.general.font": "Font",

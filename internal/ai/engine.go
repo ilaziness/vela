@@ -47,7 +47,7 @@ func NewAIEngine(logger *zap.Logger) *AIEngine {
 			Provider:      ProviderOllama,
 			Model:         "llama3.2",
 			Endpoint:      "http://localhost:11434",
-			Temperature:   0.7,
+			Temperature:   0,
 			MaxTokens:     2048,
 			MaxAgentTurns: DefaultMaxAgentTurns,
 		},

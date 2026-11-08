@@ -13,6 +13,7 @@ import {
   Switch,
   FormControlLabel,
   Slider,
+  FormHelperText,
   Divider,
   Alert,
   CircularProgress,
@@ -323,7 +324,7 @@ const AISettings: React.FC = () => {
                   </FormRow>
                 )}
 
-                <FormRow label="Temperature">
+                <FormRow label={t("settings.ai.temperature")}>
                   <Box sx={{ width: "100%", px: 1 }}>
                     <Slider
                       value={config.temperature}
@@ -340,6 +341,9 @@ const AISettings: React.FC = () => {
                       ]}
                       valueLabelDisplay="auto"
                     />
+                    <FormHelperText>
+                      {t("settings.ai.temperature_help")}
+                    </FormHelperText>
                   </Box>
                 </FormRow>
 

@@ -64,7 +64,7 @@ const defaultConfig: AIConfig = {
   provider: Provider.ProviderOllama,
   model: 'llama3.2',
   endpoint: 'http://localhost:11434',
-  temperature: 0.7,
+  temperature: 0,
   max_tokens: 2048,
   echo_ssh_commands: false,
   max_agent_turns: 50,

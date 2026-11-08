@@ -10,10 +10,6 @@ import (
 	"github.com/ilaziness/vela/internal/ai/tool"
 )
 
-var (
-	defaultTemperature = 0.5
-)
-
 const (
 	// DefaultMaxAgentTurns 单次请求中模型↔工具交互的最大轮次，超出后终止生成。
 	DefaultMaxAgentTurns = 50
@@ -117,9 +113,9 @@ func (c *Config) buildGenConfig() any {
 	switch c.Provider {
 	case ProviderOllama:
 		cfg := &ollama.GenerateContentConfig{
-			Think:       ollamaThinkOption(c.Model),
-			Temperature: &defaultTemperature,
+			Think: ollamaThinkOption(c.Model),
 		}
+		// Temperature/MaxTokens 为 0 时不传，使用服务商默认值。
 		if c.Temperature > 0 {
 			cfg.Temperature = new(c.Temperature)
 		}
@@ -141,7 +137,6 @@ func (c *Config) buildGenConfig() any {
 			}
 			return cfg
 		}
-		cfg.Temperature = openai.Float(defaultTemperature)
 		if c.Temperature > 0 {
 			cfg.Temperature = openai.Float(c.Temperature)
 		}
@@ -150,9 +145,7 @@ func (c *Config) buildGenConfig() any {
 		}
 		return cfg
 	case ProviderGoogle:
-		cfg := &genai.GenerateContentConfig{
-			Temperature: genai.Ptr(float32(0.5)),
-		}
+		cfg := &genai.GenerateContentConfig{}
 		if isGoogleThinkingModel(c.Model) {
 			cfg.ThinkingConfig = &genai.ThinkingConfig{
 				IncludeThoughts: true,
