@@ -289,6 +289,7 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     }
   };
 
+  // OSC cwd from the SSH PTY (eventTerminalCwd / TerminalCwd). No report → stay on SFTP GetWd.
   const followTerminalCwd = useEffectEvent(async (path: string) => {
     if (!path) return;
     if (!remoteReadyRef.current) {

@@ -74,25 +74,3 @@ func TestDefaultTermType(t *testing.T) {
 		t.Fatal(defaultTermType)
 	}
 }
-
-func TestFilterEchoSuppress(t *testing.T) {
-	sc := &Session{}
-	sc.beginEchoSuppress(time.Second)
-	if got := sc.filterEchoSuppress([]byte("export VTE_VERSION=1")); got != nil {
-		t.Fatalf("expected drop before newline, got %q", got)
-	}
-	if got := sc.filterEchoSuppress([]byte("rest\nprompt$ ")); string(got) != "prompt$ " {
-		t.Fatalf("got %q", got)
-	}
-	if got := sc.filterEchoSuppress([]byte("visible")); string(got) != "visible" {
-		t.Fatalf("suppress should be off, got %q", got)
-	}
-}
-
-func TestFilterEchoSuppressTimeout(t *testing.T) {
-	sc := &Session{}
-	sc.beginEchoSuppress(-time.Millisecond) // already expired
-	if got := sc.filterEchoSuppress([]byte("keep")); string(got) != "keep" {
-		t.Fatalf("%q", got)
-	}
-}

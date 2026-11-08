@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -134,22 +133,5 @@ func TestCwdParserLastWins(t *testing.T) {
 	data := []byte("\x1b]7;file:///a\x07\x1b]7;file:///b\x07")
 	if got := p.Feed(data); got != "/b" {
 		t.Fatal(got)
-	}
-}
-
-func TestBuildCwdInjectLine(t *testing.T) {
-	s := buildCwdInjectLine()
-	for _, needle := range []string{
-		"VTE_VERSION=" + vteVersionValue,
-		"PROMPT_COMMAND=",
-		`\033]7;file://`,
-		`${PROMPT_COMMAND:+;$PROMPT_COMMAND}`,
-	} {
-		if !strings.Contains(s, needle) {
-			t.Fatalf("missing %q in %q", needle, s)
-		}
-	}
-	if strings.Contains(s, `"${SHELL:-bash}"`) {
-		t.Fatalf("should not exec a shell: %q", s)
 	}
 }

@@ -130,6 +130,7 @@ func NewSSHService(app *application.App, mgr *ssh.Manager, sftpMgr *sftp.Manager
 	return s
 }
 
+// onTerminalCwd forwards OSC cwd from the SSH PTY to the SFTP pane. No path → remote did not report.
 func (s *SSHService) onTerminalCwd(id, path string) {
 	if s.app == nil || id == "" || path == "" {
 		return
@@ -144,7 +145,7 @@ func (s *SSHService) onTerminalCwd(id, path string) {
 	s.app.Event.Emit(EventTerminalCwd, string(data))
 }
 
-// TerminalCwd returns the last reported interactive-shell cwd for the session, or "".
+// TerminalCwd is the SFTP follow-cwd RPC: last OSC path, or "" if the remote never reported.
 func (s *SSHService) TerminalCwd(id string) string {
 	return s.mgr.Cwd(id)
 }

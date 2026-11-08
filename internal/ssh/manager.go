@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -62,12 +61,11 @@ type Endpoint struct {
 
 const defaultTermType = "xterm-256color"
 
-// Wait for MOTD/prompt to finish before stdin injection (avoids double echo).
+// Wait for MOTD/prompt to finish before optional user stdin bootstrap.
 const (
-	shellReadyQuiet     = 300 * time.Millisecond
-	shellReadyTimeout   = 3 * time.Second
-	shellReadyPoll      = 20 * time.Millisecond
-	echoSuppressTimeout = 1500 * time.Millisecond
+	shellReadyQuiet   = 300 * time.Millisecond
+	shellReadyTimeout = 3 * time.Second
+	shellReadyPoll    = 20 * time.Millisecond
 )
 
 func (e Endpoint) Addr() string {
@@ -121,9 +119,6 @@ type Session struct {
 	cwdParser      cwdParser
 	cwdMu          sync.Mutex
 	cwd            string
-	suppressMu     sync.Mutex
-	suppressActive bool
-	suppressUntil  time.Time
 }
 
 type hopClient struct {
@@ -242,13 +237,12 @@ func (m *Manager) SetOnClose(fn func(sessionID string, reason CloseReason)) {
 	m.onClose = fn
 }
 
-// SetOnCwd registers a callback when the interactive shell reports a new cwd.
-// The callback must not block; it runs on the PTY stdout reader.
+// SetOnCwd is the SFTP follow-cwd callback (OSC from PTY stdout). Must not block.
 func (m *Manager) SetOnCwd(fn func(sessionID, path string)) {
 	m.onCwd = fn
 }
 
-// Cwd returns the last reported interactive-shell working directory, or "".
+// Cwd returns the last OSC-reported interactive-shell path for SFTP follow, or "".
 func (m *Manager) Cwd(sessionID string) string {
 	sess, err := m.GetSession(sessionID)
 	if err != nil {
@@ -549,44 +543,31 @@ func (sc *Session) Start(cols, rows int) error {
 	if err = sc.startOutput(); err != nil {
 		return sc.failStart(err)
 	}
-	// Shell (not exec): OpenSSH prints MOTD; cwd OSC is injected quietly after prompt.
+	// Login shell (not exec): sshd prints MOTD / Last login. SFTP cwd is OSC-only
+	// from PTY stdout (feedCwd). Do not session.Start-wrap or type into stdin to
+	// force reports — that drops the banner or echoes into HISTFILE.
 	if err = sc.session.Shell(); err != nil {
 		return sc.failStart(err)
 	}
-	stdin := sc.Stdin
-	id := sc.ID
-	logger := sc.manager.logger
 	userBoot := buildStdinBootstrap(sc.env, sc.startupCmd)
-	system.SafeGo(func() {
-		sc.waitShellReady(shellReadyTimeout)
-		sc.closeMu.Lock()
-		closed := sc.isClosed
-		sc.closeMu.Unlock()
-		if closed || stdin == nil {
-			return
-		}
-		cwdLine := buildCwdInjectLine()
-		sc.beginEchoSuppress(echoSuppressTimeout)
-		if writeErr := writeStdinLine(stdin, cwdLine); writeErr != nil {
-			sc.endEchoSuppress()
-			logger.Warn("session cwd inject failed", zap.String("id", id), zap.Error(writeErr))
-			return
-		}
-		sc.waitEchoSuppressDone(echoSuppressTimeout)
-		if userBoot == "" {
-			return
-		}
-		sc.closeMu.Lock()
-		closed = sc.isClosed
-		sc.closeMu.Unlock()
-		if closed || stdin == nil {
-			return
-		}
-		if writeErr := writeStdinLine(stdin, userBoot); writeErr != nil {
-			logger.Warn("session stdin bootstrap failed",
-				zap.String("id", id), zap.Error(writeErr))
-		}
-	})
+	if userBoot != "" {
+		stdin := sc.Stdin
+		id := sc.ID
+		logger := sc.manager.logger
+		system.SafeGo(func() {
+			sc.waitShellReady(shellReadyTimeout)
+			sc.closeMu.Lock()
+			closed := sc.isClosed
+			sc.closeMu.Unlock()
+			if closed || stdin == nil {
+				return
+			}
+			if writeErr := writeStdinLine(stdin, userBoot); writeErr != nil {
+				logger.Warn("session stdin bootstrap failed",
+					zap.String("id", id), zap.Error(writeErr))
+			}
+		})
+	}
 	pty := sc.session
 	go func() {
 		waitErr := pty.Wait()
@@ -652,9 +633,6 @@ func (sc *Session) readFromPipe(pipe io.Reader, pipeName string) func() {
 		}
 		buf := make([]byte, sc.outputBuffSize)
 		emit := func(data []byte) bool {
-			if pipeName == "stdout" {
-				data = sc.filterEchoSuppress(data)
-			}
 			if len(data) == 0 {
 				return true
 			}
@@ -681,7 +659,7 @@ func (sc *Session) readFromPipe(pipe io.Reader, pipeName string) func() {
 					data = decoder.Bytes(data)
 				}
 				if pipeName == "stdout" && len(data) > 0 {
-					sc.feedCwd(data)
+					sc.feedCwd(data) // SFTP follow-cwd OSC ingest
 				}
 				if !emit(data) {
 					return
@@ -850,55 +828,4 @@ func writeStdinLine(stdin io.Writer, line string) error {
 	}
 	_, err := io.WriteString(stdin, line+"\n")
 	return err
-}
-
-func (sc *Session) beginEchoSuppress(d time.Duration) {
-	sc.suppressMu.Lock()
-	sc.suppressActive = true
-	sc.suppressUntil = time.Now().Add(d)
-	sc.suppressMu.Unlock()
-}
-
-func (sc *Session) endEchoSuppress() {
-	sc.suppressMu.Lock()
-	sc.suppressActive = false
-	sc.suppressMu.Unlock()
-}
-
-func (sc *Session) waitEchoSuppressDone(d time.Duration) {
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		sc.suppressMu.Lock()
-		active := sc.suppressActive
-		sc.suppressMu.Unlock()
-		if !active {
-			return
-		}
-		time.Sleep(shellReadyPoll)
-	}
-	sc.endEchoSuppress()
-}
-
-// filterEchoSuppress drops PTY echo of the silent cwd inject until the first
-// newline (end of echoed line) or timeout. Remaining bytes after '\n' are kept
-// (typically the reprinted prompt). feedCwd still sees raw stdout.
-func (sc *Session) filterEchoSuppress(data []byte) []byte {
-	sc.suppressMu.Lock()
-	defer sc.suppressMu.Unlock()
-	if !sc.suppressActive {
-		return data
-	}
-	if time.Now().After(sc.suppressUntil) {
-		sc.suppressActive = false
-		return data
-	}
-	if i := bytes.IndexByte(data, '\n'); i >= 0 {
-		sc.suppressActive = false
-		rest := data[i+1:]
-		for len(rest) > 0 && (rest[0] == '\r' || rest[0] == '\n') {
-			rest = rest[1:]
-		}
-		return rest
-	}
-	return nil
 }

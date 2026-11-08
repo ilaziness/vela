@@ -6,8 +6,7 @@ import (
 )
 
 const (
-	vteVersionValue = "7603"
-	cwdOSCMaxBuf    = 8192
+	cwdOSCMaxBuf = 8192
 )
 
 const (
@@ -17,7 +16,8 @@ const (
 	cwdStateOSCESC // inside OSC, saw ESC, want '\' for ST
 )
 
-// cwdParser extracts shell CWD reports from PTY stdout (OSC 7 / 1337 / 633).
+// cwdParser is the SFTP follow-cwd ingest: OSC 7 / 1337 / 633 from PTY stdout.
+// No OSC from the remote means no tracking. Do not add stdin/exec fallbacks.
 // Incomplete sequences are kept across Feed calls. Data is not modified.
 type cwdParser struct {
 	state   int
@@ -194,22 +194,15 @@ func fromHex(c byte) (byte, bool) {
 	}
 }
 
-// buildCwdInjectLine is a bash-oriented silent stdin line for OSC 7 cwd reports.
-// Caller must echo-suppress so the line is not shown in the terminal UI.
-// Existing PROMPT_COMMAND (set by bashrc/oh-my-bash) is appended, not replaced.
-func buildCwdInjectLine() string {
-	report := `printf "\033]7;file://%s%s\007" "${HOSTNAME:-}" "$PWD"`
-	return "export VTE_VERSION=" + vteVersionValue +
-		"; export PROMPT_COMMAND=" + bashSingleQuote(report) +
-		`"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"`
-}
-
+// getCwd returns the last OSC-reported path for SFTP follow, or "" if none.
 func (sc *Session) getCwd() string {
 	sc.cwdMu.Lock()
 	defer sc.cwdMu.Unlock()
 	return sc.cwd
 }
 
+// feedCwd is the PTY stdout entry for SFTP follow-cwd. Only OSC reports update
+// cwd; keep this on the raw stdout path (before UI filters) or tracking breaks.
 func (sc *Session) feedCwd(data []byte) {
 	path := sc.cwdParser.Feed(data)
 	if path == "" {
