@@ -14,11 +14,6 @@ import (
 	"github.com/ilaziness/vela/internal/database"
 )
 
-const (
-	streamFlushInterval = 200 * time.Millisecond
-	streamFlushMinBytes = 512
-)
-
 // turnPersister owns mid-run and finalize writes for one Chat run_id.
 //
 // streamBuf holds text deltas since the last Checkpoint (a segment), not the
@@ -36,10 +31,11 @@ type turnPersister struct {
 	lastTurn      []ai.ChatMessage
 	streamBuf     string
 	provisionalID string
-	lastFlush     time.Time
 	sealed        bool
 }
 
+// newTurnPersister binds one Chat/resume run_id. userMsgID is the user row to
+// mark cancelled on stop; empty for cold resume of an existing turn.
 func newTurnPersister(repo database.AISessionRepository, logger *zap.Logger, sessionID, runID, userMsgID string) *turnPersister {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -53,7 +49,7 @@ func newTurnPersister(repo database.AISessionRepository, logger *zap.Logger, ses
 	}
 }
 
-// UpsertStreamingText appends a text delta and throttles flush of durable model text.
+// UpsertStreamingText appends a text delta and writes it to SQLite immediately.
 func (p *turnPersister) UpsertStreamingText(delta string) {
 	if p == nil || delta == "" {
 		return
@@ -64,28 +60,13 @@ func (p *turnPersister) UpsertStreamingText(delta string) {
 		return
 	}
 	p.streamBuf += delta
-	if p.shouldFlushStreamLocked() {
-		if err := p.flushStreamLocked(); err != nil {
-			p.logger.Error("flush streaming AI text failed",
-				zap.String("sessionId", p.sessionID),
-				zap.String("runId", p.runID),
-				zap.Error(err),
-			)
-		}
+	if err := p.flushStreamLocked(); err != nil {
+		p.logger.Error("flush streaming AI text failed",
+			zap.String("sessionId", p.sessionID),
+			zap.String("runId", p.runID),
+			zap.Error(err),
+		)
 	}
-}
-
-func (p *turnPersister) shouldFlushStreamLocked() bool {
-	if p.streamBuf == "" {
-		return false
-	}
-	if p.provisionalID == "" {
-		return true
-	}
-	if len(p.streamBuf) >= streamFlushMinBytes {
-		return true
-	}
-	return time.Since(p.lastFlush) >= streamFlushInterval
 }
 
 // Checkpoint replaces model/tool rows with the Genkit History turn slice (no PrepareTurn).
@@ -146,6 +127,9 @@ func (p *turnPersister) Finalize(resp *ai.AgentResponse, cancelled bool) (*datab
 	if p.streamBuf != "" {
 		merged = mergeStreamSegment(merged, p.streamBuf)
 	}
+	if merged == nil {
+		merged = &ai.AgentResponse{}
+	}
 	// Stop/abort synthesizes denials. Keep interrupt only when the run is still paused
 	// (Chat returned an interrupt snapshot, cancelled=false).
 	var prepared *ai.AgentResponse
@@ -194,6 +178,8 @@ func (p *turnPersister) ForceFinalize(stopPendingTools bool) (*database.AIMessag
 	return last, nil
 }
 
+// cloneAgentResponse shallow-copies Content and the Turn slice so Finalize
+// can merge streamBuf without mutating the engine response.
 func cloneAgentResponse(resp *ai.AgentResponse) *ai.AgentResponse {
 	if resp == nil {
 		return nil
@@ -244,6 +230,8 @@ func mergeStreamSegment(resp *ai.AgentResponse, segment string) *ai.AgentRespons
 	return resp
 }
 
+// finalizePreparedLocked replaces the run's model/tool rows, seals run_id, and
+// optionally marks the user message cancelled. Caller must hold p.mu.
 func (p *turnPersister) finalizePreparedLocked(prepared *ai.AgentResponse, cancelled bool) (*database.AIMessage, error) {
 	var last *database.AIMessage
 	if prepared != nil && len(prepared.Turn) > 0 {
@@ -275,6 +263,8 @@ func (p *turnPersister) finalizePreparedLocked(prepared *ai.AgentResponse, cance
 	return last, nil
 }
 
+// flushStreamLocked writes streamBuf as durable trailing model text without
+// clearing the buffer (Finalize still merges the same segment). Caller holds p.mu.
 func (p *turnPersister) flushStreamLocked() error {
 	if p.streamBuf == "" {
 		return nil
@@ -291,7 +281,6 @@ func (p *turnPersister) flushStreamLocked() error {
 			return err
 		}
 		p.provisionalID = id
-		p.lastFlush = time.Now()
 		return nil
 	}
 
@@ -301,7 +290,6 @@ func (p *turnPersister) flushStreamLocked() error {
 		if err := p.repo.UpdateMessageContent(context.Background(), p.provisionalID, segment, parts); err != nil {
 			return err
 		}
-		p.lastFlush = time.Now()
 		return nil
 	}
 	trailIdx := len(p.lastTurn)
@@ -321,16 +309,19 @@ func (p *turnPersister) flushStreamLocked() error {
 		return err
 	}
 	p.provisionalID = id
-	p.lastFlush = time.Now()
 	return nil
 }
 
+// ensureTurnIDsLocked grows stable row IDs so checkpoint/stream/finalize reuse
+// the same model/tool ids for this run. Caller holds p.mu.
 func (p *turnPersister) ensureTurnIDsLocked(n int) {
 	for len(p.turnIDs) < n {
 		p.turnIDs = append(p.turnIDs, uuid.New().String())
 	}
 }
 
+// messagesFromTurnLocked maps Genkit model/tool messages onto DB rows using
+// turnIDs. Non-tool rows are marked cancelled when the run was stopped.
 func (p *turnPersister) messagesFromTurnLocked(turn []ai.ChatMessage, cancelled bool) []*database.AIMessage {
 	turn = modelToolTurn(turn)
 	p.ensureTurnIDsLocked(len(turn))
@@ -355,6 +346,8 @@ func (p *turnPersister) messagesFromTurnLocked(turn []ai.ChatMessage, cancelled 
 	return msgs
 }
 
+// modelToolTurn keeps only model and tool messages; user/system rows are owned
+// by insertUserChatMessage and must not be replaced with the run.
 func modelToolTurn(turn []ai.ChatMessage) []ai.ChatMessage {
 	out := make([]ai.ChatMessage, 0, len(turn))
 	for _, m := range turn {
@@ -366,6 +359,8 @@ func modelToolTurn(turn []ai.ChatMessage) []ai.ChatMessage {
 	return out
 }
 
+// chatHasToolRequest is true when the model message carries a tool request
+// (streaming text must not append onto that row).
 func chatHasToolRequest(m ai.ChatMessage) bool {
 	for _, part := range ai.UnmarshalParts(m.Parts) {
 		if part != nil && part.IsToolRequest() {

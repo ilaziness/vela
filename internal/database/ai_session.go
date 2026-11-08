@@ -176,18 +176,30 @@ func (r *SQLiteAISessionRepository) UpdateSessionPlan(ctx context.Context, id, p
 	return nil
 }
 
-// DeleteSession deletes a session (CASCADE delete handles messages)
+// DeleteSession deletes a session and its messages.
+// Messages are deleted explicitly: SQLite foreign_keys is off unless PRAGMA is set
+// on every pooled connection, so ON DELETE CASCADE is not relied on here.
 func (r *SQLiteAISessionRepository) DeleteSession(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM ai_sessions WHERE id = ?`, id)
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete session tx failed: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM ai_messages WHERE session_id = ?`, id); err != nil {
+		return fmt.Errorf("delete session messages failed: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM ai_sessions WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete session failed: %w", err)
 	}
-
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete session failed: %w", err)
+	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
 		return fmt.Errorf("session not found")
 	}
-
 	return nil
 }
 

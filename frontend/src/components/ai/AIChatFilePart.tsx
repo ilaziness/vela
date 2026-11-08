@@ -16,6 +16,21 @@ async function blobToDataURL(url: string): Promise<string> {
   return fileToDataURL(await (await fetch(url)).blob());
 }
 
+function isImagePart(part: ChatFileMessagePart): boolean {
+  if ((part.mediaType || "").startsWith("image/")) return true;
+  if (part.url.startsWith("data:image/")) return true;
+  return /\.(png|jpe?g|webp|gif)$/i.test(part.filename || "");
+}
+
+async function resolveImageSrc(url: string, mediaType: string, thumbSrc: string): Promise<string> {
+  if (url.startsWith("data:")) return url;
+  if (url.startsWith("blob:")) {
+    return blobToDataURL(url);
+  }
+  if (thumbSrc.startsWith("data:")) return thumbSrc;
+  return AIService.ReadChatAttachment(url, mediaType);
+}
+
 const chipSx = {
   display: "inline-flex",
   alignItems: "center",
@@ -44,7 +59,7 @@ const chipSx = {
 
 export function AIChatFilePart(props: ChatPartRendererProps<ChatFileMessagePart>) {
   const { part } = props;
-  const isImage = (part.mediaType || "").startsWith("image/");
+  const isImage = isImagePart(part);
   const label = part.filename || "file";
   const inlineSrc =
     part.url.startsWith("data:") || part.url.startsWith("blob:") ? part.url : "";
@@ -73,10 +88,7 @@ export function AIChatFilePart(props: ChatPartRendererProps<ChatFileMessagePart>
     if (!part.url) return;
     try {
       if (isImage) {
-        setPreviewSrc(
-          thumbSrc ||
-            (await AIService.ReadChatAttachment(part.url, part.mediaType || "")),
-        );
+        setPreviewSrc(await resolveImageSrc(part.url, part.mediaType || "", thumbSrc));
         return;
       }
       const uri = part.url.startsWith("blob:")

@@ -205,3 +205,67 @@ func TestUpdateSessionPlanPreservedAcrossTitleUpdate(t *testing.T) {
 		t.Fatalf("idempotent clear: %v", err)
 	}
 }
+
+func TestDeleteSessionRemovesMessages(t *testing.T) {
+	db := openTestDB(t)
+	repo := db.AISessionRepo
+	ctx := context.Background()
+
+	sess := &AISession{Title: "t"}
+	if err := repo.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	keep := &AISession{Title: "keep"}
+	if err := repo.CreateSession(ctx, keep); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateMessage(ctx, &AIMessage{
+		SessionID: sess.ID, Role: "user", Content: "q", Parts: "[]",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateMessage(ctx, &AIMessage{
+		SessionID: sess.ID, Role: "model", Content: "a", Parts: "[]",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateMessage(ctx, &AIMessage{
+		SessionID: keep.ID, Role: "user", Content: "other", Parts: "[]",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.DeleteSession(ctx, sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	left, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("deleted session still has messages: %+v", left)
+	}
+	kept, err := repo.ListMessages(ctx, keep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0].Content != "other" {
+		t.Fatalf("other session messages: %+v", kept)
+	}
+	// Recreate leftover messages without a session row (pre-fix CASCADE miss).
+	if err := repo.CreateMessage(ctx, &AIMessage{
+		SessionID: sess.ID, Role: "user", Content: "orphan", Parts: "[]",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteSession(ctx, sess.ID); err == nil {
+		t.Fatal("expected session not found")
+	}
+	orphans, err := repo.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("orphan messages left: %+v", orphans)
+	}
+}

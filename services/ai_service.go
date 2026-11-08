@@ -396,18 +396,16 @@ func (s *AIService) ListSessions(limit int) ([]*AISession, error) {
 }
 func (s *AIService) DeleteSession(id string) error {
 	_ = s.StopGeneration(id)
-	if err := s.sessionRepo.DeleteSession(context.Background(), id); err != nil {
-		return err
-	}
+	err := s.sessionRepo.DeleteSession(context.Background(), id)
 	if dir := s.userDataDir(); dir != "" {
 		if rmErr := ai.RemoveSessionAttachments(dir, id); rmErr != nil {
-			s.logger.Warn("remove session attachments",
+			s.logger.Error("remove session attachments",
 				zap.String("sessionId", id),
 				zap.Error(rmErr),
 			)
 		}
 	}
-	return nil
+	return err
 }
 func (s *AIService) ListMessages(sessionID string) ([]*AIMessage, error) {
 	messages, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
@@ -420,6 +418,23 @@ func (s *AIService) ListMessages(sessionID string) ([]*AIMessage, error) {
 	}
 	return out, nil
 }
+
+// listSealedChatMessages is Genkit replay history: skip in-flight run_id rows.
+func (s *AIService) listSealedChatMessages(sessionID string) ([]ai.ChatMessage, error) {
+	history, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]ai.ChatMessage, 0, len(history))
+	for _, msg := range history {
+		if msg.RunID != "" {
+			continue
+		}
+		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
+	}
+	return messages, nil
+}
+
 func (s *AIService) UpdateSession(session *AISession) error {
 	return s.sessionRepo.UpdateSession(context.Background(), &database.AISession{
 		ID: session.ID, Title: session.Title,
@@ -442,14 +457,62 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 	// Clear pre-register cancel marks even when Chat fails before run registration.
 	defer s.clearCancelledRun(runID)
-	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
-		return nil, err
-	}
-	cfg, err := s.GetConfig()
+
+	// Seal crash leftovers so a pending interrupt is visible. Does not stop a live run.
+	s.sealOrphanRuns(sessionID)
+
+	messages, err := s.listSealedChatMessages(sessionID)
 	if err != nil {
 		return nil, err
 	}
+	if ai.TurnHasInterrupt(messages) {
+		return nil, usererr.Coded("ai.approval_pending", "Resolve the pending tool approval before sending a new message")
+	}
+
+	userParts := []*genkitAI.Part{genkitAI.NewTextPart(newMessage)}
+	var attachErr error
+	dataDir, err := s.requireUserDataDir()
+	if err != nil {
+		attachErr = err
+	} else {
+		attInputs := make([]ai.ChatAttachmentInput, len(req.Attachments))
+		for i, a := range req.Attachments {
+			attInputs[i] = ai.ChatAttachmentInput{
+				DataURL:  a.DataURL,
+				Path:     a.Path,
+				Filename: a.Filename,
+				MIME:     a.MIME,
+			}
+		}
+		parts, perr := ai.PersistUserAttachments(dataDir, sessionID, newMessage, attInputs, func() string {
+			return uuid.New().String()
+		})
+		if perr != nil {
+			attachErr = perr
+		} else {
+			userParts = parts
+		}
+	}
+	userMsg, err := s.insertUserChatMessage(sessionID, newMessage, runID, userParts, len(messages) == 0)
+	if err != nil {
+		return nil, err
+	}
+	if attachErr != nil {
+		s.persistAndSealFailedTurn(sessionID, runID, attachErr)
+		return nil, attachErr
+	}
+	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
+		s.persistCancelledChatTurn(sessionID, runID, userMsg.ID)
+		return nil, err
+	}
+
+	cfg, err := s.GetConfig()
+	if err != nil {
+		s.persistAndSealFailedTurn(sessionID, runID, err)
+		return nil, err
+	}
 	if !cfg.Enabled {
+		s.persistAndSealFailedTurn(sessionID, runID, ErrAINotEnabled)
 		return nil, ErrAINotEnabled
 	}
 	if err := s.ensureEngine(cfg); err != nil {
@@ -457,13 +520,16 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			zap.String("sessionId", sessionID),
 			zap.String("detail", err.Error()),
 		)
+		s.persistAndSealFailedTurn(sessionID, runID, err)
 		return nil, err
 	}
 	s.engineMu.Lock()
 	eng := s.engine
 	s.engineMu.Unlock()
 	if eng == nil {
-		return nil, usererr.Coded("ai.engine_not_ready", "AI engine is not ready")
+		err := usererr.Coded("ai.engine_not_ready", "AI engine is not ready")
+		s.persistAndSealFailedTurn(sessionID, runID, err)
+		return nil, err
 	}
 	// Short timeout: do not block Chat for a full MCP reconnect budget.
 	ctxMCP, cancelMCP := context.WithTimeout(context.Background(), 10*time.Second)
@@ -472,14 +538,13 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	}
 	cancelMCP()
 	if err := s.errIfRunCancelled(sessionID, runID); err != nil {
+		s.persistCancelledChatTurn(sessionID, runID, userMsg.ID)
 		return nil, err
 	}
 
 	_ = s.StopGeneration(sessionID)
-	// Let the previous run Finalize/seal before we build the next prompt, so history
-	// does not include an in-flight incomplete tool round from the superseded Chat.
-	// If it hangs past the wait, steal it: ForceFinalize + drop from map so orphan
-	// recovery cannot race a still-running Finalize on the same run_id.
+	// Previous run must be sealed before we build the prompt so history does not
+	// include an in-flight tool round. If it hangs, steal: ForceFinalize + drop.
 	s.waitSessionRunIdle(sessionID, 2*time.Second)
 	s.forceFinalizeSessionRun(sessionID)
 	s.sealOrphanRuns(sessionID)
@@ -487,67 +552,15 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	delete(s.coldApprovals, sessionID)
 	s.runsMu.Unlock()
 
-	history, err := s.sessionRepo.ListMessages(context.Background(), sessionID)
+	messages, err = s.listSealedChatMessages(sessionID)
 	if err != nil {
+		s.persistAndSealFailedTurn(sessionID, runID, err)
 		return nil, err
-	}
-	messages := make([]ai.ChatMessage, 0, len(history))
-	for _, msg := range history {
-		// Skip still-unsealed rows (defensive if a prior run hung past the wait).
-		if msg.RunID != "" {
-			continue
-		}
-		// Status is UI-only; Genkit replay uses role/content/parts.
-		messages = append(messages, ai.ChatMessage{Role: msg.Role, Content: msg.Content, Parts: msg.Parts})
 	}
 	if ai.TurnHasInterrupt(messages) {
-		return nil, usererr.Coded("ai.approval_pending", "Resolve the pending tool approval before sending a new message")
-	}
-
-	dataDir, err := s.requireUserDataDir()
-	if err != nil {
+		err := usererr.Coded("ai.approval_pending", "Resolve the pending tool approval before sending a new message")
+		s.persistAndSealFailedTurn(sessionID, runID, err)
 		return nil, err
-	}
-	attInputs := make([]ai.ChatAttachmentInput, len(req.Attachments))
-	for i, a := range req.Attachments {
-		attInputs[i] = ai.ChatAttachmentInput{
-			DataURL:  a.DataURL,
-			Path:     a.Path,
-			Filename: a.Filename,
-			MIME:     a.MIME,
-		}
-	}
-	userParts, err := ai.PersistUserAttachments(dataDir, sessionID, newMessage, attInputs, func() string {
-		return uuid.New().String()
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	userMsg := &database.AIMessage{
-		SessionID: sessionID,
-		Role:      ai.RoleUser,
-		Content:   newMessage,
-		Parts:     ai.MarshalParts(userParts),
-		RunID:     runID,
-		Timestamp: time.Now(),
-	}
-	if err := s.sessionRepo.CreateMessage(context.Background(), userMsg); err != nil {
-		return nil, err
-	}
-	// Title from first user message (before Generate) so sidebar/DB match without racing Chat return.
-	if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil {
-		if len(messages) == 0 && isNewSessionTitle(session.Title) {
-			title := []rune(newMessage)
-			if len(title) > 20 {
-				title = title[:20]
-			}
-			session.Title = string(title)
-			if session.Title == "" {
-				session.Title = NewSessionTitleID
-			}
-			_ = s.sessionRepo.UpdateSession(context.Background(), session)
-		}
 	}
 
 	linkID, sshCtx, remoteInfo := s.resolveSSHContext(req.SSHContext)
@@ -557,6 +570,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 	enableFS := snap.EnableFS
 	webSearch, err := s.resolveWebSearchRuntime(cfg)
 	if err != nil {
+		s.persistAndSealFailedTurn(sessionID, runID, err)
 		return nil, err
 	}
 	if !snap.EnableWebSearch {
@@ -600,8 +614,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			zap.String("sessionId", sessionID),
 			zap.String("runId", runID),
 		)
-		s.markMessageCancelled(sessionID, userMsg.ID)
-		_ = s.sessionRepo.SealRunMessages(context.Background(), sessionID, runID)
+		s.persistCancelledChatTurn(sessionID, runID, userMsg.ID)
 		return nil, ErrGenerationStopped
 	}
 	s.runs[sessionID] = run
@@ -639,7 +652,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		OnCheckpoint: persister.Checkpoint,
 	}
 
-	aiResp, err := s.engine.Run(ctx, aiReq, rd, func(ev ai.StreamEvent) error {
+	aiResp, err := eng.Run(ctx, aiReq, rd, func(ev ai.StreamEvent) error {
 		if ev.Type == ai.EventTextDelta && ev.Delta != "" {
 			persister.UpsertStreamingText(ev.Delta)
 		}
@@ -713,14 +726,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 			return nil, perr
 		}
 		if last == nil {
-			// Finalize sealed an empty turn; still return the public error for the UI.
-			last = &database.AIMessage{
-				SessionID: sessionID,
-				Role:      ai.RoleModel,
-				Content:   msg,
-				Parts:     ai.UserTextPartsJSON(msg),
-				Timestamp: time.Now(),
-			}
+			last = s.persistSealedModelFallback(sessionID, msg)
 		}
 		return &ChatResponse{Message: *toAIMessage(last)}, nil
 	}
@@ -735,11 +741,127 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		if aiResp != nil {
 			content = aiResp.Content
 		}
-		last = &database.AIMessage{SessionID: sessionID, Role: ai.RoleModel, Content: content, Parts: "[]", Timestamp: time.Now()}
+		last = s.persistSealedModelFallback(sessionID, content)
 	}
 	return &ChatResponse{Message: *toAIMessage(last)}, nil
 }
 
+// insertUserChatMessage writes the user turn immediately so a later pre-run
+// failure still leaves the send in SQLite. Also sets the session title on first use.
+func (s *AIService) insertUserChatMessage(sessionID, newMessage, runID string, userParts []*genkitAI.Part, updateTitle bool) (*database.AIMessage, error) {
+	userMsg := &database.AIMessage{
+		SessionID: sessionID,
+		Role:      ai.RoleUser,
+		Content:   newMessage,
+		Parts:     ai.MarshalParts(userParts),
+		RunID:     runID,
+		Timestamp: time.Now(),
+	}
+	if err := s.sessionRepo.CreateMessage(context.Background(), userMsg); err != nil {
+		return nil, err
+	}
+	if updateTitle {
+		if session, err := s.sessionRepo.GetSession(context.Background(), sessionID); err == nil && isNewSessionTitle(session.Title) {
+			title := []rune(newMessage)
+			if len(title) > 20 {
+				title = title[:20]
+			}
+			session.Title = string(title)
+			if session.Title == "" {
+				session.Title = NewSessionTitleID
+			}
+			_ = s.sessionRepo.UpdateSession(context.Background(), session)
+		}
+	}
+	return userMsg, nil
+}
+
+// persistableChatErrorText is the assistant bubble text for a failed turn.
+// Prefer i18n of a usererr code; never store the JSON RPC Error() payload.
+func persistableChatErrorText(err error) string {
+	if err == nil || errors.Is(err, ErrGenerationStopped) {
+		return ""
+	}
+	if ue, ok := usererr.As(err); ok {
+		return persistableUserError(ue.Code, ue.Message)
+	}
+	if p, ok := usererr.Parse(err.Error()); ok {
+		return persistableUserError(p.Code, p.Message)
+	}
+	return err.Error()
+}
+
+// persistableUserError maps a coded user error to catalog text, then English fallback.
+func persistableUserError(code, message string) string {
+	if code != "" {
+		if t := i18n.T(code); t != "" && t != code {
+			return t
+		}
+	}
+	if message != "" {
+		return message
+	}
+	return code
+}
+
+// persistSealedModelFallback inserts a sealed (empty run_id) model row when
+// Finalize succeeded but returned no last message. Empty content is not written.
+func (s *AIService) persistSealedModelFallback(sessionID, content string) *database.AIMessage {
+	model := &database.AIMessage{
+		SessionID: sessionID,
+		Role:      ai.RoleModel,
+		Content:   content,
+		Parts:     ai.UserTextPartsJSON(content),
+		Timestamp: time.Now(),
+	}
+	if content == "" {
+		return model
+	}
+	if err := s.sessionRepo.CreateMessage(context.Background(), model); err != nil {
+		s.logger.Error("persist fallback assistant message",
+			zap.String("sessionId", sessionID),
+			zap.Error(err),
+		)
+	}
+	return model
+}
+
+// persistCancelledChatTurn seals a user send that was stopped before engine.Run.
+func (s *AIService) persistCancelledChatTurn(sessionID, runID, userMsgID string) {
+	s.persistAndSealFailedTurn(sessionID, runID, ErrGenerationStopped)
+	s.markMessageCancelled(sessionID, userMsgID)
+}
+
+// persistAndSealFailedTurn stores a model error for the current run_id and seals
+// the turn so the user message is not left unsealed after a pre-engine failure.
+func (s *AIService) persistAndSealFailedTurn(sessionID, runID string, fail error) {
+	text := persistableChatErrorText(fail)
+	if text != "" {
+		model := &database.AIMessage{
+			SessionID: sessionID,
+			Role:      ai.RoleModel,
+			Content:   text,
+			Parts:     ai.UserTextPartsJSON(text),
+			RunID:     runID,
+			Timestamp: time.Now(),
+		}
+		if err := s.sessionRepo.CreateMessage(context.Background(), model); err != nil {
+			s.logger.Error("persist failed assistant message",
+				zap.String("sessionId", sessionID),
+				zap.Error(err),
+			)
+		}
+	}
+	if err := s.sessionRepo.SealRunMessages(context.Background(), sessionID, runID); err != nil {
+		s.logger.Error("seal failed chat turn",
+			zap.String("sessionId", sessionID),
+			zap.Error(err),
+		)
+	}
+}
+
+// mergeErrorIntoResponse appends a public error as a trailing model message
+// so Finalize can persist a failed generate the same way as a normal turn.
 func mergeErrorIntoResponse(resp *ai.AgentResponse, msg string) *ai.AgentResponse {
 	out := &ai.AgentResponse{}
 	if resp != nil {
@@ -1362,7 +1484,12 @@ func (s *AIService) runColdResume(sessionID string, messages []ai.ChatMessage, r
 		ResumeParts: resumeParts,
 	}
 
-	aiResp, runErr := eng.Run(ctx, aiReq, rd, func(ai.StreamEvent) error { return nil })
+	aiResp, runErr := eng.Run(ctx, aiReq, rd, func(ev ai.StreamEvent) error {
+		if ev.Type == ai.EventTextDelta && ev.Delta != "" {
+			persister.UpsertStreamingText(ev.Delta)
+		}
+		return nil
+	})
 	cancelled := isChatStopped(runErr, ctx)
 	if _, perr := persister.Finalize(aiResp, cancelled); perr != nil {
 		s.logger.Error("persist cold resume failed", zap.String("sessionId", sessionID), zap.Error(perr))

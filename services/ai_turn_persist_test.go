@@ -41,8 +41,6 @@ func TestTurnPersisterStreamCheckpointFinalizeSameIDs(t *testing.T) {
 	p := newTurnPersister(repo, zap.NewNop(), sess.ID, "run-x", user.ID)
 	p.UpsertStreamingText("hel")
 	p.UpsertStreamingText("lo")
-	// Force flush path via Checkpoint after stream was written.
-	time.Sleep(streamFlushInterval + 20*time.Millisecond)
 	p.UpsertStreamingText("!")
 
 	mid, err := repo.ListMessagesByRunID(ctx, sess.ID, "run-x")

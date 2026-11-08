@@ -93,9 +93,11 @@ export class GenkitAdapter implements ChatAdapter {
     let messageId: string;
     const capturedSessionId = sessionId;
     const runID = `run-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    let hadAttachments = false;
 
     try {
       const draftAtts = input.attachments ?? [];
+      hadAttachments = draftAtts.length > 0;
       const attachments: ChatAttachment[] = [];
       for (const att of draftAtts) {
         const path = localFilePath(att.file);
@@ -327,6 +329,12 @@ export class GenkitAdapter implements ChatAdapter {
           }
         };
 
+        const reloadPersistedAttachments = () => {
+          if (!hadAttachments) return;
+          if (useAIAssistantStore.getState().activeSessionId !== capturedSessionId) return;
+          useAIAssistantStore.getState().bumpMessagesRevision();
+        };
+
         chatPromise
           .then(() => {
             chatDone = true;
@@ -346,6 +354,7 @@ export class GenkitAdapter implements ChatAdapter {
             enqueue({ type: 'finish', messageId });
             endStreaming();
             controller.close();
+            reloadPersistedAttachments();
           })
           .catch((err: any) => {
             chatDone = true;
@@ -378,6 +387,7 @@ export class GenkitAdapter implements ChatAdapter {
             enqueue({ type: 'finish', messageId });
             endStreaming();
             controller.close();
+            reloadPersistedAttachments();
           });
       },
     });
