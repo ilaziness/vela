@@ -8,7 +8,8 @@ import { genTabIndex } from "../../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../../func/aiSidebar";
 import { ShortcutAction } from "../../func/shortcuts";
 import { useMemo, useCallback } from "react";
-import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
+import { useFrameless } from "../../hooks/useFrameless";
+import AppLogo from "../common/AppLogo";
 import { RailMenuButton } from "../common/RailIconButton";
 import BookmarkConnectPanel from "../bookmark/BookmarkConnectPanel";
 import { useUIStore } from "../../stores/ui";
@@ -88,18 +89,7 @@ export default function Header() {
           spacing={0.25}
           sx={{ alignItems: "center", padding: 0.25, height: "100%" }}
         >
-          <Box
-            sx={{
-              ...dragRegionSx(frameless),
-              cursor: frameless ? "move" : undefined,
-            }}
-          >
-            <img
-              src="/appicon.png"
-              alt="Logo"
-              style={{ width: "24px", height: "24px" }}
-            />
-          </Box>
+          <AppLogo frameless={frameless} />
 
           {menuItems.map((item) => (
             <RailMenuButton

@@ -10,9 +10,9 @@ version: "{{.VERSION}}"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "Vela is an SSH desktop client"
+description: "Vela is an terminal desktop client"
 vendor: "Vela Team"
-homepage: "https://github.com/ilaziness/vela"
+homepage: "https://wails.io"
 license: "MIT"
 release: "1"
 

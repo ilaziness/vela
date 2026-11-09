@@ -1,16 +1,16 @@
 # This file contains the configuration for this project.
 # When you update `info` or `fileAssociations`, run `wails3 task common:update:build-assets` to update the assets.
 # Note that this will overwrite any changes you have made to the assets.
-version: '3'
+version: "3"
 
 # This information is used to generate the build assets.
 info:
   companyName: "Vela Team" # The name of the company
   productName: "Vela" # The name of the application
   productIdentifier: "com.ilaziness.vela" # The unique product identifier
-  description: "Vela is an SSH desktop client" # The application description
+  description: "Vela is an terminal desktop client" # The application description
   copyright: "(c) 2026, Vela Team" # Copyright text
-  comments: "Vela is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients." # Comments
+  comments: "Vela is a terminal desktop client that allows users to access and manage their servers through a terminal interface. It provides a secure and convenient way to interact with remote servers without the need for traditional terminal clients." # Comments
   version: "{{.VERSION}}" # The application version
 
 # iOS build configuration (uncomment to customise iOS project generation)

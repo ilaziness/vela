@@ -1,15 +1,17 @@
 {
 	"fixed": {
-		"file_version": "{{.VERSION}}"
+		"file_version": "{{.VERSION}}",
+		"product_version": "{{.VERSION}}"
 	},
 	"info": {
-		"0000": {
+		"0409": {
+			"FileVersion": "{{.VERSION}}",
 			"ProductVersion": "{{.VERSION}}",
 			"CompanyName": "Vela Team",
-			"FileDescription": "Vela is an SSH desktop client",
+			"FileDescription": "Vela is an terminal desktop client",
 			"LegalCopyright": "(c) 2026, Vela Team",
 			"ProductName": "Vela",
-			"Comments": "Vela is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients."
+			"Comments": "Vela is a terminal desktop client that allows users to access and manage their servers through a terminal interface. It provides a secure and convenient way to interact with remote servers without the need for traditional terminal clients."
 		}
 	}
 }

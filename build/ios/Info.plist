@@ -7,7 +7,7 @@
 		<key>CFBundleExecutable</key>
 		<string>Vela</string>
 		<key>CFBundleGetInfoString</key>
-		<string>Vela is a web-based SSH desktop client that allows users to access and manage their servers through a web interface. It provides a secure and convenient way to interact with remote servers without the need for traditional SSH clients.</string>
+		<string>Vela is a terminal desktop client that allows users to access and manage their servers through a terminal interface. It provides a secure and convenient way to interact with remote servers without the need for traditional terminal clients.</string>
 		<key>CFBundleIdentifier</key>
 		<string>com.ilaziness.vela</string>
 		<key>CFBundleName</key>

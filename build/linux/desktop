@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=Vela
-Comment=Vela is an SSH desktop client
+Comment=Vela is an terminal desktop client
 # The Exec line includes %u to pass the URL to the application
 Exec=/usr/local/bin/Vela %u
 Terminal=false
