@@ -4,7 +4,7 @@ const LEGACY_SIDEBAR_WIDTH_STORAGE_KEY = 'vexo.ai.sidebarWidth';
 /** 与 SSHTabBody StatusBar 高度保持一致 */
 export const SSH_STATUS_BAR_HEIGHT = 25;
 
-/** 与 Header / SSHTabs 左侧栏宽度保持一致 */
+/** 与 Header / sessionTabs 左侧栏宽度保持一致 */
 export const APP_HEADER_RAIL_WIDTH = 36;
 
 export const SIDEBAR_RESIZE_HANDLE_WIDTH = 4;

@@ -20,6 +20,7 @@ import (
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/usererr"
 )
 
@@ -119,12 +120,13 @@ type agentRun struct {
 }
 
 type AIService struct {
-	app           *application.App
-	logger        *zap.Logger
-	configService *ConfigService
-	sshService    *SSHService
-	engine        *ai.AIEngine
-	sessionRepo   database.AISessionRepository
+	app            *application.App
+	logger         *zap.Logger
+	configService  *ConfigService
+	sshService     *SSHService
+	sessionService *SessionService
+	engine         *ai.AIEngine
+	sessionRepo    database.AISessionRepository
 
 	engineMu sync.Mutex
 	runsMu   sync.Mutex
@@ -135,12 +137,13 @@ type AIService struct {
 	coldApprovals map[string]map[string]approvalDecision
 }
 
-func NewAIService(app *application.App, logger *zap.Logger, configService *ConfigService, sshService *SSHService, db *database.Database) *AIService {
+func NewAIService(app *application.App, logger *zap.Logger, configService *ConfigService, sshService *SSHService, sessionService *SessionService, db *database.Database) *AIService {
 	// Do not decrypt API keys or init Genkit here: the password prompt needs a
 	// live UI, and a 60s timeout would both delay startup and leave engine nil.
 	return &AIService{
 		app: app, logger: logger, configService: configService, sshService: sshService,
-		sessionRepo: db.AISessionRepo, runs: make(map[string]*agentRun), cancelled: make(map[string]struct{}),
+		sessionService: sessionService,
+		sessionRepo:    db.AISessionRepo, runs: make(map[string]*agentRun), cancelled: make(map[string]struct{}),
 		coldApprovals: make(map[string]map[string]approvalDecision),
 	}
 }
@@ -563,8 +566,8 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		return nil, err
 	}
 
-	linkID, sshCtx, remoteInfo := s.resolveSSHContext(req.SSHContext)
-	enableSSH := linkID != ""
+	linkID, sshCtx, serialCtx, remoteInfo := s.resolveSSHContext(req.SSHContext)
+	enableSSH := sshCtx != nil
 	snap := eng.Snapshot()
 	allowDirs := snap.AllowDirs
 	enableFS := snap.EnableFS
@@ -586,6 +589,7 @@ func (s *AIService) Chat(req *ChatRequest) (*ChatResponse, error) {
 		NewParts: userParts,
 		SystemPrompt: ai.BuildSystemPromptOpts(ai.PromptOptions{
 			SSH:             sshCtx,
+			Serial:          serialCtx,
 			Remote:          remoteInfo,
 			EnableSSH:       enableSSH,
 			EnableFS:        enableFS,
@@ -1436,7 +1440,8 @@ func (s *AIService) runColdResume(sessionID string, messages []ai.ChatMessage, r
 	}
 	cancelMCP()
 
-	linkID, sshPrompt, remoteInfo := s.resolveSSHContext(sshCtx)
+	linkID, sshPrompt, serialPrompt, remoteInfo := s.resolveSSHContext(sshCtx)
+	enableSSH := sshPrompt != nil
 	snap := eng.Snapshot()
 	webSearch, err := s.resolveWebSearchRuntime(cfg)
 	if err != nil {
@@ -1471,15 +1476,16 @@ func (s *AIService) runColdResume(sessionID string, messages []ai.ChatMessage, r
 		Messages: messages,
 		SystemPrompt: ai.BuildSystemPromptOpts(ai.PromptOptions{
 			SSH:             sshPrompt,
+			Serial:          serialPrompt,
 			Remote:          remoteInfo,
-			EnableSSH:       linkID != "",
+			EnableSSH:       enableSSH,
 			EnableFS:        snap.EnableFS,
 			AllowDirs:       snap.AllowDirs,
 			EnableWebSearch: enableWebSearch,
 			PlanJSON:        planJSON,
 			UILanguage:      i18n.Language(),
 		}),
-		EnableSSH:   linkID != "",
+		EnableSSH:   enableSSH,
 		LinkID:      linkID,
 		ResumeParts: resumeParts,
 	}
@@ -1550,20 +1556,44 @@ func (h *aiHost) ArmSSHExecCancel() {
 	h.run.mu.Unlock()
 }
 
-func (s *AIService) resolveSSHContext(ctx *SSHContext) (linkID string, prompt *ai.SSHPromptContext, info *ssh.RemoteSystemInfo) {
-	if ctx == nil || s.sshService == nil {
-		return "", nil, nil
+func (s *AIService) resolveSSHContext(ctx *SSHContext) (linkID string, prompt *ai.SSHPromptContext, serial *ai.SerialPromptContext, info *ssh.RemoteSystemInfo) {
+	if s.sessionService == nil {
+		return "", nil, nil, nil
 	}
-	linkID = strings.TrimSpace(ctx.LinkID)
-	host := strings.TrimSpace(ctx.Host)
-	user := strings.TrimSpace(ctx.User)
-	if linkID == "" || host == "" || user == "" || ctx.Port <= 0 {
-		return "", nil, nil
+	if ctx != nil {
+		linkID = strings.TrimSpace(ctx.LinkID)
 	}
-	if !s.sshService.hasSession(linkID) {
-		return "", nil, nil
+	if linkID == "" {
+		return "", nil, nil, nil
 	}
-	return linkID, &ai.SSHPromptContext{Host: host, Port: ctx.Port, User: user}, s.sshService.GetOrFetchRemoteSystemInfo(linkID, host)
+	proto, ok := s.sessionService.protocolOf(linkID)
+	if !ok {
+		return "", nil, nil, nil
+	}
+	switch proto {
+	case termio.ProtocolSSH:
+		if ctx == nil {
+			return "", nil, nil, nil
+		}
+		host := strings.TrimSpace(ctx.Host)
+		user := strings.TrimSpace(ctx.User)
+		if host == "" || user == "" || ctx.Port <= 0 {
+			return "", nil, nil, nil
+		}
+		var remote *ssh.RemoteSystemInfo
+		if s.sshService != nil {
+			remote = s.sshService.GetOrFetchRemoteSystemInfo(linkID, host)
+		}
+		return linkID, &ai.SSHPromptContext{Host: host, Port: ctx.Port, User: user}, nil, remote
+	case termio.ProtocolSerial:
+		device, baud, ok := s.sessionService.serialPromptInfo(linkID)
+		if !ok {
+			return linkID, nil, &ai.SerialPromptContext{}, nil
+		}
+		return linkID, nil, &ai.SerialPromptContext{Device: device, BaudRate: baud}, nil
+	default:
+		return "", nil, nil, nil
+	}
 }
 
 func toAISession(s *database.AISession) *AISession {

@@ -15,9 +15,11 @@ import (
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
+	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/sshkey"
+	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/termws"
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
@@ -97,15 +99,23 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 		})
 	})
 	tunnelMgr := tunnel.NewManager(log, sshMgr)
+	serialMgr := serial.NewManager(log)
+	hub := termio.NewHub()
 
 	sftpService := NewSftpService(a, sftpMgr, cfgStore, log)
-	sshService := NewSSHService(a, sshMgr, sftpMgr, tunnelMgr, cfgStore)
-	sshService.setSFTPCloseHooks(sftpService.CloseSessionEdits, sftpService.CleanupSessionEditDir, sftpService.CloseAllEdits, sftpService.CleanupAllEditDirs)
+	sessionService := NewSessionService(a, hub, sshMgr, serialMgr, sftpMgr, tunnelMgr, cfgStore)
+	sessionService.setSFTPCloseHooks(sftpService.CloseSessionEdits, sftpService.CleanupSessionEditDir, sftpService.CloseAllEdits, sftpService.CleanupAllEditDirs)
+	sessionService.setSSHConfigGetter(func() config.SSHConfig {
+		return cfgStore.Config.SSH
+	})
+	sshService := NewSSHService(a, sshMgr, sftpMgr, cfgStore)
 	sshService.setSSHConfigGetter(func() config.SSHConfig {
 		return cfgStore.Config.SSH
 	})
-	termWS := termws.NewServer(log, sshMgr, func(id string) { _ = sshService.CloseByID(id) })
-	sshMgr.SetOnClose(sshService.onSessionClosed)
+
+	termWS := termws.NewServer(log, hub, func(id string) { _ = sessionService.CloseByID(id) })
+	sshMgr.SetOnClose(sessionService.onSSHSessionClosed)
+	serialMgr.SetOnClose(sessionService.onSerialSessionClosed)
 
 	configService.configureVaultProbes(
 		func() bool { return vaultHasEncryptedSecrets(cfgStore, db) },
@@ -117,10 +127,10 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	bookmarks := bookmark.New(log, db, configService.getPasswordWithPrompt, func() {
 		a.Event.Emit(EventBookmarkUpdate, BookmarkUpdateMsg)
 	}, onBadPass, keys.PrivatePEM, onEncrypted)
-	sshService.bind(termWS, bookmarks)
-	bookmarkService := NewBookmarkService(a, bookmarks, sshService, cfgStore)
+	sessionService.bind(termWS, bookmarks)
+	bookmarkService := NewBookmarkService(a, bookmarks, sessionService, cfgStore)
 
-	commandSvc := command.New(log, db, commandsLoader, sshService.SendToSession)
+	commandSvc := command.New(log, db, commandsLoader, sessionService.SendToSession)
 	commandService := NewCommandService(windows, commandSvc, termWS)
 	configService.onLanguageChanged = func(lang string) {
 		if err := commandSvc.ReloadBuiltin(lang); err != nil {
@@ -129,13 +139,14 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 	}
 	syncService := NewSyncService(configService, db, log)
 	toolService := NewToolService(windows)
-	aiService := NewAIService(a, log, configService, sshService, db)
+	aiService := NewAIService(a, log, configService, sshService, sessionService, db)
 	aiService.RecoverOrphanTurns()
 	go aiService.HydrateCatalog()
 	appService := NewAppService(a, windows, termWS, cfgStore, log)
 	tunnelService := NewSSHTunnelService(tunnelMgr)
 
 	a.RegisterService(application.NewService(appService))
+	a.RegisterService(application.NewService(sessionService))
 	a.RegisterService(application.NewService(sshService))
 	a.RegisterService(application.NewService(sftpService))
 	a.RegisterService(application.NewService(configService))
@@ -161,7 +172,7 @@ func RegisterServices(a *application.App, mainWindow *application.WebviewWindow,
 		aiService.FlushAndStop()
 		aiService.ShutdownMCP()
 		termWS.Stop()
-		sshService.Close()
+		sessionService.Close()
 		if err := db.Close(); err != nil {
 			log.Error("close db failed", zap.Error(err))
 		}

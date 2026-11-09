@@ -6,52 +6,13 @@ export enum ConnectionStatus {
   Connecting = "connecting",
 }
 
-export interface SSHLinkInfo {
-  linkID?: string;
-  bookmarkID?: string;
-  host: string;
-  port: number;
-  user: string;
-  password?: string;
-  key?: string;
-  keyPassword?: string;
-  proxyJumpID?: string;
-  certificate?: string;
-}
+export type {
+  SessionLink as SSHLinkInfo,
+  SessionTab as SSHTab,
+  ConnectRequest,
+} from "./session";
 
-/** Matches services.ConnectRequest JSON fields (camelCase). */
-export interface ConnectRequest {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  key: string;
-  keyPassword: string;
-  proxyJumpID: string;
-  certificate: string;
-}
-
-/** Build ConnectRequest with stable defaults for optional SSHLinkInfo fields. */
-export function toConnectRequest(li: SSHLinkInfo): ConnectRequest {
-  const key = li.key || "";
-  return {
-    host: li.host,
-    port: li.port,
-    user: li.user,
-    password: li.password || "",
-    key,
-    keyPassword: key ? li.keyPassword || "" : "",
-    proxyJumpID: li.proxyJumpID || "",
-    certificate: li.certificate || "",
-  };
-}
-
-export interface SSHTab {
-  index: string;
-  name: string;
-  sshInfo?: SSHLinkInfo;
-  connectionStatus?: ConnectionStatus;
-}
+export { toConnectRequest, SessionProtocol } from "./session";
 
 export interface Message {
   open: boolean;

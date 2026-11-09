@@ -12,7 +12,7 @@ import { t, tf } from "../../i18n";
 import { translateServiceError } from "../../func/service";
 
 const UpdateAvailableDialog = React.lazy(
-  () => import("../UpdateAvailableDialog"),
+  () => import("../common/UpdateAvailableDialog"),
 );
 
 interface AboutProps {

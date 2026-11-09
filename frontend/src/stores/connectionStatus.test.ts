@@ -9,7 +9,8 @@ import {
 const baseTab = (): SSHTab => ({
   index: "t1",
   name: "host",
-  sshInfo: {
+  sessionLink: {
+    protocol: "ssh" as import("../types/session").SessionProtocol,
     host: "1.2.3.4",
     port: 22,
     user: "u",
@@ -25,8 +26,8 @@ describe("tabWithConnectionStatus", () => {
       ConnectionStatus.Disconnected,
     );
     assert.equal(next.connectionStatus, ConnectionStatus.Disconnected);
-    assert.equal(next.sshInfo?.linkID, undefined);
-    assert.equal(next.sshInfo?.host, "1.2.3.4");
+    assert.equal(next.sessionLink?.linkID, undefined);
+    assert.equal(next.sessionLink?.host, "1.2.3.4");
   });
 
   it("Connected/Connecting keep linkID", () => {
@@ -34,28 +35,34 @@ describe("tabWithConnectionStatus", () => {
       {
         ...baseTab(),
         connectionStatus: ConnectionStatus.Disconnected,
-        sshInfo: { host: "h", port: 22, user: "u", linkID: "sess-2" },
+        sessionLink: {
+          protocol: "ssh" as import("../types/session").SessionProtocol,
+          host: "h",
+          port: 22,
+          user: "u",
+          linkID: "sess-2",
+        },
       },
       ConnectionStatus.Connecting,
     );
     assert.equal(connecting.connectionStatus, ConnectionStatus.Connecting);
-    assert.equal(connecting.sshInfo?.linkID, "sess-2");
+    assert.equal(connecting.sessionLink?.linkID, "sess-2");
 
     const connected = tabWithConnectionStatus(
       connecting,
       ConnectionStatus.Connected,
     );
     assert.equal(connected.connectionStatus, ConnectionStatus.Connected);
-    assert.equal(connected.sshInfo?.linkID, "sess-2");
+    assert.equal(connected.sessionLink?.linkID, "sess-2");
   });
 
-  it("Disconnected without sshInfo is still safe", () => {
+  it("Disconnected without sessionLink is still safe", () => {
     const next = tabWithConnectionStatus(
       { index: "t2", name: "empty" },
       ConnectionStatus.Disconnected,
     );
     assert.equal(next.connectionStatus, ConnectionStatus.Disconnected);
-    assert.equal(next.sshInfo, undefined);
+    assert.equal(next.sessionLink, undefined);
   });
 });
 
@@ -67,7 +74,7 @@ describe("tabWithSessionConnectionStatus", () => {
     );
     assert.ok(next);
     assert.equal(next.connectionStatus, ConnectionStatus.Disconnected);
-    assert.equal(next.sshInfo?.linkID, "sess-1");
+    assert.equal(next.sessionLink?.linkID, "sess-1");
   });
 
   it("Disconnected is ignored while Connecting", () => {
@@ -93,6 +100,6 @@ describe("tabWithSessionConnectionStatus", () => {
     );
     assert.ok(next);
     assert.equal(next.connectionStatus, ConnectionStatus.Connected);
-    assert.equal(next.sshInfo?.linkID, "sess-1");
+    assert.equal(next.sessionLink?.linkID, "sess-1");
   });
 });

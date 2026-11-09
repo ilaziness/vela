@@ -39,7 +39,7 @@ import type {
 } from "../../../bindings/github.com/ilaziness/vela/internal/ai/models";
 import { useAIConfigStore } from "../../stores/aiConfig";
 import { useMessageStore } from "../../stores/message";
-import FormRow from "../FormRow";
+import FormRow from "../common/FormRow";
 import { t } from "../../i18n";
 import { translateServiceError } from "../../func/service";
 

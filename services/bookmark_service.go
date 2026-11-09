@@ -9,7 +9,9 @@ import (
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/usererr"
 )
 
@@ -31,14 +33,14 @@ type SSHConfigImportResult = bookmark.ImportResult
 type SSHConfigExportResult = bookmark.ExportResult
 
 type BookmarkService struct {
-	app   *application.App
-	core  *bookmark.Service
-	ssh   *SSHService
-	store *config.Store
+	app      *application.App
+	core     *bookmark.Service
+	sessions *SessionService
+	store    *config.Store
 }
 
-func NewBookmarkService(app *application.App, core *bookmark.Service, ssh *SSHService, store *config.Store) *BookmarkService {
-	return &BookmarkService{app: app, core: core, ssh: ssh, store: store}
+func NewBookmarkService(app *application.App, core *bookmark.Service, sessions *SessionService, store *config.Store) *BookmarkService {
+	return &BookmarkService{app: app, core: core, sessions: sessions, store: store}
 }
 
 func (bs *BookmarkService) ConnectBookmark(bookmarkID string) {
@@ -50,25 +52,44 @@ func (bs *BookmarkService) ConnectBookmarkByID(bookmarkID string) (string, error
 	if err != nil {
 		return "", err
 	}
-	hops, err := bs.core.ResolveHopsBookmark(*b)
-	if err != nil {
-		return "", err
+	proto, ok := termio.ParseProtocol(b.Protocol)
+	if !ok {
+		return "", usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
 	}
-	proxy, err := resolveDialProxy(b.ProxyMode, ssh.ProxyConfig{
-		Type: b.ProxyType, Host: b.ProxyHost, Port: b.ProxyPort,
-		User: b.ProxyUser, Password: b.ProxyPassword,
-	}, bs.sshConfig())
-	if err != nil {
-		return "", err
+	switch proto {
+	case termio.ProtocolSSH:
+		hops, err := bs.core.ResolveHopsBookmark(*b)
+		if err != nil {
+			return "", err
+		}
+		proxy, err := resolveDialProxy(b.ProxyMode, ssh.ProxyConfig{
+			Type: b.ProxyType, Host: b.ProxyHost, Port: b.ProxyPort,
+			User: b.ProxyUser, Password: b.ProxyPassword,
+		}, bs.sshConfig())
+		if err != nil {
+			return "", err
+		}
+		return bs.sessions.connectHops(hops, proxy)
+	case termio.ProtocolSerial:
+		return bs.sessions.connectSerial(serial.OpenConfig{
+			Device:      b.SerialDevice,
+			BaudRate:    b.BaudRate,
+			DataBits:    b.DataBits,
+			Parity:      b.Parity,
+			StopBits:    b.StopBits,
+			FlowControl: b.FlowControl,
+			Charset:     b.Charset,
+		})
+	default:
+		return "", usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
 	}
-	return bs.ssh.connectHops(hops, proxy)
 }
 
 func (bs *BookmarkService) sshConfig() config.SSHConfig {
-	if bs.ssh == nil || bs.ssh.getSSHConfig == nil {
+	if bs.sessions == nil || bs.sessions.getSSHConfig == nil {
 		return config.SSHConfig{}
 	}
-	return bs.ssh.getSSHConfig()
+	return bs.sessions.getSSHConfig()
 }
 
 func (bs *BookmarkService) ListBookmarks() ([]*BookmarkGroup, error) {
@@ -81,8 +102,14 @@ func (bs *BookmarkService) GetBookmarkByID(id string) (*SSHBookmark, error) {
 	return bs.core.GetMasked(id)
 }
 func (bs *BookmarkService) SaveBookmark(b SSHBookmark) (string, error) {
-	if err := validateBookmarkProxy(b); err != nil {
-		return "", err
+	proto, ok := termio.ParseProtocol(b.Protocol)
+	if !ok {
+		return "", usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
+	}
+	if proto == termio.ProtocolSSH {
+		if err := validateBookmarkProxy(b); err != nil {
+			return "", err
+		}
 	}
 	return bs.core.Save(b)
 }
@@ -102,22 +129,41 @@ func (bs *BookmarkService) DeleteGroup(name string) error {
 	return bs.core.DeleteGroup(name)
 }
 func (bs *BookmarkService) TestConnection(b SSHBookmark) error {
-	prep, err := bs.core.PrepareTest(b)
-	if err != nil {
-		return err
+	proto, ok := termio.ParseProtocol(b.Protocol)
+	if !ok {
+		return usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
 	}
-	hops, err := bs.core.ResolveHops(prep.Endpoint, prep.JumpID)
-	if err != nil {
-		return err
+	switch proto {
+	case termio.ProtocolSSH:
+		prep, err := bs.core.PrepareTest(b)
+		if err != nil {
+			return err
+		}
+		hops, err := bs.core.ResolveHops(prep.Endpoint, prep.JumpID)
+		if err != nil {
+			return err
+		}
+		proxy, err := resolveDialProxy(b.ProxyMode, ssh.ProxyConfig{
+			Type: b.ProxyType, Host: b.ProxyHost, Port: b.ProxyPort,
+			User: b.ProxyUser, Password: prep.ProxyPassword,
+		}, bs.sshConfig())
+		if err != nil {
+			return err
+		}
+		return bs.sessions.testHops(hops, proxy)
+	case termio.ProtocolSerial:
+		return bs.sessions.testSerial(serial.OpenConfig{
+			Device:      b.SerialDevice,
+			BaudRate:    b.BaudRate,
+			DataBits:    b.DataBits,
+			Parity:      b.Parity,
+			StopBits:    b.StopBits,
+			FlowControl: b.FlowControl,
+			Charset:     b.Charset,
+		})
+	default:
+		return usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
 	}
-	proxy, err := resolveDialProxy(b.ProxyMode, ssh.ProxyConfig{
-		Type: b.ProxyType, Host: b.ProxyHost, Port: b.ProxyPort,
-		User: b.ProxyUser, Password: prep.ProxyPassword,
-	}, bs.sshConfig())
-	if err != nil {
-		return err
-	}
-	return bs.ssh.testHops(hops, proxy)
 }
 
 func validateBookmarkProxy(b SSHBookmark) error {

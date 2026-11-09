@@ -104,6 +104,7 @@ type Session struct {
 	stopOutput     chan struct{}
 	stopOutputOnce sync.Once
 	manager        *Manager
+	label          string
 	forwardAgent   bool
 	startupCmd     string
 	env            map[string]string
@@ -356,34 +357,6 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 	return sess.Resize(cols, rows)
 }
 
-func (m *Manager) SendToSession(sessionID, command string) error {
-	sess, err := m.GetSession(sessionID)
-	if err != nil {
-		return err
-	}
-	if sess.Stdin == nil {
-		return usererr.Coded("ssh.stdin_unavailable", "Standard input is not available")
-	}
-	_, err = sess.Stdin.Write([]byte(command + "\n"))
-	if err != nil {
-		m.logger.Error("Failed to write to stdin", zap.Error(err))
-	}
-	return err
-}
-
-func (m *Manager) ActiveSessions() []map[string]any {
-	sessions := make([]map[string]any, 0)
-	m.sessions.Range(func(_, value any) bool {
-		sess := value.(*Session)
-		sessions = append(sessions, map[string]any{
-			"id":        sess.ID,
-			"clientKey": sess.ClientKey,
-		})
-		return true
-	})
-	return sessions
-}
-
 func (m *Manager) notifyClosed(id string, reason CloseReason) {
 	if m.onClose != nil {
 		m.onClose(id, reason)
@@ -458,6 +431,7 @@ func newSession(m *Manager, clientKey string, client *cryptossh.Client, target E
 		OutputChan:     make(chan []byte, 200),
 		stopOutput:     make(chan struct{}),
 		outputBuffSize: 1024 * 10,
+		label:          sessionLabel(target),
 		forwardAgent:   target.ForwardAgent,
 		startupCmd:     target.StartupCmd,
 		env:            target.Env,

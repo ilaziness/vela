@@ -1,4 +1,4 @@
-# Vela — Cross-platform SSH & SFTP AI GUI client
+# Vela — Cross-platform SSH / SFTP / serial AI GUI client
 
 [English](README.en.md) | [中文](README.md)
 
@@ -9,13 +9,13 @@
 [![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
-A modern, cross-platform SSH & SFTP AI GUI built with Go and Wails v3.
+A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for developers and operators.
 
 ---
 
 ## 📖 Overview
 
-**Vela** is a fast, compact desktop app that puts SSH, SFTP, and an AI assistant in a native GUI. Built with [Wails v3](https://wails.io) and Go, it runs on Windows, macOS, and Linux, giving developers and operators a single tool for remote access, file management, and AI-assisted troubleshooting. The assistant can diagnose issues and run commands after approval, with remote exec, local filesystem tools (directory allowlist), web search, and custom MCP / Skill extensions. The UI is available in English, Simplified Chinese, and Traditional Chinese.
+**Vela** is a cross-platform desktop client for SSH logins, SFTP file management, local serial consoles, and a sidebar AI assistant. It is built with Go and [Wails v3](https://wails.io) and runs natively on Windows, macOS, and Linux. The UI is available in English, Simplified Chinese, and Traditional Chinese.
 
 ---
 
@@ -23,38 +23,33 @@ A modern, cross-platform SSH & SFTP AI GUI built with Go and Wails v3.
 
 **Connection & auth**
 
-- SSH login: password, private key, SSH Agent (Windows Pageant / macOS·Linux `SSH_AUTH_SOCK`), OpenSSH certificates, keyboard-interactive (OTP / 2FA)
-- Generate key pairs in-app; copy the public key; store the private key encrypted with the master password, or export it
-- Secrets protected by a master password (Argon2id + AES-GCM, in-process Vault)
-- ProxyJump; agent forwarding (`ForwardAgent`) so the remote host can use keys from the local agent
-- Dial through HTTP / SOCKS5 (global, or per bookmark: inherit / none / custom)
-- Keepalive and auto-reconnect; first-seen host keys, mismatch review, and known_hosts management
-- Import and export `~/.ssh/config`; bookmarks can set startup commands, environment variables, and `TERM`
-- Port forwarding: local, remote, and SOCKS5 dynamic
+- SSH login with password, private key, certificate, 2FA, or SSH Agent
+- Local serial consoles in the same terminal tabs as SSH
+- Jump hosts, HTTP / SOCKS proxies, and local / remote / dynamic port forwarding
+- Generate keys in-app; protect secrets with a master password
+- Keepalive and auto-reconnect; confirm and manage host keys
+- Import and export OpenSSH config
 
 **Terminal**
 
-- Multiple tabs: switch, drag, copy, refresh; in-terminal search (shortcut / context menu)
-- Session log: start/stop from the context menu and save terminal output to a local file (stdin is not recorded)
-- Zmodem (rz/sz): detect the protocol in the terminal, pick a folder or files, and show progress in the terminal
-- Command history hints
+- Multiple tabs shared by SSH and serial sessions
+- In-terminal search, encodings, and session log
+- Zmodem (rz / sz) file transfer on SSH sessions
+- Command history hints as you type
 
 **SFTP & bookmarks**
 
-- Dual-pane SFTP: local and remote directories side by side
-- File browser: upload, download, delete, rename, edit in place; chmod / chown on the remote side
-- Resume interrupted transfers; retry failed jobs; persist unfinished queues (restored per bookmark)
-- Multi-select batch download and delete; transfer task list
-- Bookmarks and groups for frequent hosts
+- Dual-pane local and remote files, with drag-and-drop transfer
+- Resume and retry; unfinished jobs are still there next time
+- Edit remote files in place; change permissions and ownership
+- Bookmark groups for SSH hosts and serial devices
 
 **Workflow**
 
-- Command library: snippets sent to multiple sessions in one click
-- Languages: English, Simplified Chinese, Traditional Chinese
-- Themes: light, dark, eye-care
-- Encrypted remote backup and restore across devices. Backups are encrypted on your computer before upload, and you can list, restore, or delete them anytime. Store them on your own backup server, a WebDAV drive (Nutstore, Nextcloud, NAS, and similar), or S3-compatible storage (MinIO, Cloudflare R2, Aliyun OSS, Tencent COS, and similar)
-- Automatic update check, download, and install
-- AI assistant: diagnose issues and run commands (with approval), plus remote exec, local filesystem tools (directory allowlist), web search, and custom MCP / Skill extensions
+- Command library: send a snippet to many sessions at once
+- Sidebar AI: advice for the current session, remote exec after approval; local files, web search, MCP, and Skills
+- Encrypt backups on the machine, then store them on your own server, WebDAV, or S3
+- English, Simplified Chinese, and Traditional Chinese; light / dark / eye-care themes; automatic updates
 
 ---
 

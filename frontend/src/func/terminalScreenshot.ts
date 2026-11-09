@@ -1,4 +1,4 @@
-import { useSSHTabsStore } from "../stores/ssh";
+import { useSessionTabsStore } from "../stores/sessionTabs";
 import { terminalInstances } from "../stores/terminalInstances";
 import {
   CurrentSSHBindStatus,
@@ -23,9 +23,10 @@ function webglCellCanvas(screen: Element): HTMLCanvasElement | undefined {
 
 /** PNG of the current connected tab's WebGL2 terminal, or null if not capturable. */
 export async function captureCurrentTerminalPng(): Promise<File | null> {
-  const { currentTab, getByIndex } = useSSHTabsStore.getState();
+  const { currentTab, getByIndex } = useSessionTabsStore.getState();
   const tab = getByIndex(currentTab);
-  const linkId = tab?.sshInfo?.linkID;
+  const linkId = tab?.sessionLink?.linkID;
+  // Serial tabs have no host/user/port — only require a connected linkID.
   if (
     resolveSSHBindState(tab).status !== CurrentSSHBindStatus.Connected ||
     !linkId
@@ -33,7 +34,9 @@ export async function captureCurrentTerminalPng(): Promise<File | null> {
     return null;
   }
 
-  const screen = terminalInstances.get(linkId)?.element?.querySelector(".xterm-screen");
+  const screen = terminalInstances
+    .get(linkId)
+    ?.element?.querySelector(".xterm-screen");
   if (!screen) return null;
 
   const canvas = webglCellCanvas(screen);

@@ -31,8 +31,8 @@ declare module "@wailsio/runtime" {
             "eventLanguage": string;
             "eventNewVersion": services$0.NewVersion;
             "eventProgress": services$0.ProgressData;
-            "eventSSHSessionClosed": string;
-            "eventSSHSessionLogStopped": string;
+            "eventSessionClosed": string;
+            "eventSessionLogStopped": string;
             "eventSftpFilesDropped": services$0.SftpFilesDroppedData;
             "eventShortcut": services$0.ShortcutEvent;
             "eventTerminal": services$0.TerminalConfig;

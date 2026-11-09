@@ -37,10 +37,3 @@ func resolveDialProxy(mode string, custom ssh.ProxyConfig, global config.SSHConf
 		return p, nil
 	}
 }
-
-func (s *SSHService) globalDialProxy() (ssh.ProxyConfig, error) {
-	if s == nil || s.getSSHConfig == nil {
-		return ssh.ProxyConfig{}, nil
-	}
-	return resolveDialProxy("inherit", ssh.ProxyConfig{}, s.getSSHConfig())
-}

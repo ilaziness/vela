@@ -1,4 +1,4 @@
-# Vela — 跨平台 SSH & SFTP AI GUI 客户端
+# Vela — 跨平台 SSH / SFTP / 串口 AI GUI 客户端
 
 [中文](README.md) | [English](README.en.md)
 
@@ -9,13 +9,13 @@
 [![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
-一款基于 Go 和 Wails v3 构建的现代化、跨平台 SSH & SFTP AI GUI 应用。
+面向开发与运维的跨平台 SSH / SFTP / 串口桌面客户端，内置 AI 助手。
 
 ---
 
 ## 📖 简介
 
-**Vela** 是一个简洁、响应迅速的桌面应用程序，将 SSH、SFTP 与 AI 助手带到您的指尖——无需离开原生 GUI 环境。使用 [Wails v3](https://wails.io) 和 Go 构建，Vela 原生运行于 Windows、macOS 和 Linux，为开发人员和系统管理员提供统一的远程访问、文件管理与 AI 排障工具。AI 助手可分析问题并在批准后执行命令，支持远程命令、本地文件系统（目录白名单）、网络搜索，以及自定义 MCP 与 Skill 扩展。界面支持英语、简体中文和繁体中文。
+**Vela** 是一款跨平台桌面客户端，用来做 SSH 远程登录、SFTP 文件管理、本机串口控制，以及侧栏里的 AI 助手。基于 Go 和 [Wails v3](https://wails.io) 构建，原生运行于 Windows、macOS 和 Linux。界面支持英语、简体中文和繁体中文。
 
 ---
 
@@ -23,38 +23,33 @@
 
 **连接与认证**
 
-- SSH 登录：密码、私钥、SSH Agent（Windows Pageant / macOS·Linux `SSH_AUTH_SOCK`）、OpenSSH 证书、keyboard-interactive（OTP/二次验证）
-- 应用内生成 SSH 密钥对，公钥可复制，私钥按主密码加密保存或导出
-- 敏感信息主密码保护（Argon2id + AES-GCM，进程内 Vault）
-- ProxyJump 跳板连接；Agent 转发（`ForwardAgent`），远端可继续使用本机 Agent 密钥
-- 经 HTTP / SOCKS5 代理拨号（全局或书签 inherit / none / custom）
-- 连接保活与自动重连；主机密钥首次确认、变更对比与 known_hosts 管理
-- 导入、导出 `~/.ssh/config`；书签可配置启动命令、环境变量与 `TERM`
-- SSH 端口转发：本地转发、远程转发、SOCKS5 动态代理
+- SSH 登录：密码、私钥、证书、二次验证、SSH Agent
+- 本机串口直连，会话开在和 SSH 相同的终端标签里
+- 跳板、HTTP / SOCKS 代理，以及本地 / 远程 / 动态端口转发
+- 应用内生成密钥，主密码保护口令和私钥
+- 连接保活与自动重连，主机密钥可确认、可管理
+- 导入、导出 OpenSSH 配置
 
 **终端**
 
-- 多标签切换、拖动、复制、刷新；终端内搜索（快捷键 / 右键）
-- 会话日志：右键开始/停止记录，将终端输出保存到本地文件（不记录 stdin）
-- Zmodem（rz/sz）：终端内自动识别传输协议，弹窗选择目录或文件完成收发，进度显示在终端
-- 历史输入命令提示
+- 多标签终端，SSH 与串口共用
+- 终端内搜索、中文编码、会话日志
+- SSH 会话支持 Zmodem（rz / sz）传文件
+- 输入时提示历史命令
 
 **SFTP 与书签**
 
-- SFTP 左右分栏，本机与远程目录并排管理
-- SFTP 文件浏览器：上传、下载、删除、重命名、就地编辑；修改远程权限与属主（chmod / chown）
-- 断点续传；传输失败可重试；未完成任务队列持久化（按书签恢复）
-- 多选批量下载与删除；传输任务管理
-- 书签管理与分组，快速连接常用服务器
+- 本机与远程左右分栏，拖拽传输
+- 断点续传、失败重试，未完成任务下次打开还在
+- 远程文件就地编辑，可改权限和属主
+- 书签分组，收藏 SSH 主机和串口设备
 
 **效率与运维**
 
-- 命令库：自定义命令片段，一键发送到多个会话
-- 多语言：英语、简体中文、繁体中文
-- 主题切换：亮色、暗色、护眼等方案
-- 加密远程备份与多设备恢复：备份在本机加密后再上传，可随时查看、恢复或删除。支持自建备份服务、WebDAV 网盘（坚果云、Nextcloud、NAS 等）以及 S3 兼容存储（MinIO、Cloudflare R2、阿里云 OSS、腾讯云 COS 等）
-- 自动更新检查，自动下载安装新版
-- AI 助手：分析问题并自动执行命令（需批准），内置远程命令执行工具，本地文件系统工具（目录白名单），网络搜索，并支持自定义 MCP 和 Skill 扩展
+- 命令库：常用片段一次发到多个会话
+- 侧栏 AI 助手：针对当前会话给建议，远程执行需批准；可接本地文件、网络搜索、MCP 和 Skill
+- 备份在本机加密后存到自建服务、WebDAV 或 S3，换设备可恢复
+- 英语、简体中文、繁体中文；亮色 / 暗色 / 护眼主题；自动检查更新
 
 ---
 

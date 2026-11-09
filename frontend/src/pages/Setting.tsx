@@ -13,10 +13,10 @@ import {
   KeybindingsSettings,
   About,
 } from "../components/settings";
-import OpBar from "../components/OpBar";
-import Message from "../components/Message";
-import Loading from "../components/Loading";
-import PasswordInputDialog from "../components/PasswordInputDialog";
+import OpBar from "../components/common/OpBar";
+import Message from "../components/common/Message";
+import Loading from "../components/common/Loading";
+import PasswordInputDialog from "../components/common/PasswordInputDialog";
 import {
   Config,
   AppInfo,

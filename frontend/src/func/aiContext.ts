@@ -1,30 +1,36 @@
-import { useSSHTabsStore } from '../stores/ssh';
-import { ConnectionStatus, type SSHTab } from '../types/ssh';
-import { SSHContext } from '../../bindings/github.com/ilaziness/vela/services/models';
+import { useSessionTabsStore } from "../stores/sessionTabs";
+import { ConnectionStatus } from "../types/ssh";
+import {
+  SessionProtocol,
+  sessionTabLabel,
+  type SessionTab,
+} from "../types/session";
+import { SSHContext } from "../../bindings/github.com/ilaziness/vela/services/models";
 
-/** SSH bind state of the currently active SSH tab (for AI sidebar). */
+/** Bind state of the currently active session tab (for AI sidebar). */
 export enum CurrentSSHBindStatus {
-  Connected = 'connected',
-  Connecting = 'connecting',
-  Disconnected = 'disconnected',
-  None = 'none',
+  Connected = "connected",
+  Connecting = "connecting",
+  Disconnected = "disconnected",
+  None = "none",
 }
 
 export interface CurrentSSHBindState {
   status: CurrentSSHBindStatus;
-  /** e.g. user@host:port when host info exists */
+  /** e.g. user@host:port or COM3 @ 115200 */
   targetLabel: string;
-  /** Present only when this tab has an Exec-ready session. */
+  protocol?: SessionProtocol;
+  /** Present only for SSH when Exec-ready. */
   context?: SSHContext;
 }
 
-export const RUN_SSH_COMMAND_TOOL = 'run_ssh_command';
-export const UPSERT_PLAN_TOOL = 'upsert_plan';
-export const USE_SKILL_TOOL = 'use_skill';
-export const READ_LOCAL_FILE_TOOL = 'read_local_file';
-export const WRITE_LOCAL_FILE_TOOL = 'write_local_file';
-export const LIST_LOCAL_DIRECTORY_TOOL = 'list_local_directory';
-export const WEB_SEARCH_TOOL = 'web_search';
+export const RUN_SSH_COMMAND_TOOL = "run_ssh_command";
+export const UPSERT_PLAN_TOOL = "upsert_plan";
+export const USE_SKILL_TOOL = "use_skill";
+export const READ_LOCAL_FILE_TOOL = "read_local_file";
+export const WRITE_LOCAL_FILE_TOOL = "write_local_file";
+export const LIST_LOCAL_DIRECTORY_TOOL = "list_local_directory";
+export const WEB_SEARCH_TOOL = "web_search";
 
 const KNOWN_CHAT_TOOLS = new Set([
   RUN_SSH_COMMAND_TOOL,
@@ -41,62 +47,96 @@ export function isKnownChatTool(toolName: string): boolean {
 }
 
 /** Legacy UI-only field once merged into tool input; strip from display. */
-const LEGACY_SSH_TARGET_INPUT_KEY = '_sshTarget';
+const LEGACY_SSH_TARGET_INPUT_KEY = "_sshTarget";
 
 /** Remove non-model fields from run_ssh_command tool input before showing in Chat. */
-export function sanitizeToolInputForDisplay(toolName: string, input: unknown): unknown {
+export function sanitizeToolInputForDisplay(
+  toolName: string,
+  input: unknown,
+): unknown {
   if (toolName !== RUN_SSH_COMMAND_TOOL) return input;
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
-  const { [LEGACY_SSH_TARGET_INPUT_KEY]: _removed, ...rest } = input as Record<string, unknown>;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const { [LEGACY_SSH_TARGET_INPUT_KEY]: _removed, ...rest } = input as Record<
+    string,
+    unknown
+  >;
   void _removed;
   return rest;
 }
 
-function formatTargetLabel(user: string, host: string, port: number): string {
-  return `${user}@${host}:${port}`;
-}
-
 /**
- * Resolve bind state for one SSH tab — never looks at other tabs.
- * Exec is ready once store sshInfo.linkID exists (SSH handshake), not waiting
- * for terminal WebSocket. Disconnected clears that linkID in the tabs store.
+ * Resolve bind state for one session tab — never looks at other tabs.
+ * Missing/unknown protocol → unbound. SSHContext only for protocol===ssh.
  */
-export function resolveSSHBindState(tab: SSHTab | undefined): CurrentSSHBindState {
-  const sshInfo = tab?.sshInfo;
+export function resolveSSHBindState(
+  tab: SessionTab | undefined,
+): CurrentSSHBindState {
+  const sessionLink = tab?.sessionLink;
   const status = tab?.connectionStatus;
 
-  if (!sshInfo?.host || !sshInfo.user || typeof sshInfo.port !== 'number' || sshInfo.port <= 0) {
-    return { status: CurrentSSHBindStatus.None, targetLabel: '' };
+  if (
+    !sessionLink?.protocol ||
+    (sessionLink.protocol !== SessionProtocol.SSH &&
+      sessionLink.protocol !== SessionProtocol.Serial)
+  ) {
+    return { status: CurrentSSHBindStatus.None, targetLabel: "" };
   }
 
-  const targetLabel = formatTargetLabel(sshInfo.user, sshInfo.host, sshInfo.port);
+  const targetLabel = sessionTabLabel(sessionLink);
 
   if (status === ConnectionStatus.Disconnected) {
-    return { status: CurrentSSHBindStatus.Disconnected, targetLabel };
-  }
-
-  if (sshInfo.linkID) {
     return {
-      status: CurrentSSHBindStatus.Connected,
+      status: CurrentSSHBindStatus.Disconnected,
       targetLabel,
-      context: new SSHContext({
-        link_id: sshInfo.linkID,
-        host: sshInfo.host,
-        port: sshInfo.port,
-        user: sshInfo.user,
-      }),
+      protocol: sessionLink.protocol,
     };
   }
 
-  if (status === ConnectionStatus.Connecting) {
-    return { status: CurrentSSHBindStatus.Connecting, targetLabel };
+  if (sessionLink.linkID) {
+    const state: CurrentSSHBindState = {
+      status: CurrentSSHBindStatus.Connected,
+      targetLabel,
+      protocol: sessionLink.protocol,
+    };
+    if (
+      sessionLink.protocol === SessionProtocol.SSH &&
+      sessionLink.host &&
+      sessionLink.user &&
+      typeof sessionLink.port === "number" &&
+      sessionLink.port > 0
+    ) {
+      // Full SSHContext only for ssh — backend EnableSSH still gated by Hub protocol.
+      state.context = new SSHContext({
+        link_id: sessionLink.linkID,
+        host: sessionLink.host,
+        port: sessionLink.port,
+        user: sessionLink.user,
+      });
+    } else if (sessionLink.protocol === SessionProtocol.Serial) {
+      // link_id only: Hub resolves serial Current session; never enables Exec.
+      state.context = new SSHContext({
+        link_id: sessionLink.linkID,
+        host: "",
+        port: 0,
+        user: "",
+      });
+    }
+    return state;
   }
 
-  return { status: CurrentSSHBindStatus.None, targetLabel: '' };
+  if (status === ConnectionStatus.Connecting) {
+    return {
+      status: CurrentSSHBindStatus.Connecting,
+      targetLabel,
+      protocol: sessionLink.protocol,
+    };
+  }
+
+  return { status: CurrentSSHBindStatus.None, targetLabel: "" };
 }
 
-/** Active SSH tab only — never falls back to another tab. */
+/** Active session tab only — never falls back to another tab. */
 export function getCurrentSSHBindState(): CurrentSSHBindState {
-  const { currentTab, getByIndex } = useSSHTabsStore.getState();
+  const { currentTab, getByIndex } = useSessionTabsStore.getState();
   return resolveSSHBindState(getByIndex(currentTab));
 }

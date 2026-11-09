@@ -10,7 +10,7 @@ import { useNavigate } from "react-router";
 import { Events } from "@wailsio/runtime";
 import { useToolStore } from "../stores/tool";
 import { Tool } from "../types/tool";
-import OpBar from "../components/OpBar";
+import OpBar from "../components/common/OpBar";
 import { getToolIcon } from "../func/toolIcons";
 import { dragRegionSx, useFrameless } from "../hooks/useFrameless";
 import { t } from "../i18n";

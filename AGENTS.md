@@ -26,7 +26,8 @@
 │   ├── register.go           # 组合根：注入依赖、注册 Service、Shutdown
 │   ├── windows.go            # 多窗口生命周期
 │   ├── app_service.go        # 主窗口/对话框/更新/WS 地址
-│   ├── ssh_service.go        # SSH RPC 转发与关会话编排
+│   ├── session_service.go    # 多协议 Connect/Resize/Close/日志/列串口；Hub 编排
+│   ├── ssh_service.go        # SSH 专属 RPC（hostkey/known_hosts/SFTP/metrics）
 │   ├── ssh_tunnel.go         # 隧道 RPC
 │   ├── sftp_service.go       # SFTP RPC 与系统对话框
 │   ├── bookmark_service.go   # 书签 RPC
@@ -37,12 +38,14 @@
 │   ├── tool_service.go       # 工具 RPC
 │   └── log_service.go        # 日志（持有 *zap.Logger）
 ├── internal/                 # 引擎与基础设施（禁止 import services / Wails）
+│   ├── termio/               # Protocol + Session 接口 + Hub（终端会话 mux）
 │   ├── ssh/                  # 连接、会话、known_hosts、远程信息
+│   ├── serial/               # 串口引擎（go.bug.st/serial；同口互斥；无自动重连）
 │   ├── sftp/                 # SFTP 协议
 │   ├── tunnel/               # 端口转发
-│   ├── termws/               # 本机终端 WebSocket
+│   ├── termws/               # 本机终端 WebSocket（经 Hub 取 Stdin/Output）
 │   ├── transfer/             # 传输进度
-│   ├── bookmark/             # 书签业务与跳板链解析
+│   ├── bookmark/             # 书签业务与跳板链解析（跳板仅 ssh）
 │   ├── command/              # 内置/用户命令
 │   ├── config/               # TOML 配置
 │   ├── secret/               # 加解密与进程内 Vault
@@ -76,7 +79,16 @@
 │   │   └── github.com/ilaziness/vela/services/  # 暴露给前端的函数、类型等
 │   ├── public/               # 公共静态资源
 │   ├── src/
-│   │   ├── components/       # React UI 组件（MUI）
+│   │   ├── components/       # React UI 组件（MUI；按职责分目录）
+│   │   │   ├── session/      # SessionTabs / SessionTabBody
+│   │   │   ├── terminal/     # XTerm 终端
+│   │   │   ├── bookmark/     # 书签
+│   │   │   ├── sftp/         # SFTP
+│   │   │   ├── ssh/          # SSH 专属（隧道/hostkey/状态栏）
+│   │   │   ├── serial/       # 串口专用 UI
+│   │   │   ├── command/      # 命令管理
+│   │   │   ├── tools/        # 工具箱
+│   │   │   ├── common/       # Header / OpBar / ConnectionForm
 │   │   │   ├── ai/           # AI 助手（AISideBar、GenkitAdapter 等）
 │   │   │   ├── settings/     # 设置页子组件
 │   │   │   └── subwindow/    # 子窗口组件
@@ -84,9 +96,9 @@
 │   │   ├── hooks/            # 自定义 React Hooks
 │   │   ├── i18n/             # 前端 catalog 缓存与 t()/tf()（唯一源在 Go embed）
 │   │   ├── pages/            # 页面级组件（配合 React Router）
-│   │   ├── stores/           # 状态管理（zustand）
+│   │   ├── stores/           # 状态管理（zustand；sessionTabs）
 │   │   ├── theme/            # 主题配色
-│   │   ├── types/            # TypeScript 类型定义
+│   │   ├── types/            # TypeScript 类型定义（session.ts 协议/会话）
 │   │   ├── main.tsx          # 前端入口
 │   │   └── routes.ts         # 路由定义
 │   ├── index.html

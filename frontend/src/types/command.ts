@@ -25,9 +25,11 @@ export interface CommandHistory {
     command: string;
 }
 
-export interface SSHTunnelSession {
+/** Active terminal session row from SessionService.GetActiveSessions. */
+export interface TerminalSessionItem {
     id: string;
-    clientKey: string;
+    protocol: string;
+    label: string;
 }
 
 export interface SendCommandRequest {

@@ -9,7 +9,7 @@ import {
   FormControlLabel,
   Switch,
 } from "@mui/material";
-import FormRow from "../FormRow";
+import FormRow from "../common/FormRow";
 import { useMessageStore } from "../../stores/message";
 import {
   Config,

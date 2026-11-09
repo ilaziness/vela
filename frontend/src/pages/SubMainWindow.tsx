@@ -1,11 +1,11 @@
 import { Box } from "@mui/material";
-import SSHTabs from "../components/SSHTabs.tsx";
+import SessionTabs from "../components/session/SessionTabs.tsx";
 import Header from "../components/subwindow/Header.tsx";
-import Message from "../components/Message.tsx";
-import HostKeyPrompt from "../components/HostKeyPrompt";
-import KeyboardInteractivePrompt from "../components/KeyboardInteractivePrompt";
-import PasswordInputDialog from "../components/PasswordInputDialog";
-import ShortcutListener from "../components/ShortcutListener";
+import Message from "../components/common/Message.tsx";
+import HostKeyPrompt from "../components/ssh/HostKeyPrompt";
+import KeyboardInteractivePrompt from "../components/ssh/KeyboardInteractivePrompt";
+import PasswordInputDialog from "../components/common/PasswordInputDialog";
+import ShortcutListener from "../components/common/ShortcutListener";
 
 function SubMainWindow() {
   return (
@@ -20,7 +20,7 @@ function SubMainWindow() {
         }}
       >
         <Header />
-        <SSHTabs />
+        <SessionTabs />
       </Box>
       <Message />
       <HostKeyPrompt />

@@ -21,7 +21,7 @@ import {
   FormControl,
 } from "@mui/material";
 import { Refresh, Save, Delete as DeleteIcon } from "@mui/icons-material";
-import FormRow from "../FormRow";
+import FormRow from "../common/FormRow";
 import { useMessageStore } from "../../stores/message";
 import {
   ListBackups,

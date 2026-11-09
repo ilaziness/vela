@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/sshconfig"
 	"github.com/ilaziness/vela/internal/termcharset"
+	"github.com/ilaziness/vela/internal/termio"
 )
 
 const ImportedGroupName = "Imported"
@@ -115,6 +116,10 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 
 	entries := make([]sshconfig.HostEntry, 0, len(bookmarks))
 	for _, b := range bookmarks {
+		if proto, ok := termio.ParseProtocol(b.Protocol); ok && proto != termio.ProtocolSSH {
+			warnings = append(warnings, fmt.Sprintf("%s: skipped non-SSH bookmark", b.Title))
+			continue
+		}
 		e := sshconfig.HostEntry{
 			Alias:         b.Title,
 			HostName:      b.Host,
@@ -207,6 +212,7 @@ func entryToBookmark(e sshconfig.HostEntry, title, groupName string) Bookmark {
 	b := Bookmark{
 		GroupName:  groupName,
 		Title:      title,
+		Protocol:   string(termio.ProtocolSSH),
 		Host:       host,
 		Port:       port,
 		User:       e.User,

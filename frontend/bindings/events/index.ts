@@ -74,14 +74,14 @@ export const EventNewVersion = "eventNewVersion";
 export const EventProgress = "eventProgress";
 
 /**
- * Name of the custom event "eventSSHSessionClosed".
+ * Name of the custom event "eventSessionClosed".
  */
-export const EventSSHSessionClosed = "eventSSHSessionClosed";
+export const EventSessionClosed = "eventSessionClosed";
 
 /**
- * Name of the custom event "eventSSHSessionLogStopped".
+ * Name of the custom event "eventSessionLogStopped".
  */
-export const EventSSHSessionLogStopped = "eventSSHSessionLogStopped";
+export const EventSessionLogStopped = "eventSessionLogStopped";
 
 /**
  * Name of the custom event "eventSftpFilesDropped".

@@ -137,7 +137,7 @@ func testBookmarkService(t *testing.T, keyPath, keyPass string) (*Service, strin
 	now := time.Now()
 	const id = "bm-1"
 	if err := db.BookmarkRepo.InsertBookmark(&database.BookmarkDB{
-		ID: id, GroupID: group.ID, Title: "t", Host: "h", Port: 22, User: "root",
+		ID: id, GroupID: group.ID, Title: "t", Protocol: "ssh", Host: "h", Port: 22, User: "root",
 		Password: login, PrivateKey: keyPath, PrivateKeyPassword: keyPassword,
 		ProxyJumpID: "jump-old",
 		ProxyMode:   "custom", ProxyType: "socks5", ProxyHost: "127.0.0.1", ProxyPort: 1080,

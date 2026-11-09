@@ -2,33 +2,33 @@ import { Box, Stack } from "@mui/material";
 import AddBoxIcon from "@mui/icons-material/AddBox";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
-import { useSSHTabsStore } from "../../stores/ssh";
+import { useSessionTabsStore } from "../../stores/sessionTabs";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
 import { genTabIndex } from "../../func/service";
 import { APP_HEADER_RAIL_WIDTH } from "../../func/aiSidebar";
 import { ShortcutAction } from "../../func/shortcuts";
 import { useMemo, useCallback } from "react";
 import { dragRegionSx, useFrameless } from "../../hooks/useFrameless";
-import { RailMenuButton } from "../RailIconButton";
-import BookmarkConnectPanel from "../BookmarkConnectPanel";
+import { RailMenuButton } from "../common/RailIconButton";
+import BookmarkConnectPanel from "../bookmark/BookmarkConnectPanel";
 import { useUIStore } from "../../stores/ui";
 import { newConnectionTabName, t, useLanguage } from "../../i18n";
 
 export default function Header() {
   const lang = useLanguage();
-  const { sshTabs, pushTab } = useSSHTabsStore();
+  const { sessionTabs, pushTab } = useSessionTabsStore();
   const frameless = useFrameless();
   const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
   const toggleSidebarOpen = useAIAssistantStore((s) => s.toggleSidebarOpen);
   const handleAddTab = useCallback(() => {
-    const number = sshTabs.length + 1;
+    const number = sessionTabs.length + 1;
     pushTab({
       index: `${genTabIndex()}`,
       name: newConnectionTabName(number),
     });
-  }, [sshTabs.length, pushTab]);
+  }, [sessionTabs.length, pushTab]);
 
   const menuItems = useMemo(() => {
     void lang;

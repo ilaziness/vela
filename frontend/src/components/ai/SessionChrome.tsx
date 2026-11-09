@@ -15,7 +15,7 @@ import {
 import { Add, Close, Delete } from "@mui/icons-material";
 import { ChatConversationHeaderActions } from "@mui/x-chat";
 import { useAIAssistantStore } from "../../stores/aiAssistant";
-import { useSSHTabsStore } from "../../stores/ssh";
+import { useSessionTabsStore } from "../../stores/sessionTabs";
 import {
   CurrentSSHBindStatus,
   resolveSSHBindState,
@@ -62,9 +62,9 @@ function useCurrentSSHIndicator(): {
   hint: string;
   status: CurrentSSHBindStatus;
 } {
-  const currentTab = useSSHTabsStore((s) => s.currentTab);
-  const tab = useSSHTabsStore((s) =>
-    s.sshTabs.find((item) => item.index === currentTab),
+  const currentTab = useSessionTabsStore((s) => s.currentTab);
+  const tab = useSessionTabsStore((s) =>
+    s.sessionTabs.find((item) => item.index === currentTab),
   );
   const bind = resolveSSHBindState(tab);
 
@@ -72,26 +72,26 @@ function useCurrentSSHIndicator(): {
     case CurrentSSHBindStatus.Connected:
       return {
         status: bind.status,
-        line: t("ai.session.ssh_connected", bind.targetLabel),
+        line: t("ai.session.bind_connected", bind.targetLabel),
         hint: "",
       };
     case CurrentSSHBindStatus.Connecting:
       return {
         status: bind.status,
-        line: t("ai.session.ssh_connecting", bind.targetLabel),
+        line: t("ai.session.bind_connecting", bind.targetLabel),
         hint: "",
       };
     case CurrentSSHBindStatus.Disconnected:
       return {
         status: bind.status,
-        line: t("ai.session.ssh_disconnected", bind.targetLabel),
-        hint: t("ai.session.ssh_disconnected_hint"),
+        line: t("ai.session.bind_disconnected", bind.targetLabel),
+        hint: t("ai.session.bind_disconnected_hint"),
       };
     default:
       return {
         status: CurrentSSHBindStatus.None,
-        line: t("ai.session.ssh_none"),
-        hint: t("ai.session.ssh_none_hint"),
+        line: t("ai.session.bind_none"),
+        hint: t("ai.session.bind_none_hint"),
       };
   }
 }

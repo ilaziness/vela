@@ -24,9 +24,16 @@ type SSHPromptContext struct {
 	User string
 }
 
+// SerialPromptContext serial-port context for the system prompt.
+type SerialPromptContext struct {
+	Device   string
+	BaudRate int
+}
+
 // PromptOptions controls which capability sections are included in the system prompt.
 type PromptOptions struct {
 	SSH             *SSHPromptContext
+	Serial          *SerialPromptContext
 	Remote          *ssh.RemoteSystemInfo
 	EnableSSH       bool
 	EnableFS        bool
@@ -86,7 +93,7 @@ func BuildSystemPromptOpts(opts PromptOptions) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(body))
 	appendAllowDirsSection(&b, opts)
-	appendSSHContextSection(&b, opts)
+	appendCurrentSessionSection(&b, opts)
 	appendCurrentPlanSection(&b, opts.PlanJSON)
 	return b.String()
 }
@@ -110,9 +117,9 @@ func renderedSystemText(rendered dotprompt.RenderedPrompt) string {
 func fallbackSystemPrompt(opts PromptOptions, uiLang string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Current time: %s.\n\n", time.Now().Format("2006-01"))
-	b.WriteString("You are Vela's built-in AI assistant (Agent) in an SSH desktop client sidebar.\n")
+	b.WriteString("You are Vela's built-in AI assistant (Agent) in a desktop terminal client sidebar. Current protocol is under Current session — do not assume SSH by default.\n")
 	fmt.Fprintf(&b, "Respond in the user's UI language: %s (including refusals).\n", uiLang)
-	b.WriteString("Only answer operations-related questions (Linux/Unix, SSH, servers, networking, processes, services, logs, files, scripts, configs). If a message mixes topics, answer only the operations part. If unrelated, do not answer it, do not use tools, and reply briefly that you cannot answer.\n")
+	b.WriteString("Only answer operations-related questions (Linux/Unix, terminals, servers, networking, processes, services, logs, files, scripts, configs). If a message mixes topics, answer only the operations part. If unrelated, do not answer it, do not use tools, and reply briefly that you cannot answer.\n")
 	b.WriteString("upsert_plan: for ≥2 steps or probe→decide→execute, submit a full snapshot; empty tasks clears the plan. Mark a step running before work and done/failed as soon as that step finishes.\n")
 	if opts.EnableSSH {
 		b.WriteString("run_ssh_command: user approval required; one short command per call (preferably ≤300 characters, single-line JSON string); prefer read-only probes; call out risk before destructive commands.\n")
@@ -147,18 +154,32 @@ func appendAllowDirsSection(b *strings.Builder, opts PromptOptions) {
 	}
 }
 
-func appendSSHContextSection(b *strings.Builder, opts PromptOptions) {
+func appendCurrentSessionSection(b *strings.Builder, opts PromptOptions) {
+	if opts.Serial != nil {
+		b.WriteString(`
+
+## Current session
+protocol=serial. Bound to a local serial port. run_ssh_command is not available. There is no remote system probe. Give terminal/serial advice for this device; upsert_plan remains available.
+`)
+		if d := strings.TrimSpace(opts.Serial.Device); d != "" {
+			fmt.Fprintf(b, "- Device: %s\n", d)
+		}
+		if opts.Serial.BaudRate > 0 {
+			fmt.Fprintf(b, "- Baud rate: %d\n", opts.Serial.BaudRate)
+		}
+		return
+	}
 	if !isValidSSHContext(opts.SSH) || !opts.EnableSSH {
 		b.WriteString(`
 
-## Current SSH context
-No usable SSH session. Do not call run_ssh_command. Do not assume hosts from earlier chat are reachable. General Linux/Unix and SSH advice is still in scope; upsert_plan remains available.`)
+## Current session
+No session bound. Do not call run_ssh_command. Do not assume hosts from earlier chat are reachable. General Linux/Unix and terminal advice is still in scope; upsert_plan remains available.`)
 		return
 	}
 	b.WriteString(`
 
-## Current SSH context
-Connected; run_ssh_command is available (user approval required). Operations questions default to this host. This connection is authoritative — do not assume commands still run on hosts mentioned only in chat history.
+## Current session
+protocol=ssh. Connected; run_ssh_command is available (user approval required). Operations questions default to this host. This connection is authoritative — do not assume commands still run on hosts mentioned only in chat history.
 `)
 	fmt.Fprintf(b, "- Connection: %s@%s:%d\n", opts.SSH.User, opts.SSH.Host, opts.SSH.Port)
 

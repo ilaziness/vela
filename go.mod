@@ -16,6 +16,7 @@ require (
 	github.com/things-go/go-socks5 v0.1.4
 	github.com/wailsapp/wails/v3 v3.1.0
 	github.com/xx25/go-zmodem v0.0.0-20260928123519-057a34b28431
+	go.bug.st/serial v1.8.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0

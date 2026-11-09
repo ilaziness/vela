@@ -13,8 +13,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/command"
-	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/system"
+	"github.com/ilaziness/vela/internal/termio"
 )
 
 type Client struct {
@@ -31,18 +31,18 @@ type Client struct {
 
 type Server struct {
 	logger     *zap.Logger
-	ssh        *ssh.Manager
+	hub        *termio.Hub
 	onClose    func(sessionID string)
 	httpServer *http.Server
 	clients    sync.Map
 	addr       string
 }
 
-func NewServer(logger *zap.Logger, sshMgr *ssh.Manager, onClose func(sessionID string)) *Server {
+func NewServer(logger *zap.Logger, hub *termio.Hub, onClose func(sessionID string)) *Server {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Server{logger: logger, ssh: sshMgr, onClose: onClose}
+	return &Server{logger: logger, hub: hub, onClose: onClose}
 }
 
 // AcceptHistory reports whether a frontend-submitted shell line may be stored.
@@ -135,21 +135,26 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			s.onClose(sessionID)
 		}
 	}
-	if err := s.ssh.Start(sessionID, cols, rows); err != nil {
-		s.logger.Error("Failed to start SSH session", zap.Error(err), zap.String("id", sessionID))
+	sess, ok := s.hub.Get(sessionID)
+	if !ok || sess == nil {
 		cleanup()
-		http.Error(w, "Failed to start SSH session", http.StatusInternalServerError)
+		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
-	sess, err := s.ssh.GetSession(sessionID)
-	if err != nil || sess.Stdin == nil {
+	if err := sess.Start(cols, rows); err != nil {
+		s.logger.Error("Failed to start session", zap.Error(err), zap.String("id", sessionID))
 		cleanup()
-		http.Error(w, "SSH connection not found", http.StatusNotFound)
+		http.Error(w, "Failed to start session", http.StatusInternalServerError)
+		return
+	}
+	if sess.Stdin() == nil {
+		cleanup()
+		http.Error(w, "Session stdin unavailable", http.StatusNotFound)
 		return
 	}
 	client := &Client{
 		done:      make(chan struct{}),
-		stdin:     sess.Stdin,
+		stdin:     sess.Stdin(),
 		sessionID: sessionID,
 		logger:    s.logger,
 		capture:   &command.LineCapture{},
@@ -170,7 +175,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	client.conn = connWS
 	s.clients.Store(sessionID, client)
 	go client.readLoop()
-	go client.writeLoop(sess.OutputChan)
+	go client.writeLoop(sess.Output())
 	client.ping()
 	client.closeDone()
 	s.clients.Delete(sessionID)
@@ -224,7 +229,7 @@ func (c *Client) readLoop() {
 	}
 }
 
-func (c *Client) writeLoop(outputChan chan []byte) {
+func (c *Client) writeLoop(outputChan <-chan []byte) {
 	defer c.closeDone()
 	ctx := context.Background()
 	for {

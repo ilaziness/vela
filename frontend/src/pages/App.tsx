@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Box, CircularProgress } from "@mui/material";
-import SSHTabs from "../components/SSHTabs.tsx";
-import Header from "../components/Header.tsx";
-import Message from "../components/Message.tsx";
-import PasswordInputDialog from "../components/PasswordInputDialog.tsx";
-import VaultUnlockGate from "../components/VaultUnlockGate.tsx";
-import HostKeyPrompt from "../components/HostKeyPrompt";
-import KeyboardInteractivePrompt from "../components/KeyboardInteractivePrompt";
-import ShortcutListener from "../components/ShortcutListener";
+import SessionTabs from "../components/session/SessionTabs.tsx";
+import Header from "../components/common/Header.tsx";
+import Message from "../components/common/Message.tsx";
+import PasswordInputDialog from "../components/common/PasswordInputDialog.tsx";
+import VaultUnlockGate from "../components/common/VaultUnlockGate.tsx";
+import HostKeyPrompt from "../components/ssh/HostKeyPrompt";
+import KeyboardInteractivePrompt from "../components/ssh/KeyboardInteractivePrompt";
+import ShortcutListener from "../components/common/ShortcutListener";
 import { AppService } from "../../bindings/github.com/ilaziness/vela/services";
 import * as ConfigService from "../../bindings/github.com/ilaziness/vela/services/configservice";
 
@@ -65,7 +65,7 @@ function App() {
         }}
       >
         <Header />
-        <SSHTabs onClose={() => AppService.MainWindowClose()} />
+        <SessionTabs onClose={() => AppService.MainWindowClose()} />
       </Box>
       <Message />
       <PasswordInputDialog />

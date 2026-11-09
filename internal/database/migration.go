@@ -35,6 +35,7 @@ var migrations = []Migration{
 	{Version: 16, Name: "add ai_messages run_id", Up: migrateAddAIMessageRunID},
 	{Version: 17, Name: "add ai_sessions plan_json", Up: migrateAddAISessionPlanJSON},
 	{Version: 18, Name: "i18n persist ids", Up: migrateI18nPersistIDs},
+	{Version: 19, Name: "add bookmark protocol serial", Up: migrateAddBookmarkProtocolSerial},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -482,6 +483,38 @@ func migrateI18nPersistIDs(db *sql.DB, logger *zap.Logger) error {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		logger.Debug("migration: renamed new ai session titles", zap.Int64("rows", n))
+	}
+	return nil
+}
+
+// migrateAddBookmarkProtocolSerial adds explicit protocol + serial columns (idempotent).
+// Existing rows default to protocol=ssh because they were SSH-only.
+func migrateAddBookmarkProtocolSerial(db *sql.DB, logger *zap.Logger) error {
+	cols := []struct {
+		name string
+		ddl  string
+	}{
+		{"protocol", `ALTER TABLE bookmarks ADD COLUMN protocol TEXT NOT NULL DEFAULT 'ssh'`},
+		{"serial_device", `ALTER TABLE bookmarks ADD COLUMN serial_device TEXT NOT NULL DEFAULT ''`},
+		{"baud_rate", `ALTER TABLE bookmarks ADD COLUMN baud_rate INTEGER NOT NULL DEFAULT 0`},
+		{"data_bits", `ALTER TABLE bookmarks ADD COLUMN data_bits INTEGER NOT NULL DEFAULT 0`},
+		{"parity", `ALTER TABLE bookmarks ADD COLUMN parity TEXT NOT NULL DEFAULT ''`},
+		{"stop_bits", `ALTER TABLE bookmarks ADD COLUMN stop_bits INTEGER NOT NULL DEFAULT 0`},
+		{"flow_control", `ALTER TABLE bookmarks ADD COLUMN flow_control TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, c := range cols {
+		var columnName string
+		err := db.QueryRow(`SELECT name FROM pragma_table_info('bookmarks') WHERE name = ?`, c.name).Scan(&columnName)
+		if err == sql.ErrNoRows {
+			if _, err := db.Exec(c.ddl); err != nil {
+				return fmt.Errorf("add column bookmarks.%s failed: %w", c.name, err)
+			}
+			logger.Debug("migration: added bookmarks column", zap.String("column", c.name))
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("check column bookmarks.%s failed: %w", c.name, err)
+		}
 	}
 	return nil
 }

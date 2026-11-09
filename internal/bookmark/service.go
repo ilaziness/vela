@@ -14,6 +14,7 @@ import (
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termcharset"
+	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
 )
@@ -36,6 +37,7 @@ type Bookmark struct {
 	GroupName          string   `json:"group_name"`
 	ID                 string   `json:"id"`
 	Title              string   `json:"title"`
+	Protocol           string   `json:"protocol"` // ssh | serial (explicit required)
 	Host               string   `json:"host"`
 	Port               int      `json:"port"`
 	PrivateKey         string   `json:"private_key"`
@@ -58,6 +60,12 @@ type Bookmark struct {
 	EnvVars            string   `json:"env_vars"` // JSON object
 	Term               string   `json:"term"`
 	Charset            string   `json:"charset"` // utf-8 | gbk | gb18030
+	SerialDevice       string   `json:"serial_device"`
+	BaudRate           int      `json:"baud_rate"`
+	DataBits           int      `json:"data_bits"`
+	Parity             string   `json:"parity"`
+	StopBits           int      `json:"stop_bits"`
+	FlowControl        string   `json:"flow_control"`
 	Tags               []string `json:"tags"`
 	Color              string   `json:"color"`
 }
@@ -83,6 +91,7 @@ type ListItem struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	GroupName string `json:"group_name"`
+	Protocol  string `json:"protocol"`
 	Host      string `json:"host"`
 	Port      int    `json:"port"`
 	User      string `json:"user"`
@@ -236,15 +245,18 @@ func fromDB(b *database.BookmarkDB, groupName string) *Bookmark {
 		mode = "inherit"
 	}
 	return &Bookmark{
-		ID: b.ID, GroupName: groupName, Title: b.Title, Host: b.Host, Port: b.Port,
+		ID: b.ID, GroupName: groupName, Title: b.Title, Protocol: b.Protocol,
+		Host: b.Host, Port: b.Port,
 		User: b.User, Password: b.Password, PrivateKey: b.PrivateKey,
 		PrivateKeyPassword: b.PrivateKeyPassword, ProxyJumpID: b.ProxyJumpID, Icon: b.Icon,
 		UseAgent: true, SshKeyID: b.SshKeyID, Certificate: b.Certificate, ForwardAgent: b.ForwardAgent,
 		ProxyMode: mode, ProxyType: b.ProxyType, ProxyHost: b.ProxyHost, ProxyPort: b.ProxyPort,
 		ProxyUser: b.ProxyUser, ProxyPassword: b.ProxyPassword,
 		StartupCmd: b.StartupCmd, EnvVars: b.EnvVars, Term: b.Term,
-		Charset: normalizeStoredCharset(b.Charset),
-		Tags:    decodeTags(b.Tags), Color: normalizeColor(b.Color),
+		Charset:      normalizeStoredCharset(b.Charset),
+		SerialDevice: b.SerialDevice, BaudRate: b.BaudRate, DataBits: b.DataBits,
+		Parity: b.Parity, StopBits: b.StopBits, FlowControl: b.FlowControl,
+		Tags: decodeTags(b.Tags), Color: normalizeColor(b.Color),
 	}
 }
 
@@ -291,6 +303,9 @@ func (s *Service) ResolveHops(target ssh.Endpoint, jumpID string) ([]ssh.Endpoin
 		if err != nil {
 			return nil, fmt.Errorf("failed to load proxy jump bookmark: %w", err)
 		}
+		if proto, ok := termio.ParseProtocol(b.Protocol); !ok || proto != termio.ProtocolSSH {
+			return nil, usererr.Coded("bookmark.jump_not_ssh", "ProxyJump target must be an SSH bookmark")
+		}
 		ep, err := s.endpointWithKey(*b)
 		if err != nil {
 			return nil, err
@@ -316,6 +331,9 @@ func (s *Service) ResolveHops(target ssh.Endpoint, jumpID string) ([]ssh.Endpoin
 
 // ResolveHopsBookmark builds the hop chain from an already-decrypted bookmark.
 func (s *Service) ResolveHopsBookmark(b Bookmark) ([]ssh.Endpoint, error) {
+	if proto, ok := termio.ParseProtocol(b.Protocol); !ok || proto != termio.ProtocolSSH {
+		return nil, usererr.Coded("bookmark.jump_not_ssh", "ProxyJump target must be an SSH bookmark")
+	}
 	ep, err := s.endpointWithKey(b)
 	if err != nil {
 		return nil, err
@@ -393,15 +411,24 @@ func (s *Service) ListItems() ([]*ListItem, error) {
 	}
 	items := make([]*ListItem, 0, len(dbBookmarks))
 	for _, b := range dbBookmarks {
-		items = append(items, &ListItem{ID: b.ID, Title: b.Title, GroupName: names[b.GroupID], Host: b.Host, Port: b.Port, User: b.User})
+		items = append(items, &ListItem{
+			ID: b.ID, Title: b.Title, GroupName: names[b.GroupID], Protocol: b.Protocol,
+			Host: b.Host, Port: b.Port, User: b.User,
+		})
 	}
 	return items, nil
 }
 
 func (s *Service) Save(b Bookmark) (string, error) {
-	b, err := s.normalizeKeySource(b)
-	if err != nil {
+	if err := validateBookmarkProtocol(&b); err != nil {
 		return "", err
+	}
+	if termio.Protocol(b.Protocol) == termio.ProtocolSSH {
+		var err error
+		b, err = s.normalizeKeySource(b)
+		if err != nil {
+			return "", err
+		}
 	}
 	if err := validateSessionOptions(&b); err != nil {
 		return "", err
@@ -414,6 +441,72 @@ func (s *Service) Save(b Bookmark) (string, error) {
 		}
 	}
 	return s.insert(b)
+}
+
+func validateBookmarkProtocol(b *Bookmark) error {
+	proto, ok := termio.ParseProtocol(strings.TrimSpace(b.Protocol))
+	if !ok {
+		return usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
+	}
+	b.Protocol = string(proto)
+	switch proto {
+	case termio.ProtocolSSH:
+		if strings.TrimSpace(b.Host) == "" {
+			return usererr.Coded("bookmark.host_required", "Host is required")
+		}
+		if b.Port <= 0 {
+			return usererr.Coded("bookmark.port_required", "Port is required")
+		}
+		if strings.TrimSpace(b.User) == "" {
+			return usererr.Coded("bookmark.user_required", "User is required")
+		}
+		b.SerialDevice = ""
+		b.BaudRate = 0
+		b.DataBits = 0
+		b.Parity = ""
+		b.StopBits = 0
+		b.FlowControl = ""
+	case termio.ProtocolSerial:
+		if strings.TrimSpace(b.SerialDevice) == "" {
+			return usererr.Coded("serial.device_required", "Serial device is required")
+		}
+		if b.BaudRate <= 0 {
+			return usererr.Coded("serial.baud_required", "Baud rate is required")
+		}
+		if b.DataBits == 0 {
+			b.DataBits = 8
+		}
+		if b.StopBits == 0 {
+			b.StopBits = 1
+		}
+		if strings.TrimSpace(b.Parity) == "" {
+			b.Parity = "none"
+		}
+		if strings.TrimSpace(b.FlowControl) == "" {
+			b.FlowControl = "none"
+		}
+		// Do not store COM name in host; keep SSH dial fields empty.
+		b.Host = ""
+		b.Port = 0
+		b.User = ""
+		b.Password = ""
+		b.PrivateKey = ""
+		b.PrivateKeyPassword = ""
+		b.ProxyJumpID = ""
+		b.SshKeyID = ""
+		b.Certificate = ""
+		b.ForwardAgent = false
+		b.ProxyMode = "inherit"
+		b.ProxyType = ""
+		b.ProxyHost = ""
+		b.ProxyPort = 0
+		b.ProxyUser = ""
+		b.ProxyPassword = ""
+		b.StartupCmd = ""
+		b.EnvVars = ""
+		b.Term = ""
+	}
+	return nil
 }
 
 func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
@@ -441,7 +534,8 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 		}
 	}
 	dbBookmark := &database.BookmarkDB{
-		ID: processed.ID, GroupID: groupID, Title: processed.Title, Host: processed.Host, Port: processed.Port,
+		ID: processed.ID, GroupID: groupID, Title: processed.Title, Protocol: processed.Protocol,
+		Host: processed.Host, Port: processed.Port,
 		User: processed.User, Password: processed.Password, PrivateKey: processed.PrivateKey,
 		PrivateKeyPassword: processed.PrivateKeyPassword, ProxyJumpID: processed.ProxyJumpID,
 		Icon: processed.Icon, UseAgent: true, SshKeyID: processed.SshKeyID, Certificate: processed.Certificate,
@@ -450,8 +544,10 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 		ProxyHost: processed.ProxyHost, ProxyPort: processed.ProxyPort,
 		ProxyUser: processed.ProxyUser, ProxyPassword: processed.ProxyPassword,
 		StartupCmd: processed.StartupCmd, EnvVars: processed.EnvVars, Term: processed.Term,
-		Charset: processed.Charset,
-		Tags:    encodeTags(processed.Tags), Color: processed.Color,
+		Charset:      processed.Charset,
+		SerialDevice: processed.SerialDevice, BaudRate: processed.BaudRate, DataBits: processed.DataBits,
+		Parity: processed.Parity, StopBits: processed.StopBits, FlowControl: processed.FlowControl,
+		Tags: encodeTags(processed.Tags), Color: processed.Color,
 		UpdatedAt: time.Now(),
 	}
 	if err := s.db.BookmarkRepo.UpdateBookmark(dbBookmark); err != nil {
@@ -510,7 +606,8 @@ func (s *Service) insert(b Bookmark) (string, error) {
 	id := utils.GenerateRandomID()
 	now := time.Now()
 	if err := s.db.BookmarkRepo.InsertBookmark(&database.BookmarkDB{
-		ID: id, GroupID: group.ID, Title: processed.Title, Host: processed.Host, Port: processed.Port,
+		ID: id, GroupID: group.ID, Title: processed.Title, Protocol: processed.Protocol,
+		Host: processed.Host, Port: processed.Port,
 		User: processed.User, Password: processed.Password, PrivateKey: processed.PrivateKey,
 		PrivateKeyPassword: processed.PrivateKeyPassword, ProxyJumpID: processed.ProxyJumpID,
 		Icon: processed.Icon, UseAgent: true, SshKeyID: processed.SshKeyID, Certificate: processed.Certificate,
@@ -519,8 +616,10 @@ func (s *Service) insert(b Bookmark) (string, error) {
 		ProxyHost: processed.ProxyHost, ProxyPort: processed.ProxyPort,
 		ProxyUser: processed.ProxyUser, ProxyPassword: processed.ProxyPassword,
 		StartupCmd: processed.StartupCmd, EnvVars: processed.EnvVars, Term: processed.Term,
-		Charset: processed.Charset,
-		Tags:    encodeTags(processed.Tags), Color: processed.Color,
+		Charset:      processed.Charset,
+		SerialDevice: processed.SerialDevice, BaudRate: processed.BaudRate, DataBits: processed.DataBits,
+		Parity: processed.Parity, StopBits: processed.StopBits, FlowControl: processed.FlowControl,
+		Tags: encodeTags(processed.Tags), Color: processed.Color,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return "", err
@@ -602,7 +701,8 @@ func (s *Service) Copy(id string) (*Bookmark, error) {
 	now := time.Now()
 	newID := utils.GenerateRandomID()
 	if err := s.db.BookmarkRepo.InsertBookmark(&database.BookmarkDB{
-		ID: newID, GroupID: src.GroupID, Title: title, Host: src.Host, Port: src.Port,
+		ID: newID, GroupID: src.GroupID, Title: title, Protocol: src.Protocol,
+		Host: src.Host, Port: src.Port,
 		User: src.User, Password: src.Password, PrivateKey: src.PrivateKey,
 		PrivateKeyPassword: src.PrivateKeyPassword, ProxyJumpID: src.ProxyJumpID,
 		Icon: src.Icon, UseAgent: true, SshKeyID: src.SshKeyID, Certificate: src.Certificate,
@@ -611,8 +711,10 @@ func (s *Service) Copy(id string) (*Bookmark, error) {
 		ProxyHost: src.ProxyHost, ProxyPort: src.ProxyPort,
 		ProxyUser: src.ProxyUser, ProxyPassword: src.ProxyPassword,
 		StartupCmd: src.StartupCmd, EnvVars: src.EnvVars, Term: src.Term,
-		Charset: normalizeStoredCharset(src.Charset),
-		Tags:    src.Tags, Color: src.Color,
+		Charset:      normalizeStoredCharset(src.Charset),
+		SerialDevice: src.SerialDevice, BaudRate: src.BaudRate, DataBits: src.DataBits,
+		Parity: src.Parity, StopBits: src.StopBits, FlowControl: src.FlowControl,
+		Tags: src.Tags, Color: src.Color,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		return nil, err

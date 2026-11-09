@@ -3,7 +3,7 @@ import { Box, Typography, Button } from "@mui/material";
 import { createHashRouter, useRouteError, isRouteErrorResponse } from "react-router";
 import App from "./pages/App.tsx";
 import SubMainWindow from "./pages/SubMainWindow";
-import Loading from "./components/Loading";
+import Loading from "./components/common/Loading";
 import { t } from "./i18n";
 
 /** Shown while a lazy route chunk is loading (e.g. setting/command/tools windows). */

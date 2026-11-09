@@ -17,14 +17,14 @@ func TestBuildSystemPromptNoSSH(t *testing.T) {
 	if !strings.Contains(got, "Respond in the user's UI language: en") {
 		t.Fatalf("expected UI language rule:\n%s", got)
 	}
-	if !strings.Contains(got, "Current SSH context") {
-		t.Fatalf("expected SSH context section:\n%s", got)
+	if !strings.Contains(got, "Current session") {
+		t.Fatalf("expected Current session section:\n%s", got)
 	}
 	if strings.Contains(got, "run_ssh_command is available") {
 		t.Fatalf("did not expect connected SSH tools blurb:\n%s", got)
 	}
-	if !strings.Contains(got, "No usable SSH session") {
-		t.Fatalf("expected disconnected SSH wording:\n%s", got)
+	if !strings.Contains(got, "No session bound") {
+		t.Fatalf("expected unbound session wording:\n%s", got)
 	}
 }
 
@@ -33,6 +33,9 @@ func TestBuildSystemPromptWithSSH(t *testing.T) {
 	got := BuildSystemPromptOpts(PromptOptions{SSH: ctx, EnableSSH: true, UILanguage: "zh-CN"})
 	if !strings.Contains(got, "run_ssh_command") {
 		t.Fatalf("expected SSH capability:\n%s", got)
+	}
+	if !strings.Contains(got, "protocol=ssh") {
+		t.Fatalf("expected protocol=ssh:\n%s", got)
 	}
 	if !strings.Contains(got, "u@h.example:22") {
 		t.Fatalf("expected connection line:\n%s", got)
@@ -44,6 +47,44 @@ func TestBuildSystemPromptWithSSH(t *testing.T) {
 	got2 := BuildSystemPromptOpts(PromptOptions{SSH: ctx, Remote: remote, EnableSSH: true, UILanguage: "en"})
 	if !strings.Contains(got2, "Hostname: box") {
 		t.Fatalf("expected remote info:\n%s", got2)
+	}
+}
+
+func TestBuildSystemPromptWithSerial(t *testing.T) {
+	got := BuildSystemPromptOpts(PromptOptions{
+		Serial:     &SerialPromptContext{Device: "COM3", BaudRate: 115200},
+		UILanguage: "en",
+	})
+	if !strings.Contains(got, "protocol=serial") {
+		t.Fatalf("expected protocol=serial:\n%s", got)
+	}
+	if !strings.Contains(got, "COM3") {
+		t.Fatalf("expected device:\n%s", got)
+	}
+	if !strings.Contains(got, "115200") {
+		t.Fatalf("expected baud:\n%s", got)
+	}
+	if strings.Contains(got, "run_ssh_command is available") {
+		t.Fatalf("serial must not enable SSH exec blurb:\n%s", got)
+	}
+	if strings.Contains(got, "Remote system info") {
+		t.Fatalf("serial must not include remote info:\n%s", got)
+	}
+}
+
+func TestBuildSystemPromptWithSerialBoundNoDevice(t *testing.T) {
+	got := BuildSystemPromptOpts(PromptOptions{
+		Serial:     &SerialPromptContext{},
+		UILanguage: "en",
+	})
+	if !strings.Contains(got, "protocol=serial") {
+		t.Fatalf("bound serial must still set protocol=serial:\n%s", got)
+	}
+	if strings.Contains(got, "No session bound") {
+		t.Fatalf("must not treat empty device as unbound:\n%s", got)
+	}
+	if strings.Contains(got, "run_ssh_command is available") {
+		t.Fatalf("serial must not enable SSH exec blurb:\n%s", got)
 	}
 }
 

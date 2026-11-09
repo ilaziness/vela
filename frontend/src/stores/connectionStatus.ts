@@ -1,17 +1,18 @@
-import { ConnectionStatus, type SSHTab } from "../types/ssh";
+import { ConnectionStatus } from "../types/ssh";
+import type { SessionTab } from "../types/session";
 
 /**
- * Tab lifecycle status. Disconnected drops sshInfo.linkID (end Exec/AI session).
+ * Tab lifecycle status. Disconnected drops sessionLink.linkID (end Exec/AI session).
  */
 export function tabWithConnectionStatus(
-  tab: SSHTab,
+  tab: SessionTab,
   status: ConnectionStatus,
-): SSHTab {
-  const sshInfo =
-    status === ConnectionStatus.Disconnected && tab.sshInfo
-      ? { ...tab.sshInfo, linkID: undefined }
-      : tab.sshInfo;
-  return { ...tab, connectionStatus: status, sshInfo };
+): SessionTab {
+  const sessionLink =
+    status === ConnectionStatus.Disconnected && tab.sessionLink
+      ? { ...tab.sessionLink, linkID: undefined }
+      : tab.sessionLink;
+  return { ...tab, connectionStatus: status, sessionLink };
 }
 
 /**
@@ -20,9 +21,9 @@ export function tabWithConnectionStatus(
  * clobber an in-flight reconnect (StrictMode remount or reload unmount).
  */
 export function tabWithSessionConnectionStatus(
-  tab: SSHTab,
+  tab: SessionTab,
   status: ConnectionStatus,
-): SSHTab | null {
+): SessionTab | null {
   if (
     status === ConnectionStatus.Disconnected &&
     tab.connectionStatus === ConnectionStatus.Connecting

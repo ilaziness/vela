@@ -15,18 +15,18 @@ import { translateServiceError } from "../func/service";
 import { t, tf } from "../i18n";
 import {
   CommandHistory,
-  SSHTunnelSession,
+  TerminalSessionItem,
   SendCommandRequest,
   CommandInfo,
   UserCommand,
 } from "../types/command";
-import { SSHService, CommandService } from "../../bindings/github.com/ilaziness/vela/services";
-import CommandTree from "../components/CommandTree";
-import CommandHistoryList from "../components/CommandHistory";
-import SessionSelector from "../components/SessionSelector";
-import CommandInput from "../components/CommandInput";
-import AddCommandDialog from "../components/AddCommandDialog";
-import OpBar from "../components/OpBar";
+import { SessionService, CommandService } from "../../bindings/github.com/ilaziness/vela/services";
+import CommandTree from "../components/command/CommandTree";
+import CommandHistoryList from "../components/command/CommandHistory";
+import SessionSelector from "../components/session/SessionSelector";
+import CommandInput from "../components/command/CommandInput";
+import AddCommandDialog from "../components/command/AddCommandDialog";
+import OpBar from "../components/common/OpBar";
 import { useFrameless } from "../hooks/useFrameless";
 
 const Command: React.FC = () => {
@@ -41,9 +41,8 @@ const Command: React.FC = () => {
     [key: string]: boolean;
   }>({});
 
-  // SSH 会话列表
-  const [sessions, setSessions] = useState<SSHTunnelSession[]>([]);
-  const [selectedSessions, setSelectedSessions] = useState<SSHTunnelSession[]>(
+  const [sessions, setSessions] = useState<TerminalSessionItem[]>([]);
+  const [selectedSessions, setSelectedSessions] = useState<TerminalSessionItem[]>(
     [],
   );
 
@@ -81,7 +80,7 @@ const Command: React.FC = () => {
 
   const loadSessions = useCallback(async () => {
     try {
-      const sessionsData = (await SSHService.GetActiveSessions()) as SSHTunnelSession[];
+      const sessionsData = (await SessionService.GetActiveSessions()) as TerminalSessionItem[];
       const next = sessionsData ?? [];
       setSessions(next);
       setSelectedSessions((prev) =>
