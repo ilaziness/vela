@@ -1,0 +1,319 @@
+package workspace
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
+)
+
+// newTestWorkspace builds a Workspace wired to a bare window and an isolated
+// (nonexistent) config path, so the command table can be built without a
+// live GUI backend or the developer's real ~/.config file.
+func newTestWorkspace(t *testing.T) *Workspace {
+	t.Helper()
+	cfg := Cfg{ConfigPath: filepath.Join(t.TempDir(), "no-such-config")}
+	return &Workspace{w: &gui.Window{}, cfg: cfg, baseCfg: cfg}
+}
+
+// TestRegisterCommands_NoDuplicateShortcuts guards the failure mode that
+// silently disabled Cmd+1..9: go-gui's RegisterCommand rejects a duplicate
+// shortcut, and the batch helper aborts on the first rejection, so a single
+// collision drops every command declared after it.
+func TestRegisterCommands_NoDuplicateShortcuts(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	seenShortcut := make(map[gui.Shortcut]string, len(ws.commands))
+	seenID := make(map[string]bool, len(ws.commands))
+	for _, cmd := range ws.commands {
+		if seenID[cmd.ID] {
+			t.Errorf("duplicate command ID %q", cmd.ID)
+		}
+		seenID[cmd.ID] = true
+		if !cmd.Shortcut.IsSet() {
+			continue
+		}
+		if prev, dup := seenShortcut[cmd.Shortcut]; dup {
+			t.Errorf("commands %q and %q share shortcut %s",
+				prev, cmd.ID, cmd.Shortcut.String())
+		}
+		seenShortcut[cmd.Shortcut] = cmd.ID
+	}
+}
+
+// TestRegisterCommands_AllReachRegistry asserts every declared command is
+// actually live on the window — the registry, not the ws.commands slice, is
+// what dispatches keystrokes.
+func TestRegisterCommands_AllReachRegistry(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	for _, cmd := range ws.commands {
+		if _, ok := ws.w.CommandByID(cmd.ID); !ok {
+			t.Errorf("command %q declared but not registered", cmd.ID)
+		}
+	}
+}
+
+// TestSaveCommand_BoundToCmdS pins the Cmd+S workspace-save command: it must
+// exist, carry the conventional chord, and write the layout to Cfg.SavePath.
+func TestSaveCommand_BoundToCmdS(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	var cmd *gui.Command
+	for i := range ws.commands {
+		if ws.commands[i].ID == "workspace.save" {
+			cmd = &ws.commands[i]
+			break
+		}
+	}
+	if cmd == nil {
+		t.Fatal("workspace.save command not declared")
+	}
+	// The default chord is Super+S, remapped to the platform's primary
+	// modifier before registration (Cmd→Ctrl+Shift on Windows).
+	want := gui.Shortcut{Key: gui.KeyS, Modifiers: remapMod(gui.ModSuper)}
+	if cmd.Shortcut != want {
+		t.Errorf("Cmd+S binding = %+v, want %+v", cmd.Shortcut, want)
+	}
+
+	path := filepath.Join(t.TempDir(), "sub", "workspace.json")
+	ws.cfg.SavePath = path
+	cmd.Execute(nil, ws.w)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("save did not write %s: %v", path, err)
+	}
+}
+
+// TestSaveCommand_EmptyPathFallsBack pins the default-path fallback: with no
+// SavePath configured the command still resolves a target rather than
+// silently no-oping. The write itself is not exercised here — the fallback
+// target is the host's real default workspace path, which a test must not
+// clobber.
+func TestSaveCommand_EmptyPathFallsBack(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	var cmd *gui.Command
+	for i := range ws.commands {
+		if ws.commands[i].ID == "workspace.save" {
+			cmd = &ws.commands[i]
+			break
+		}
+	}
+	if cmd == nil {
+		t.Fatal("workspace.save command not declared")
+	}
+	def, err := DefaultWorkspacePath()
+	if err != nil || def == "" {
+		t.Skipf("no default workspace path on this host: %v", err)
+	}
+}
+
+// TestRegisterCommands_TabDigitsBound pins the Cmd+1..Cmd+9 tab-selection
+// bindings: correct IDs, contiguous digit key codes, and the platform-remapped
+// modifier.
+func TestRegisterCommands_TabDigitsBound(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+
+	wantMods := remapMod(gui.ModSuper)
+	for i := 0; i < 9; i++ {
+		id := "workspace.tab" + strconv.Itoa(i+1)
+		cmd, ok := ws.w.CommandByID(id)
+		if !ok {
+			t.Errorf("%s not registered", id)
+			continue
+		}
+		wantKey := gui.KeyCode(uint16(gui.Key1) + uint16(i))
+		if cmd.Shortcut.Key != wantKey {
+			t.Errorf("%s key = %d, want %d", id, cmd.Shortcut.Key, wantKey)
+		}
+		if cmd.Shortcut.Modifiers != wantMods {
+			t.Errorf("%s modifiers = %v, want %v", id,
+				cmd.Shortcut.Modifiers, wantMods)
+		}
+		if !cmd.Global {
+			t.Errorf("%s must be Global to outrank the focused terminal", id)
+		}
+	}
+}
+
+// TestRegisterCommands_TabDigitsSelectTab drives each registered Cmd+digit
+// command and checks it activates the matching tab.
+func TestRegisterCommands_TabDigitsSelectTab(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.loadAndApplyConfig()
+	// Three empty tabs: activateTab only touches Terms when present, and a
+	// nil-map tab has none, so refresh/focus work stays out of the way.
+	ws.tabs = []*tab{{}, {}, {}}
+	ws.activeTab = 0
+
+	for _, want := range []int{2, 1, 0} {
+		id := "workspace.tab" + strconv.Itoa(want+1)
+		cmd, ok := ws.w.CommandByID(id)
+		if !ok {
+			t.Fatalf("%s not registered", id)
+		}
+		cmd.Execute(&gui.Event{}, ws.w)
+		if ws.activeTab != want {
+			t.Errorf("%s: activeTab = %d, want %d", id, ws.activeTab, want)
+		}
+	}
+}
+
+// TestDismissOverlay_ThemeBrowserWinsOverHelp covers the merged Escape binding:
+// one command owns both the browser and the help overlay, closing the topmost
+// first.
+func TestDismissOverlay_ThemeBrowserWinsOverHelp(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.cfg.Themes = []term.NamedTheme{{Name: "test"}}
+	ws.helpVisible = true
+	ws.browser.visible = true
+
+	ws.dismissOverlay()
+	if ws.browser.visible {
+		t.Error("theme browser still visible after first Escape")
+	}
+	if !ws.helpVisible {
+		t.Error("help closed by the same Escape that closed the picker")
+	}
+
+	ws.dismissOverlay()
+	if ws.helpVisible {
+		t.Error("help still visible after second Escape")
+	}
+}
+
+// TestDismissOverlay_NoOverlayOpen asserts dismissOverlay is a safe no-op
+// when neither overlay is visible (Escape with nothing to dismiss).
+func TestDismissOverlay_NoOverlayOpen(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.helpVisible = false
+	ws.browser.visible = false
+	// Must not panic, and flags must stay false.
+	ws.dismissOverlay()
+	if ws.helpVisible {
+		t.Error("help flag flipped from false to true")
+	}
+	if ws.browser.visible {
+		t.Error("browser flag flipped from false to true")
+	}
+}
+
+// focusedCwd must degrade to "" (child inherits the process CWD) rather than
+// panicking when there is no active tab or the focused leaf has no live Term.
+func TestFocusedCwd_NoPane(t *testing.T) {
+	if got := (&Workspace{activeTab: -1}).focusedCwd(); got != "" {
+		t.Errorf("no tabs: focusedCwd() = %q, want empty", got)
+	}
+	ws := &Workspace{
+		tabs:      []*tab{{focused: "gone", terms: map[string]*term.Term{}}},
+		activeTab: 0,
+	}
+	if got := ws.focusedCwd(); got != "" {
+		t.Errorf("dead pane: focusedCwd() = %q, want empty", got)
+	}
+}
+
+// extraTestCommands returns the fixture for the ExtraCommands tests: one
+// palette-only entry and one chord-bound entry. The chord avoids every
+// built-in shortcut so the fixture never collides with the default table.
+func extraTestCommands() []gui.Command {
+	return []gui.Command{
+		{
+			ID:      "embed.about",
+			Label:   "About Embed",
+			Global:  true,
+			Execute: func(_ *gui.Event, _ *gui.Window) {},
+		},
+		{
+			ID:       "embed.settings",
+			Label:    "Embed Settings",
+			Shortcut: gui.Shortcut{Key: gui.KeyF12, Modifiers: gui.ModSuper | gui.ModAlt | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, _ *gui.Window) {},
+		},
+	}
+}
+
+// TestExtraCommands_RegisteredListedAndSurviveReload pins the
+// Cfg.ExtraCommands contract: embedder commands join the workspace table,
+// reach the window registry, appear in the palette, and are not duplicated
+// by a config reload (which rebuilds the table from baseCfg).
+func TestExtraCommands_RegisteredListedAndSurviveReload(t *testing.T) {
+	cfg := Cfg{ConfigPath: filepath.Join(t.TempDir(), "no-such-config")}
+	cfg.ExtraCommands = extraTestCommands()
+	ws := &Workspace{w: &gui.Window{}, cfg: cfg, baseCfg: cfg}
+	ws.loadAndApplyConfig()
+
+	// Registered on the window: the registry, not ws.commands, is what
+	// dispatches keystrokes.
+	for _, id := range []string{"embed.about", "embed.settings"} {
+		if _, ok := ws.w.CommandByID(id); !ok {
+			t.Errorf("extra command %q not registered", id)
+		}
+	}
+	// Listed in the palette, including the shortcut-less About entry.
+	labels := make(map[string]string)
+	for _, it := range ws.paletteItems() {
+		labels[it.label] = it.keys
+	}
+	if _, ok := labels["About Embed"]; !ok {
+		t.Error("palette is missing the extra About command")
+	}
+	keys, ok := labels["Embed Settings"]
+	if !ok {
+		t.Fatal("palette is missing the extra Settings command")
+	}
+	if keys == "" {
+		t.Error("palette hides the extra Settings shortcut")
+	}
+
+	// A reload (config re-read + table rebuild) must not stack a second
+	// copy of the extras.
+	ws.loadAndApplyConfig()
+	seen := make(map[string]int)
+	for _, cmd := range ws.commands {
+		seen[cmd.ID]++
+	}
+	for _, id := range []string{"embed.about", "embed.settings"} {
+		if seen[id] != 1 {
+			t.Errorf("command %q appears %d times after reload, want 1", id, seen[id])
+		}
+	}
+}
+
+// TestExtraCommands_RebindByFullID pins that a config-file [keybindings]
+// entry naming an embedder command's full ID rewrites its shortcut, the
+// same as for the built-in workspace.* commands.
+func TestExtraCommands_RebindByFullID(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config")
+	if err := os.WriteFile(cfgPath, []byte("[keybindings]\nembed.settings = Cmd+E\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Cfg{ConfigPath: cfgPath}
+	cfg.ExtraCommands = extraTestCommands()
+	ws := &Workspace{w: &gui.Window{}, cfg: cfg, baseCfg: cfg}
+	ws.loadAndApplyConfig()
+
+	// The chord is honored verbatim — remapMod applies to the built-in
+	// defaults only — so assert the key, as the workspace.* rebind tests
+	// do, rather than the platform-dependent modifiers.
+	for _, cmd := range ws.commands {
+		if cmd.ID != "embed.settings" {
+			continue
+		}
+		if cmd.Shortcut.Key != gui.KeyE {
+			t.Errorf("shortcut = %v, want KeyE", cmd.Shortcut)
+		}
+		return
+	}
+	t.Error("extra command embed.settings missing after reload with keybindings")
+}

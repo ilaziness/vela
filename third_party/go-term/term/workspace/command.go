@@ -1,0 +1,757 @@
+package workspace
+
+import (
+	"log"
+	"strconv"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
+)
+
+// buildCommands returns the workspace command table with built-in shortcuts,
+// before any config-file overrides. All commands use Global: true so they fire
+// before the focused terminal consumes the key.
+func (ws *Workspace) buildCommands() []gui.Command {
+	cmds := []gui.Command{
+		// Split pane.
+		{
+			ID:       "workspace.splitVertical",
+			Label:    "Split Vertical",
+			Shortcut: gui.Shortcut{Key: gui.KeyD, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.splitPane(false) },
+		},
+		{
+			ID:       "workspace.splitHorizontal",
+			Label:    "Split Horizontal",
+			Shortcut: gui.Shortcut{Key: gui.KeyD, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.splitPane(true) },
+		},
+		// Close pane.
+		{
+			ID:       "workspace.closePane",
+			Label:    "Close Pane",
+			Shortcut: gui.Shortcut{Key: gui.KeyW, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.closePane() },
+		},
+		// Pane navigation.
+		{
+			ID:       "workspace.nextPane",
+			Label:    "Next Pane",
+			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.nextPane() },
+		},
+		{
+			ID:       "workspace.prevPane",
+			Label:    "Previous Pane",
+			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.prevPane() },
+		},
+		// Pane resize: move the focused pane's nearest same-axis split
+		// divider toward the arrow direction.
+		{
+			ID:       "workspace.resizeLeft",
+			Label:    "Resize Pane Left",
+			Shortcut: gui.Shortcut{Key: gui.KeyLeft, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeLeft) },
+		},
+		{
+			ID:       "workspace.resizeRight",
+			Label:    "Resize Pane Right",
+			Shortcut: gui.Shortcut{Key: gui.KeyRight, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeRight) },
+		},
+		{
+			ID:       "workspace.resizeUp",
+			Label:    "Resize Pane Up",
+			Shortcut: gui.Shortcut{Key: gui.KeyUp, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeUp) },
+		},
+		{
+			ID:       "workspace.resizeDown",
+			Label:    "Resize Pane Down",
+			Shortcut: gui.Shortcut{Key: gui.KeyDown, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.resizeActivePane(resizeDown) },
+		},
+		// tab management.
+		{
+			ID:       "workspace.newTab",
+			Label:    "New tab",
+			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.addTab() },
+		},
+		{
+			ID:       "workspace.closeTab",
+			Label:    "Close tab",
+			Shortcut: gui.Shortcut{Key: gui.KeyW, Modifiers: gui.ModSuper | gui.ModCtrl},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.closeTab() },
+		},
+		{
+			ID:       "workspace.moveTabLeft",
+			Label:    "Move tab Left",
+			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper | gui.ModAlt},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.moveTabLeft() },
+		},
+		{
+			ID:       "workspace.moveTabRight",
+			Label:    "Move tab Right",
+			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper | gui.ModAlt},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.moveTabRight() },
+		},
+		{
+			ID:       "workspace.nextTab",
+			Label:    "Next tab",
+			Shortcut: gui.Shortcut{Key: gui.KeyRightBracket, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.nextTab() },
+		},
+		{
+			ID:       "workspace.prevTab",
+			Label:    "Previous tab",
+			Shortcut: gui.Shortcut{Key: gui.KeyLeftBracket, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.prevTab() },
+		},
+		// Workspace save. Cmd+S is the conventional persist chord; the
+		// target is Cfg.SavePath, falling back to the default workspace
+		// path so the command works for an embedder that never set one.
+		{
+			ID:       "workspace.save",
+			Label:    "Save Workspace",
+			Shortcut: gui.Shortcut{Key: gui.KeyS, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.saveWorkspace() },
+		},
+		// Session recording of the focused pane.
+		{
+			ID:       "workspace.toggleRecording",
+			Label:    "Start / Stop Recording",
+			Shortcut: gui.Shortcut{Key: gui.KeyR, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleRecording() },
+		},
+		// Broadcast input to every pane in the active tab.
+		{
+			ID:       "workspace.toggleBroadcast",
+			Label:    "Broadcast Input to All Panes",
+			Shortcut: gui.Shortcut{Key: gui.KeyI, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleBroadcast() },
+		},
+		// Cursor appearance. No shortcuts: these are palette-only, and
+		// RegisterCommand only rejects a duplicate Shortcut when one is set.
+		// Explicit rows rather than cycling toggles — the palette shows no
+		// current state, so a cycle would be a guess.
+		{
+			ID:      "workspace.cursorStyleBlock",
+			Label:   "Cursor: Block",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorStyle(term.CursorStyleBlock) },
+		},
+		{
+			ID:      "workspace.cursorStyleUnderline",
+			Label:   "Cursor: Underline",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorStyle(term.CursorStyleUnderline) },
+		},
+		{
+			ID:      "workspace.cursorStyleBar",
+			Label:   "Cursor: Bar",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorStyle(term.CursorStyleBar) },
+		},
+		{
+			ID:      "workspace.cursorBlinkOn",
+			Label:   "Cursor Blink: On",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorBlink(true) },
+		},
+		{
+			ID:      "workspace.cursorBlinkOff",
+			Label:   "Cursor Blink: Off",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorBlink(false) },
+		},
+		{
+			ID:      "workspace.cursorLockOn",
+			Label:   "Cursor: Lock (Ignore Apps)",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorLocked(true) },
+		},
+		{
+			ID:      "workspace.cursorLockOff",
+			Label:   "Cursor: Unlock (Follow Apps)",
+			Global:  true,
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.setCursorLocked(false) },
+		},
+		// Theme.
+		{
+			ID:       "workspace.chooseTheme",
+			Label:    "Choose Theme...",
+			Shortcut: gui.Shortcut{Key: gui.KeyT, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleThemeBrowser() },
+		},
+		// List-overlay navigation — only active while one of the list overlays
+		// (theme browser, command palette) is open, so these bare keys still
+		// reach the child the rest of the time.
+		//
+		// One registration per key, shared by both overlays, with the Execute
+		// switching on which is up. Adding a second Up/Down/Enter entry for the
+		// palette is not an option: go-gui's registry rejects duplicate
+		// shortcuts, and one rejection aborts the whole batch — see the note on
+		// dismissOverlay below.
+		{
+			ID:         "workspace.overlayUp",
+			Shortcut:   gui.Shortcut{Key: gui.KeyUp},
+			Global:     true,
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayMove(-1) },
+		},
+		{
+			ID:         "workspace.overlayDown",
+			Shortcut:   gui.Shortcut{Key: gui.KeyDown},
+			Global:     true,
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayMove(1) },
+		},
+		{
+			ID:         "workspace.overlayPageUp",
+			Shortcut:   gui.Shortcut{Key: gui.KeyPageUp},
+			Global:     true,
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayPage(-1) },
+		},
+		{
+			ID:         "workspace.overlayPageDown",
+			Shortcut:   gui.Shortcut{Key: gui.KeyPageDown},
+			Global:     true,
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayPage(1) },
+		},
+		{
+			ID:         "workspace.overlayConfirm",
+			Shortcut:   gui.Shortcut{Key: gui.KeyEnter},
+			Global:     true,
+			CanExecute: ws.listOverlayOpen,
+			Execute:    func(_ *gui.Event, w *gui.Window) { ws.overlayConfirm() },
+		},
+		// Command palette.
+		{
+			ID:       paletteCommandID,
+			Label:    "Command Palette",
+			Shortcut: gui.Shortcut{Key: gui.KeyP, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.togglePalette() },
+		},
+		// Config reload. Cmd+, is deliberately left free for a future
+		// settings UI, so the reload lives on the Shift variant.
+		{
+			ID:       "workspace.reloadConfig",
+			Label:    "Reload Config",
+			Shortcut: gui.Shortcut{Key: gui.KeyComma, Modifiers: gui.ModSuper | gui.ModShift},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.reloadConfig() },
+		},
+		// Help overlay.
+		{
+			ID:       "workspace.toggleHelp",
+			Label:    "Show / Hide Shortcuts",
+			Shortcut: gui.Shortcut{Key: gui.KeySlash, Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.toggleHelp() },
+		},
+		{
+			// Escape dismisses whichever overlay is up. A *single* Escape
+			// command owns both overlays: go-gui's registry rejects
+			// duplicate shortcuts, and one rejection aborts the whole
+			// RegisterCommands batch, so two Escape entries would silently
+			// drop every command registered after them. CanExecute gates on
+			// visibility so Escape still reaches the child process (vim,
+			// less, …) whenever no overlay is open.
+			ID:       "workspace.dismissOverlay",
+			Shortcut: gui.Shortcut{Key: gui.KeyEscape},
+			Global:   true,
+			CanExecute: func(_ *gui.Window) bool {
+				return ws.palette.visible || ws.browser.visible || ws.helpVisible
+			},
+			Execute: func(_ *gui.Event, w *gui.Window) { ws.dismissOverlay() },
+		},
+	}
+	// tab 1–9 shortcuts.
+	for i := 0; i < 9; i++ {
+		idx := i // capture
+		cmds = append(cmds, gui.Command{
+			ID:       "workspace.tab" + strconv.Itoa(i+1),
+			Shortcut: gui.Shortcut{Key: gui.KeyCode(uint16(gui.Key1) + uint16(i)), Modifiers: gui.ModSuper},
+			Global:   true,
+			Execute:  func(_ *gui.Event, w *gui.Window) { ws.goToTab(idx) },
+		})
+	}
+	// Embedder commands (About, Settings, …) ride the same table so the
+	// palette, the help overlay, and config reloads all see them. Sourced
+	// from baseCfg — the pristine copy — so a reload recomputes from the
+	// same starting point instead of stacking a copy per reload.
+	cmds = append(cmds, ws.baseCfg.ExtraCommands...)
+	// Remap the Super-based defaults to platform-appropriate modifiers
+	// (identity except on Windows, where Super is OS-reserved — see remapMod).
+	// Applied before config overrides so explicit user bindings are honored
+	// verbatim.
+	for i := range cmds {
+		cmds[i].Shortcut.Modifiers = remapMod(cmds[i].Shortcut.Modifiers)
+	}
+	return cmds
+}
+
+// loadAndApplyConfig re-reads the config file and rebuilds everything derived
+// from it: the workspace command table (registered on the window), the term.*
+// keybindings, and the effective Cfg used to build panes.
+//
+// It does not touch live panes — reloadConfig does that, so New can call this
+// before any pane exists.
+func (ws *Workspace) loadAndApplyConfig() {
+	fc := loadConfig(ws.baseCfg)
+	cmds := ws.buildCommands()
+	// Overrides are applied before registering so the help overlay, which
+	// reads ws.commands, reflects the live bindings.
+	keys := applyKeybindingOverrides(cmds, fc.keybindings)
+	ws.cfg = applySettings(ws.baseCfg, fc, keys)
+	ws.installCommands(cmds)
+	// Covers both startup and reload: `theme =` in the config file is the
+	// other way the active scheme changes without anyone touching the picker.
+	ws.notifyColorScheme()
+}
+
+// reloadConfig re-reads the config file and applies it to the running
+// workspace: command shortcuts are re-registered and every live pane is
+// updated in place. Bound to Cmd+Shift+, by default.
+//
+// Parse errors are logged and the offending setting keeps its current value —
+// a malformed config must never wedge the app. Settings that did not change
+// are not pushed to panes, so a reload triggered for one key doesn't disturb
+// unrelated per-pane state (notably font zoom, which SetTextStyle resets).
+func (ws *Workspace) reloadConfig() {
+	prev := ws.cfg
+	ws.loadAndApplyConfig()
+	ws.applyTermSettings(prev)
+	ws.refresh()
+}
+
+// saveWorkspace writes the current layout to Cfg.SavePath, or to the
+// default workspace path when none is configured. Failures are logged, never
+// fatal: a save is a convenience, and the window must not die over a disk
+// problem. Bound to Cmd+S. Main-thread only.
+func (ws *Workspace) saveWorkspace() {
+	path := ws.cfg.SavePath
+	if path == "" {
+		def, err := DefaultWorkspacePath()
+		if err != nil {
+			log.Printf("workspace: cannot determine save path: %v", err)
+			return
+		}
+		path = def
+	}
+	if err := ws.Save(path); err != nil {
+		log.Printf("workspace: save to %s: %v", path, err)
+	}
+}
+
+// applyTermSettings pushes the settings that changed between prev and the
+// current effective Cfg to every live pane in every tab.
+func (ws *Workspace) applyTermSettings(prev Cfg) {
+	cur := ws.cfg
+	styleChanged := prev.TextStyle != cur.TextStyle
+	// A theme removed from the config reverts to the embedder's first theme,
+	// which is what term applies to a brand-new pane.
+	newTheme, hasTheme := effectiveTheme(cur)
+	oldTheme, hadTheme := effectiveTheme(prev)
+	themeChanged := hasTheme && (!hadTheme || newTheme != oldTheme)
+
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			if styleChanged {
+				tm.SetTextStyle(cur.TextStyle)
+			}
+			if themeChanged {
+				tm.SetTheme(newTheme)
+			}
+			if prev.opts.scrollback != cur.opts.scrollback {
+				tm.SetScrollbackRows(cur.opts.scrollback)
+			}
+			if prev.opts.bell != cur.opts.bell {
+				tm.SetBellMode(cur.opts.bell)
+			}
+			if prev.opts.scrollbar != cur.opts.scrollbar {
+				tm.SetScrollbarWidth(cur.opts.scrollbar)
+			}
+			if prev.opts.minContrast != cur.opts.minContrast {
+				tm.SetMinimumContrast(cur.opts.minContrast)
+			}
+			if prev.opts.middleClickPaste != cur.opts.middleClickPaste {
+				tm.SetMiddleClickPaste(cur.opts.middleClickPaste)
+			}
+			if prev.opts.notifyAfter != cur.opts.notifyAfter {
+				tm.SetNotifyAfter(cur.opts.notifyAfter)
+			}
+			if prev.opts.cursorStyle != cur.opts.cursorStyle {
+				tm.SetCursorStyle(cur.opts.cursorStyle)
+			}
+			if prev.opts.cursorBlink != cur.opts.cursorBlink {
+				tm.SetCursorBlink(cur.opts.cursorBlink)
+			}
+			if prev.opts.cursorLocked != cur.opts.cursorLocked {
+				tm.SetCursorLocked(cur.opts.cursorLocked)
+			}
+			// KeyMap is a map, so it can't be compared for equality cheaply;
+			// re-seeding is idempotent (mergeBindings rebuilds from the
+			// defaults each time) and costs one small map per pane.
+			tm.SetKeyBindings(cur.opts.keys)
+		}
+	}
+	ws.w.InvalidateLayout()
+}
+
+// setCursorStyle / setCursorBlink / setCursorLocked apply a cursor setting to
+// every live pane and to the workspace default, so a later split or tab
+// inherits it. They are the palette's entry points.
+//
+// The choice lasts for the session only: a config reload recomputes the
+// effective Cfg from the file and therefore discards it. The config file stays
+// the durable setting — nothing here writes to it.
+func (ws *Workspace) setCursorStyle(s term.CursorStyle) {
+	ws.cfg.opts.cursorStyle = s
+	ws.forEachPane(func(tm *term.Term) { tm.SetCursorStyle(s) })
+}
+
+func (ws *Workspace) setCursorBlink(on bool) {
+	ws.cfg.opts.cursorBlink = on
+	ws.forEachPane(func(tm *term.Term) { tm.SetCursorBlink(on) })
+}
+
+func (ws *Workspace) setCursorLocked(locked bool) {
+	ws.cfg.opts.cursorLocked = locked
+	ws.forEachPane(func(tm *term.Term) { tm.SetCursorLocked(locked) })
+}
+
+// forEachPane runs fn against every live pane in every tab, then repaints.
+// Deliberately not used by applyTermSettings, which needs both the previous
+// and current Cfg inside the loop to skip settings that did not change.
+func (ws *Workspace) forEachPane(fn func(*term.Term)) {
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			fn(tm)
+		}
+	}
+	ws.w.InvalidateLayout()
+}
+
+// effectiveTheme returns the theme a new pane would start with: the one named
+// in the config file, else the embedder's first configured theme.
+func effectiveTheme(cfg Cfg) (term.Theme, bool) {
+	if cfg.opts.theme != nil {
+		return *cfg.opts.theme, true
+	}
+	if len(cfg.Themes) > 0 {
+		return cfg.Themes[0].Theme, true
+	}
+	return term.Theme{}, false
+}
+
+// installCommands registers cmds on the window, replacing any previously
+// registered table (a config reload re-registers everything).
+func (ws *Workspace) installCommands(cmds []gui.Command) {
+	// Unregister the previous table first: the registry rejects duplicate
+	// IDs, so a reload would otherwise keep the stale shortcuts.
+	for i := range ws.commands {
+		ws.w.UnregisterCommand(ws.commands[i].ID)
+	}
+	// Retain Label+Shortcut metadata so the help overlay renders the live
+	// bindings rather than a hand-maintained copy. The tab 1–9 commands
+	// carry no Label and are skipped by the overlay.
+	ws.commands = cmds
+	// Register one at a time rather than via RegisterCommands: that helper
+	// aborts the whole batch on the first duplicate ID/shortcut, which
+	// silently drops every command declared after it — exactly how a
+	// duplicate Escape binding once disabled Cmd+1..9 tab selection.
+	// Per-command registration confines the damage to the offending entry
+	// and logs it instead of failing invisibly.
+	for i := range cmds {
+		if err := ws.w.RegisterCommand(cmds[i]); err != nil {
+			log.Printf("workspace: register %s: %v", cmds[i].ID, err)
+		}
+	}
+}
+
+// listOverlayOpen reports whether an overlay that owns Up/Down/Enter is up.
+// Shared by every navigation command so the gate cannot drift between them.
+// Same set as overlayOwnsKeys, and deliberately expressed as that call: an
+// overlay that owns Up/Down/Enter is exactly one that has taken the keyboard
+// off the pane, so the two must not drift apart.
+func (ws *Workspace) listOverlayOpen(_ *gui.Window) bool {
+	return ws.overlayOwnsKeys()
+}
+
+// overlayMove routes a cursor step to whichever list overlay is open. The
+// palette floats above the browser and is checked first, matching both the
+// z-order in View and the precedence in dismissOverlay.
+func (ws *Workspace) overlayMove(delta int) {
+	switch {
+	case ws.palette.visible:
+		ws.paletteMove(delta)
+	case ws.browser.visible:
+		ws.themeBrowserMove(delta)
+	}
+}
+
+// overlayPage routes a coarse jump to whichever list overlay is open.
+func (ws *Workspace) overlayPage(dir int) {
+	switch {
+	case ws.palette.visible:
+		ws.palettePage(dir)
+	case ws.browser.visible:
+		ws.themeBrowserPage(dir)
+	}
+}
+
+// overlayConfirm routes Enter to whichever list overlay is open.
+func (ws *Workspace) overlayConfirm() {
+	switch {
+	case ws.palette.visible:
+		ws.paletteConfirm()
+	case ws.browser.visible:
+		ws.themeBrowserConfirm()
+	}
+}
+
+// dismissOverlay closes the topmost visible overlay. The palette floats above
+// the theme picker, which is drawn above the help panel, so precedence runs in
+// that order when more than one is open.
+func (ws *Workspace) dismissOverlay() {
+	switch {
+	case ws.palette.visible:
+		// Not togglePalette: Escape has its own two-stage meaning inside the
+		// palette (clear the filter, then close).
+		ws.paletteDismiss()
+	case ws.browser.visible:
+		// Not toggleThemeBrowser: Escape has its own two-stage meaning inside
+		// the browser (clear the filter, then close-and-revert).
+		ws.themeBrowserDismiss()
+	case ws.helpVisible:
+		// Not toggleHelp: this arm only ever closes, and a toggle here would
+		// re-open the sheet if the guard above it ever stopped matching.
+		ws.closeHelp()
+	}
+}
+
+// splitPane splits the focused pane. If horizontal is true, splits top/bottom;
+// otherwise splits left/right. Creates a new PTY with a fresh shell.
+func (ws *Workspace) splitPane(horizontal bool) {
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
+	dir := splitVertical
+	if horizontal {
+		dir = splitHorizontal
+	}
+	// Capture the source pane's effective font size so the split inherits its
+	// zoom (matching Ghostty). An unzoomed source reports the workspace default,
+	// so the new pane matches it either way; addPane treats zero as "inherit
+	// default" for the no-source case. The split also inherits the source
+	// pane's CWD (empty when the shell never reported one via OSC 7 — then the
+	// child inherits the process CWD).
+	var inheritSize float32
+	cwd := ws.focusedCwd()
+	old, hasOld := tab.terms[tab.focused]
+	if hasOld {
+		inheritSize = old.FontSize()
+	}
+	// Build the new tree before spawning. splitLeaf is pure, so a focused leaf
+	// that is stale or missing from the tree costs nothing here. Spawning
+	// first left a live shell in tab.terms that no layout ever showed, with
+	// the source pane already unfocused.
+	newLeafID := tab.allocLeafID()
+	newRoot := splitLeaf(tab.root, tab.focused, newLeafID, dir)
+	if newRoot == nil {
+		return
+	}
+	// addPane refuses to spawn into a closing window (errWindowClosing), so
+	// that case needs no guard here.
+	if err := tab.addPane(ws.w, ws.cfg, newLeafID, cwd, inheritSize, ws.hooks()); err != nil {
+		return
+	}
+	// Unfocus the old pane only now that the split exists, so it stops
+	// asserting focus during layout. Doing it before the spawn left no pane
+	// focused when the spawn failed. The new pane defaults to focused=true.
+	if hasOld {
+		setTermFocused(old, false)
+	}
+	tab.root = newRoot
+	tab.focused = newLeafID
+	ws.refresh()
+}
+
+// closePane closes the focused pane in the active tab. Falls back to the
+// nearest surviving pane. If the last pane, closes the tab.
+func (ws *Workspace) closePane() {
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
+	ws.closePaneInTab(tab, tab.focused)
+}
+
+// nextPane cycles focus to the next pane, wrapping to first after last.
+func (ws *Workspace) nextPane() {
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
+	if next := nextLeaf(tab.root, tab.focused); next != "" {
+		ws.focusPaneInTab(tab, next)
+	}
+}
+
+// prevPane cycles focus to the previous pane, wrapping to last after first.
+func (ws *Workspace) prevPane() {
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return
+	}
+	if prev := prevLeaf(tab.root, tab.focused); prev != "" {
+		ws.focusPaneInTab(tab, prev)
+	}
+}
+
+// focusedCwd returns the working directory of the focused pane of the active
+// tab, as reported by the shell over OSC 7. Empty when there is no live pane
+// or the shell never emitted OSC 7 — callers pass that straight through, which
+// leaves the child inheriting the process CWD.
+func (ws *Workspace) focusedCwd() string {
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return ""
+	}
+	tm, ok := tab.terms[tab.focused]
+	if !ok {
+		return ""
+	}
+	return cwdLocalPath(tm.Cwd())
+}
+
+// addTab creates a new tab with a single terminal and switches to it. The new
+// tab's shell starts in the CWD of the pane the command was issued from, and
+// the pane inherits that source pane's effective font size (matching splitPane:
+// an unzoomed source reports the workspace default, so the new pane matches it
+// either way).
+func (ws *Workspace) addTab() {
+	// Capture the source CWD, pane, and zoom before the active tab index moves.
+	cwd := ws.focusedCwd()
+	oldTab := ws.activeTabPtr()
+	var inheritSize float32
+	if oldTab != nil {
+		if old, ok := oldTab.terms[oldTab.focused]; ok {
+			inheritSize = old.FontSize()
+		}
+	}
+	// addTabIn refuses to spawn into a closing window (errWindowClosing), so
+	// that case needs no guard here.
+	if _, err := ws.addTabIn(cwd); err != nil {
+		return
+	}
+	// Unfocus the old tab's pane only after the new tab exists. Doing it first
+	// left no pane focused when the spawn failed.
+	if oldTab != nil {
+		if t, ok := oldTab.terms[oldTab.focused]; ok {
+			setTermFocused(t, false)
+		}
+	}
+	// Focus the new tab's pane.
+	tab := ws.tabs[ws.activeTab]
+	if t, ok := tab.terms[tab.focused]; ok {
+		if inheritSize > 0 {
+			t.SetFontSize(inheritSize)
+		}
+		setTermFocused(t, true)
+	}
+	ws.refresh()
+}
+
+// closeTab closes the active tab. If it's the last tab, replaces it with
+// a fresh single-pane tab.
+func (ws *Workspace) closeTab() {
+	ws.closeTabAt(ws.activeTab)
+}
+
+// moveTabLeft swaps the active tab with the one to its left.
+// No-op when the active tab is already the first tab.
+func (ws *Workspace) moveTabLeft() {
+	if ws.activeTab <= 0 || len(ws.tabs) < 2 {
+		return
+	}
+	ws.tabs[ws.activeTab], ws.tabs[ws.activeTab-1] =
+		ws.tabs[ws.activeTab-1], ws.tabs[ws.activeTab]
+	ws.activeTab--
+	ws.refresh()
+}
+
+// moveTabRight swaps the active tab with the one to its right.
+// No-op when the active tab is already the last tab.
+func (ws *Workspace) moveTabRight() {
+	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs)-1 || len(ws.tabs) < 2 {
+		return
+	}
+	ws.tabs[ws.activeTab], ws.tabs[ws.activeTab+1] =
+		ws.tabs[ws.activeTab+1], ws.tabs[ws.activeTab]
+	ws.activeTab++
+	ws.refresh()
+}
+
+// nextTab switches to the next tab (wraps around).
+func (ws *Workspace) nextTab() {
+	if len(ws.tabs) < 2 {
+		return
+	}
+	ws.activateTab((ws.activeTab + 1) % len(ws.tabs))
+}
+
+// prevTab switches to the previous tab (wraps around).
+func (ws *Workspace) prevTab() {
+	if len(ws.tabs) < 2 {
+		return
+	}
+	idx := ws.activeTab - 1
+	if idx < 0 {
+		idx = len(ws.tabs) - 1
+	}
+	ws.activateTab(idx)
+}
+
+// goToTab switches to the tab at the given 0-based index.
+func (ws *Workspace) goToTab(idx int) {
+	if idx >= 0 && idx < len(ws.tabs) {
+		ws.activateTab(idx)
+	}
+}
+
+// focusPane makes the given leaf the focused pane in its tab.
+func (ws *Workspace) focusPane(leafID string) {
+	for _, tab := range ws.tabs {
+		if _, ok := tab.terms[leafID]; ok {
+			ws.focusPaneInTab(tab, leafID)
+			return
+		}
+	}
+}

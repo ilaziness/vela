@@ -1,0 +1,928 @@
+package term
+
+import (
+	"bytes"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/rivo/uniseg"
+)
+
+// Put writes a single rune at the cursor with current attrs and advances.
+// It is the immediate, non-clustering path used by tests and direct callers;
+// the parser's streaming input goes through PutRune/FlushGrapheme instead.
+// Honors east-asian wide / emoji widths via runeWidth; width-0 runes
+// (combining marks, ZWJ, etc.) are dropped.
+func (g *grid) Put(ch rune) {
+	ch = g.translateRune(ch)
+	w := runeWidth(ch)
+	if w == 0 {
+		return
+	}
+	g.putCell(ch, 0, w)
+}
+
+// PutRune feeds one rune of streaming input into the grapheme assembler.
+// Runes are accumulated into g.gphBuf and a leading orthographic syllable is
+// committed to the grid only once its boundary is observed (i.e. when the
+// next rune cannot extend it). The trailing, possibly-incomplete syllable
+// stays pending until a boundary, FlushGrapheme, or end of Feed. Callers must
+// FlushGrapheme before any cursor/erase/report operation so the cursor
+// position reflects committed cells.
+func (g *grid) PutRune(r rune) {
+	r = g.translateRune(r)
+	// Fast path for runs of printable ASCII (the common case). A pending
+	// single ASCII-printable rune is a complete width-1 cluster the moment
+	// another ASCII-printable rune arrives: ASCII printable never extends a
+	// prior cluster nor is extended by a following ASCII printable. Commit it
+	// directly and keep the new rune pending, skipping the uniseg segmenter.
+	if len(g.gphBuf) == 1 && g.gphBuf[0] >= 0x20 && g.gphBuf[0] < 0x7f &&
+		r >= 0x20 && r < 0x7f {
+		g.putCell(rune(g.gphBuf[0]), 0, 1)
+		g.gphBuf[0] = byte(r)
+		return
+	}
+	// The same shortcut for CJK ideographs and Hangul syllables, which make up most CJK
+	// text. Every rune isPlainWide accepts is 3 bytes of UTF-8, grapheme property Other
+	// or a precomposed LV/LVT syllable, and East Asian Wide. No grapheme rule joins two
+	// such runes (a syllable extends only with V/T jamo, which are not plain), so a
+	// pending one is a complete width-2 cluster once another arrives.
+	if len(g.gphBuf) == 3 && isPlainWide(r) {
+		if a, _ := utf8.DecodeRune(g.gphBuf); isPlainWide(a) {
+			g.putCell(a, 0, 2)
+			g.gphBuf = utf8.AppendRune(g.gphBuf[:0], r)
+			return
+		}
+	}
+	g.gphBuf = utf8.AppendRune(g.gphBuf, r)
+	g.drainAksharas(false)
+}
+
+// isPlainWide reports whether r is a CJK Unified Ideograph (Extension A or the main
+// block) or a precomposed Hangul syllable. PutRune's fast path relies on all of them
+// being width 2 and never joined into one grapheme with each other;
+// TestPutRune_PlainWideMatchesSegmenter checks that against uniseg for every one.
+func isPlainWide(r rune) bool {
+	return (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0xAC00 && r <= 0xD7A3) ||
+		(r >= 0x3400 && r <= 0x4DBF)
+}
+
+// FlushGrapheme commits any pending orthographic syllable(s) to the grid.
+// Called before control sequences (so DSR/CPR see the advanced cursor) and at
+// the end of a Feed batch (so a trailing syllable renders without lag).
+func (g *grid) FlushGrapheme() {
+	g.drainAksharas(true)
+}
+
+// drainAksharas commits leading orthographic syllables from g.gphBuf. A
+// syllable is one or more uniseg grapheme clusters fused across a virama
+// (Indic/Brahmic conjunct) — see leadingAkshara. When flush is false the
+// trailing, still-extendable syllable stays pending in g.gphBuf; when flush
+// is true (end of input) it is committed as-is.
+func (g *grid) drainAksharas(flush bool) {
+	for len(g.gphBuf) > 0 {
+		n, width, complete := leadingAkshara(g.gphBuf)
+		if n == 0 || (!complete && !flush) {
+			return // nothing committable yet; keep pending
+		}
+		g.commitCluster(g.gphBuf[:n], width)
+		m := copy(g.gphBuf, g.gphBuf[n:])
+		g.gphBuf = g.gphBuf[:m]
+	}
+}
+
+// leadingAkshara reports the byte length n and display width of the leading
+// orthographic syllable in b. uniseg supplies grapheme-cluster boundaries;
+// clusters joined by a virama (optionally followed by ZWJ) are fused into one
+// syllable so a Brahmic conjunct such as "ꦏ꧀ꦏ" occupies a single cell group.
+// The syllable's width is uniseg's for non-Brahmic text (emoji, CJK, flags,
+// variation selectors) but recomputed by brahmicWidth for syllables carrying
+// a virama or spacing mark, since uniseg's per-rune widths diverge from the
+// terminal-cell model (wcwidth wcswidth / ucs-detect): it widths a dead
+// consonant base+virama at 2 (model: 1) and a base+spacing-mark at 1 in some
+// scripts (model: 2).
+//
+// complete is true only when a grapheme boundary is known to follow the
+// syllable — i.e. it cannot grow with more input. While false the caller
+// keeps the bytes pending (or commits them if at end of input).
+func leadingAkshara(b []byte) (n, width int, complete bool) {
+	for {
+		cluster, rest, w, _ := uniseg.FirstGraphemeCluster(b[n:], -1)
+		if len(cluster) == 0 {
+			break // no complete cluster (empty buffer)
+		}
+		n += len(cluster)
+		width += w
+		if len(rest) == 0 {
+			// Cluster consumed the buffer; uniseg cannot confirm a boundary
+			// past it, so the syllable may still grow. Keep pending.
+			break
+		}
+		if clusterFusesRight(cluster) {
+			continue // virama (or virama+ZWJ): fuse the following cluster
+		}
+		complete = true
+		break // self-contained cluster with a boundary after it
+	}
+	if brahmic, w := brahmicWidth(b[:n]); brahmic {
+		width = w
+	} else {
+		width = wcwidthWidth(b[:n], width)
+	}
+	return n, width, complete
+}
+
+// wcwidthWidth reconciles uniseg's width w for the syllable b (its complete
+// bytes) with the wcwidth model ucs-detect measures against, correcting the few
+// cases uniseg's Unicode-15.0.0 data gets wrong. It only ever widens 0/1 -> 2;
+// it never narrows, so uniseg's already-wide clusters (flag pairs, ZWJ emoji,
+// wide base + combining) and its VS15 text-presentation narrowing are preserved.
+func wcwidthWidth(b []byte, w int) int {
+	r, sz := utf8.DecodeRune(b)
+	single := sz == len(b) // syllable is exactly one code point
+	switch {
+	case single && w == 1 && eawWide(r):
+		// A lone wide codepoint uniseg calls narrow: symbols reclassified Wide
+		// since Unicode 15.0, and wcwidth's wide regional indicators.
+		return 2
+	case single && w == 0 && isEmojiModifier(r):
+		// A standalone emoji skin-tone modifier: uniseg zero-widths it
+		// (Grapheme_Extend), but wcwidth renders a lone one as wide. Combined
+		// with an emoji base it is one cluster whose width comes from the base.
+		return 2
+	case w == 1 && hasVS16(b):
+		// A base + VS16 that uniseg left narrow — the ASCII emoji bases # * 0-9.
+		// VS16 requests emoji (wide) presentation, so the cluster is width 2.
+		// VS15 (U+FE0E, text presentation) has a different final byte and is not
+		// matched here, so its narrowing stands.
+		return 2
+	}
+	return w
+}
+
+// hasVS16 reports whether b contains U+FE0F, the emoji variation selector that
+// forces emoji (wide) presentation of the preceding base.
+func hasVS16(b []byte) bool {
+	return bytes.Contains(b, []byte{0xEF, 0xB8, 0x8F})
+}
+
+// clusterFusesRight reports whether a grapheme cluster should fuse with the
+// next one to form a single Brahmic syllable: it ends in a virama, or in a
+// virama immediately followed by a ZWJ (the explicit-conjunct request used in
+// Bengali/Malayalam/Devanagari, e.g. "र्‍या" = RA, virama, ZWJ, YA, sign AA).
+func clusterFusesRight(cluster []byte) bool {
+	r, sz := utf8.DecodeLastRune(cluster)
+	if r == 0x200D && sz < len(cluster) { // trailing ZWJ over a virama
+		r, _ = utf8.DecodeLastRune(cluster[:len(cluster)-sz])
+	}
+	return isVirama(r)
+}
+
+// brahmicWidth computes the terminal cell width of an orthographic syllable
+// under the wcwidth wcswidth model, returning brahmic=false (and width 0) when
+// b carries neither a virama nor a spacing combining mark — in which case the
+// caller keeps uniseg's width. The model: a virama is zero-width but caps the
+// conjunct it forms with the following consonant at 2 cells; a spacing mark
+// (category Mc) forces the syllable to 2 cells; ZWJ preserves a pending
+// virama, ZWNJ breaks it; non-spacing marks contribute nothing.
+func brahmicWidth(b []byte) (brahmic bool, width int) {
+	// Only a virama or an Mc mark makes a syllable Brahmic, and the width below is thrown
+	// away otherwise. Scan for one first: almost every cluster (CJK, Latin, symbols) has
+	// neither, and the width loop's per-rune runeWidth costs a uniseg lookup each. On
+	// vtebench's unicode input this pre-scan halved the parser's time per MiB.
+	if !hasBrahmicSign(b) {
+		return false, 0
+	}
+	prevVirama := false
+	for i := 0; i < len(b); {
+		if b[i] < utf8.RuneSelf {
+			width += 1 // an ASCII base, e.g. a digit between marks
+			i++
+			continue
+		}
+		r, sz := utf8.DecodeRune(b[i:])
+		i += sz
+		switch {
+		case isVirama(r):
+			brahmic = true
+			prevVirama = true
+		case r == 0x200D: // ZWJ: consumed, conjunct intent preserved
+		case r == 0x200C: // ZWNJ: breaks the conjunct
+			prevVirama = false
+		case unicode.Is(unicode.Mc, r):
+			brahmic = true
+			if width > 0 {
+				width = 2
+			}
+			prevVirama = false
+		default:
+			w := runeWidth(r)
+			if w == 0 { // non-spacing combining mark
+				prevVirama = false
+				continue
+			}
+			switch {
+			case prevVirama:
+				width = 2
+			case width == 0:
+				width = w
+			default:
+				width += w
+			}
+			prevVirama = false
+		}
+	}
+	if width > 2 {
+		width = 2
+	}
+	return brahmic, width
+}
+
+// hasBrahmicSign reports whether b holds a virama or a spacing combining mark
+// (category Mc) — the two runes that make brahmicWidth treat a syllable as Brahmic.
+// Both sets start at U+0903, so ASCII and Latin-1 through Arabic skip the table
+// search entirely.
+func hasBrahmicSign(b []byte) bool {
+	for i := 0; i < len(b); {
+		if b[i] < utf8.RuneSelf {
+			i++
+			continue
+		}
+		r, sz := utf8.DecodeRune(b[i:])
+		i += sz
+		if r >= 0x0903 && (isVirama(r) || unicode.Is(unicode.Mc, r)) {
+			return true
+		}
+	}
+	return false
+}
+
+// isVirama reports whether r is a Brahmic virama / halant / pangkon — the
+// dead-consonant sign that forms a conjunct with the following consonant.
+// Set per wcwidth's _ISC_VIRAMA_SET (Unicode general category derivation);
+// matching it lets leadingAkshara fuse conjuncts across scripts (Devanagari,
+// Tamil, Myanmar, Khmer, Balinese, Javanese, Brahmi-derived, …).
+func isVirama(r rune) bool {
+	switch r {
+	case 0x094D, 0x09CD, 0x0A4D, 0x0ACD, 0x0B4D, 0x0BCD, 0x0C4D, 0x0CCD,
+		0x0D4D, 0x0DCA, 0x1039, 0x17D2, 0x1A60, 0x1B44, 0x1BAB, 0xA806,
+		0xA8C4, 0xA9C0, 0xAAF6, 0x10A3F, 0x11046, 0x110B9, 0x11133,
+		0x111C0, 0x11235, 0x1134D, 0x113D0, 0x11442, 0x114C2, 0x115BF,
+		0x1163F, 0x116B6, 0x11839, 0x1193E, 0x119E0, 0x11A47, 0x11A99,
+		0x11C3F, 0x11D45, 0x11D97, 0x11F42:
+		return true
+	}
+	return false
+}
+
+// commitCluster writes one grapheme cluster (UTF-8 bytes b, display width
+// width as measured by uniseg) to the grid at the cursor. Single-rune
+// clusters store the rune directly in cell.Ch; multi-rune clusters intern
+// the string and store the resulting clusterID. Width-0 clusters (a lone
+// combining/format run with no spacing base — only possible when split
+// across Feed calls) are dropped, matching legacy behavior.
+func (g *grid) commitCluster(b []byte, width int) {
+	if width <= 0 {
+		return
+	}
+	if width > 2 {
+		width = 2
+	}
+	base, sz := utf8.DecodeRune(b)
+	var cid uint16
+	if sz != len(b) {
+		cid = g.internCluster(b)
+	}
+	g.putCell(base, cid, width)
+}
+
+// internCluster returns the clusterID for s, allocating one on first sight.
+// Returns 0 (degrade to base rune) when the pool is exhausted.
+//
+// b is bytes, not a string: the compiler turns m[string(b)] into a lookup without a copy,
+// so a cluster already in the pool (every repeat of an accented letter or ZWJ emoji)
+// costs no allocation. The string is built only when a new entry is stored.
+func (g *grid) internCluster(b []byte) uint16 {
+	if id, ok := g.clusterIDs[string(b)]; ok {
+		return id
+	}
+	s := string(b)
+	if len(g.clusters) >= maxClusters {
+		return 0
+	}
+	if g.clusterIDs == nil {
+		g.clusterIDs = make(map[string]uint16, 64)
+		g.clusters = make([]string, 1, 64) // index 0 reserved (clusterID 0 = none)
+	}
+	id := uint16(len(g.clusters))
+	g.clusters = append(g.clusters, s)
+	g.clusterIDs[s] = id
+	return id
+}
+
+// putCell writes a glyph (base rune ch, optional clusterID, display width w)
+// at the cursor with current attrs and advances. Wraps to the next line at
+// the right margin; scrolls up at bottom. A width-2 glyph occupies the
+// current cell and the cell to its right (the "continuation"), wrapping early
+// if only one column remains. Width and any clustering are resolved by the
+// caller; this is the shared write path for Put and commitCluster.
+func (g *grid) putCell(ch rune, clusterID uint16, w int) {
+	// Belt and braces behind the resize clamps: a cursor row outside the
+	// live screen would index RowWrapped out of range below.
+	if g.CursorR < 0 || g.CursorR >= g.Rows || g.Cols <= 0 {
+		return
+	}
+	justWrapped := false
+	if !g.AutoWrap {
+		if g.CursorC >= g.Cols {
+			g.CursorC = g.Cols - 1
+		}
+		if w == 2 && g.CursorC+1 >= g.Cols {
+			w = 1
+		}
+	} else if g.CursorC >= g.Cols {
+		g.RowWrapped[g.CursorR] = true
+		g.Newline()
+		g.CursorC = 0
+		justWrapped = true
+	}
+
+	// Guard with justWrapped: if we already wrapped once (cursor is now at
+	// col 0), the wide-char check would fire again when Cols==1, producing a
+	// second spurious Newline for a single Put call.
+	if !justWrapped && g.AutoWrap && w == 2 && g.CursorC+1 >= g.Cols {
+		if c := g.At(g.CursorR, g.CursorC); c != nil {
+			*c = blankCell(g.CurFG, g.CurBG, g.CurAttrs|attrWrapPad)
+		}
+		g.RowWrapped[g.CursorR] = true
+		g.Newline()
+		g.CursorC = 0
+	}
+
+	if g.InsertMode {
+		g.InsertChars(w)
+	}
+	g.eraseWideAt(g.CursorR, g.CursorC)
+	if w == 2 {
+		g.eraseWideAt(g.CursorR, g.CursorC+1)
+	}
+	head := cell{
+		Ch: ch, FG: g.CurFG, BG: g.CurBG,
+		Attrs: g.CurAttrs, Width: uint8(w), LinkID: g.CurLinkID,
+		ULStyle: g.CurULStyle, ULColor: g.CurULColor,
+		clusterID: clusterID,
+	}
+	if c := g.At(g.CursorR, g.CursorC); c != nil {
+		*c = head
+	}
+	if w == 2 {
+		if c := g.At(g.CursorR, g.CursorC+1); c != nil {
+			*c = head.continuation()
+		}
+	}
+	// Text written into an image's cells destroys it, for the protocols that
+	// have no delete sequence. The length check is the hot-path cost.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(g.CursorR, 1, g.CursorC, g.CursorC+w)
+	}
+	g.markDirty(g.CursorR)
+	// Remember what was written so REP can repeat it. w (not the caller's
+	// width) is recorded because the no-autowrap path above may have narrowed
+	// a wide glyph to one cell.
+	g.lastGraphic, g.lastGraphicID, g.lastGraphicW = ch, clusterID, uint8(w)
+	g.CursorC += w
+	if !g.AutoWrap && g.CursorC >= g.Cols {
+		g.CursorC = g.Cols - 1
+	} else if g.CursorC > g.Cols {
+		// A wide glyph on a grid narrower than itself (a 1-column pane):
+		// the wide-char wrap above reset CursorC to 0 and w overshoots the
+		// grid width. Wrap-pending is encoded as CursorC == Cols exactly
+		// (settledCol collapses it), so an overflow must land on Cols, not
+		// past it — eraseInLine and friends key off the exact encoding.
+		g.CursorC = g.Cols
+	}
+}
+
+// RepeatLast implements REP (CSI Ps b): write the last graphic character
+// again n times, as if the application had re-sent it. ncurses emits this
+// for runs of identical characters whenever the terminfo entry advertises
+// `rep` (Linux xterm-256color does), so dropping it silently swallows text.
+//
+// No-op before anything has been printed. n is bounded to one screenful:
+// a repeat count beyond that can only overwrite its own output, and the cap
+// keeps a hostile "CSI 999999999 b" from burning the reader goroutine.
+func (g *grid) RepeatLast(n int) {
+	if n <= 0 || g.lastGraphicW == 0 {
+		return
+	}
+	if limit := g.Rows * g.Cols; n > limit {
+		n = limit
+	}
+	// putCell overwrites lastGraphic* with the same values on each pass, so
+	// reading them once up front is only an optimization, not a correctness
+	// requirement.
+	ch, id, w := g.lastGraphic, g.lastGraphicID, int(g.lastGraphicW)
+	for range n {
+		g.putCell(ch, id, w)
+	}
+}
+
+// eraseWideAt sanitizes the wide-char pair (if any) covering (r,c) so
+// a subsequent overwrite doesn't leave half a glyph behind. If (r,c)
+// is a wide head, blanks the continuation to its right. If it's a
+// continuation, blanks the head to its left. No-op for normal cells.
+func (g *grid) eraseWideAt(r, c int) {
+	cell := g.At(r, c)
+	if cell == nil {
+		return
+	}
+	switch {
+	case cell.Width == 2:
+		if right := g.At(r, c+1); right != nil &&
+			right.Width == 0 && right.Ch == 0 {
+			*right = defaultCell()
+		}
+	case cell.Width == 0 && cell.Ch == 0:
+		if left := g.At(r, c-1); left != nil && left.Width == 2 {
+			*left = defaultCell()
+		}
+	}
+}
+
+// Newline moves to next row, scrolling the region if needed. Column
+// unchanged (LF only); shells emit CRLF. When the cursor sits on the
+// scroll region's Bottom row, scrollUpRegion is invoked so apps that
+// shrink the active area (less, vim status line) don't blow away
+// untouched rows below. When the cursor is below Bottom (outside the
+// region), it advances toward Rows-1 without scrolling.
+func (g *grid) Newline() {
+	switch {
+	case g.CursorR == g.Bottom:
+		g.scrollUpRegion(1)
+	case g.CursorR+1 < g.Rows:
+		g.markDirty(g.CursorR)
+		g.CursorR++
+		g.markDirty(g.CursorR)
+	}
+}
+
+// NextLine implements ESC E (NEL): CR + LF.
+func (g *grid) NextLine() {
+	g.CarriageReturn()
+	g.Newline()
+}
+
+// CarriageReturn moves to column 0.
+func (g *grid) CarriageReturn() { g.CursorC = 0 }
+
+// Backspace moves cursor left one column. No erase.
+func (g *grid) Backspace() {
+	g.CursorC = max(g.settledCol()-1, 0)
+}
+
+// Tab advances the cursor to the next tab stop. Scans TabStops from
+// CursorC+1; if no stop exists within the row, clamps to Cols-1.
+func (g *grid) Tab() {
+	g.CursorC = max(g.settledCol(), 0)
+	for c := g.CursorC + 1; c < g.Cols; c++ {
+		if g.TabStops[c] {
+			g.CursorC = c
+			return
+		}
+	}
+	g.CursorC = g.Cols - 1
+}
+
+// TabForward advances n tab stops. Implements CSI Ps I (CHT). n < 1 is
+// treated as 1; the cursor clamps to the last column when stops run out.
+func (g *grid) TabForward(n int) {
+	if n < 1 {
+		n = 1
+	}
+	for range n {
+		g.Tab()
+	}
+}
+
+// TabBackward moves back n tab stops. Implements CSI Ps Z (CBT), the
+// counterpart to Tab: scans TabStops leftward from CursorC-1 and stops at
+// column 0 when no earlier stop exists. TUI renderers use CBT to walk back to
+// a column boundary while painting — ignoring it strands the cursor to the
+// right of where the application believes it is, so subsequent writes land in
+// the wrong columns and leave the previous text unerased.
+func (g *grid) TabBackward(n int) {
+	if n < 1 {
+		n = 1
+	}
+	// Settle a pending wrap first, like Tab does: scanning from the raw
+	// CursorC == Cols starts one column too far right.
+	g.CursorC = max(g.settledCol(), 0)
+	for range n {
+		if g.CursorC <= 0 {
+			g.CursorC = 0
+			return
+		}
+		moved := false
+		for c := g.CursorC - 1; c > 0; c-- {
+			if g.TabStops[c] {
+				g.CursorC = c
+				moved = true
+				break
+			}
+		}
+		if !moved {
+			g.CursorC = 0
+			return
+		}
+	}
+}
+
+// SetTabStop sets a tab stop at the current cursor column. Implements ESC H (HTS).
+// The pending-wrap column (CursorC == Cols) settles onto the last cell, and
+// stops past the right margin are refused: a stop at Cols would never fire
+// (Tab scans c < Cols) and would only surface after a widen.
+func (g *grid) SetTabStop() {
+	c := g.settledCol()
+	if c >= 0 && c < g.Cols && c < MaxGridDim {
+		g.TabStops[c] = true
+	}
+}
+
+// ClearTabStop clears the tab stop at the current cursor column (all==false)
+// or clears all tab stops (all==true). Implements CSI g (TBC).
+func (g *grid) ClearTabStop(all bool) {
+	if all {
+		g.TabStops = [MaxGridDim]bool{}
+		return
+	}
+	// Same column SetTabStop uses: with a wrap pending the cursor is on the
+	// last cell, not at Cols.
+	if c := g.settledCol(); c >= 0 && c < MaxGridDim {
+		g.TabStops[c] = false
+	}
+}
+
+// resetPendingWrap drops a pending wrap: the cursor goes back onto the last
+// column, where DEC terminals keep it while the wrap flag is set. Erase, insert
+// and delete all do this (xterm ResetWrap), so they act on the last column and
+// the next glyph overwrites it instead of wrapping to the next row.
+func (g *grid) resetPendingWrap() {
+	if g.Cols > 0 && g.CursorC >= g.Cols {
+		g.CursorC = g.Cols - 1
+	}
+}
+
+// EraseInLine implements CSI K. mode: 0 = cursor to EOL, 1 = SOL to
+// cursor, 2 = entire line. Cleared cells use current bg/attrs so
+// painted backgrounds persist.
+func (g *grid) EraseInLine(mode int) { g.eraseInLine(mode, false) }
+
+// SelectiveEraseInLine implements DECSEL (CSI ? Ps K): EraseInLine that
+// leaves DECSCA-protected cells standing. Same mode values.
+func (g *grid) SelectiveEraseInLine(mode int) { g.eraseInLine(mode, true) }
+
+func (g *grid) eraseInLine(mode int, selective bool) {
+	row := g.CursorR
+	if row < 0 || row >= g.Rows {
+		return
+	}
+	if mode < 0 || mode > 2 {
+		return
+	}
+	// A pending wrap puts the cursor on the last column for this erase, so
+	// EL 0 clears that cell, and the next glyph lands there instead of wrapping.
+	g.resetPendingWrap()
+	// A wide pair straddling the cursor is split so no orphaned half survives —
+	// unless this is a selective erase and the pair is protected, which must
+	// come through untouched.
+	edge := splitWide
+	if selective {
+		edge = splitWideErasable
+	}
+	cFrom, cTo := 0, g.Cols
+	switch mode {
+	case 0:
+		g.splitWideAt(row, g.CursorC, edge)
+		cFrom = clamp(g.CursorC, 0, g.Cols)
+		// With its tail gone the row no longer runs on into the next one
+		// (xterm ClearRight). Left set, the next Resize would join the two.
+		// A selective erase may leave protected text in the tail, so it keeps
+		// the flag.
+		if !selective {
+			g.RowWrapped[row] = false
+		}
+	case 1:
+		g.splitWideAt(row, g.CursorC, edge)
+		// The cursor can sit at Cols with a wrap pending; without the clamp
+		// this span would run one cell past the row into the next one.
+		cTo = clamp(g.CursorC+1, 0, g.Cols)
+	}
+	g.eraseSpan(row, cFrom, cTo, selective)
+}
+
+// eraseSpan blanks columns [from,to) of row r to the current SGR bg/attrs
+// (BCE). When selective is set — DECSEL/DECSED/DECSERA — cells carrying
+// attrProtected are stepped over. The span is clamped to the row: most
+// callers pre-clamp, but a stale cursor column must not panic here.
+// Caller holds Mu.
+func (g *grid) eraseSpan(r, from, to int, selective bool) {
+	if r < 0 || r >= g.Rows || from >= to {
+		return
+	}
+	row := g.row(r)
+	from = clamp(from, 0, len(row))
+	to = clamp(to, 0, len(row))
+	if from >= to {
+		return
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	for c := from; c < to; c++ {
+		if selective && row[c].Attrs&attrProtected != 0 {
+			continue
+		}
+		row[c] = blank
+	}
+	// An erase over an image's cells removes it, same as overwriting it with
+	// text — see grid.occludeGraphics.
+	if len(g.Graphics) != 0 {
+		g.occludeGraphics(r, 1, from, to)
+	}
+	g.markDirty(r)
+}
+
+// EraseChars implements CSI Ps X (ECH): blank n cells starting at the
+// cursor, clamped to the right margin. Unlike DCH the rest of the row does
+// not shift, and unlike EL the span is bounded — which is why cell-diffing
+// TUI renderers use it to repaint one pane of a split layout without
+// disturbing the panes beside it. The cursor does not move. Cleared cells
+// take the current bg/attrs, matching EraseInLine, so a painted background
+// survives the erase (BCE).
+func (g *grid) EraseChars(n int) {
+	row := g.CursorR
+	if row < 0 || row >= g.Rows {
+		return
+	}
+	if n < 1 {
+		n = 1
+	}
+	// ECH at a pending wrap erases the last column (see resetPendingWrap).
+	g.resetPendingWrap()
+	from := g.CursorC
+	if from < 0 {
+		from = 0
+	}
+	if from >= g.Cols {
+		return
+	}
+	to := min(from+n, g.Cols)
+	// A double-width char may straddle either edge of the span; clear its
+	// partner cell too so no orphaned continuation half is left behind.
+	g.eraseWideAt(row, from)
+	g.eraseWideAt(row, to-1)
+	// eraseSpan owns the blanking, so ECH picks up image occlusion on the
+	// same terms as EL/ED — an erase over an image's cells removes it.
+	g.eraseSpan(row, from, to, false)
+	// An erase that reaches the right margin empties the row's tail, so the row
+	// no longer wraps into the next one. xterm clears the flag for every ECH;
+	// clearing it only here keeps a mid-row ECH from splitting a logical line
+	// whose tail is still there.
+	if to == g.Cols {
+		g.RowWrapped[row] = false
+	}
+}
+
+// EraseInDisplay implements CSI J. mode: 0 = cursor to end of screen,
+// 1 = start of screen to cursor, 2 = entire screen. Mode 3 (ED 3, "erase
+// saved lines") blanks the screen like mode 2 and additionally drops the
+// scrollback buffer, so `clear` (which emits CSI 3 J then CSI 2 J) wipes
+// history as it does in xterm/iTerm/kitty.
+func (g *grid) EraseInDisplay(mode int) { g.eraseInDisplay(mode, false) }
+
+// SelectiveEraseInDisplay implements DECSED (CSI ? Ps J): EraseInDisplay
+// that leaves DECSCA-protected cells standing. Mode 3 still drops the
+// scrollback — history holds no protection state to honor.
+func (g *grid) SelectiveEraseInDisplay(mode int) { g.eraseInDisplay(mode, true) }
+
+func (g *grid) eraseInDisplay(mode int, selective bool) {
+	switch mode {
+	case 0:
+		g.eraseInLine(0, selective)
+		for r := g.CursorR + 1; r < g.Rows; r++ {
+			g.eraseSpan(r, 0, g.Cols, selective)
+			g.clearEraseWrap(r, selective)
+		}
+		g.markAllDirty()
+	case 1:
+		g.eraseInLine(1, selective)
+		for r := range g.CursorR {
+			g.eraseSpan(r, 0, g.Cols, selective)
+			g.clearEraseWrap(r, selective)
+		}
+		g.markAllDirty()
+	case 2, 3:
+		// A screen clear drops a pending wrap too (xterm ClearScreen).
+		g.resetPendingWrap()
+		if selective {
+			for r := range g.Rows {
+				g.eraseSpan(r, 0, g.Cols, true)
+			}
+		} else {
+			// Direct fill: clearing the screen is common enough to keep the
+			// per-row bookkeeping out of it.
+			g.fillScreen(blankCell(g.CurFG, g.CurBG, g.CurAttrs))
+			// The fill joins nothing: drop the wrap flags with the text,
+			// matching ClearAll, or the next Resize splices blank rows
+			// into one logical line.
+			for r := range g.RowWrapped {
+				g.RowWrapped[r] = false
+			}
+			// The direct fill skips eraseSpan, so clear the images itself.
+			if len(g.Graphics) != 0 {
+				g.occludeGraphics(0, g.Rows, 0, g.Cols)
+			}
+		}
+		// ED 2/3 is the one erase that takes the Kitty layer with it, so
+		// `clear` leaves no image behind. Mode 3 reaches into scrollback too.
+		g.clearKittyGraphics(mode == 3)
+		// Mode 3 additionally erases saved lines (scrollback). Dropping
+		// scrollback shifts the content-row coordinate space, so marks,
+		// graphics, and any active selection (all content-row based) must be
+		// trimmed/cleared, matching EnterAlt/ExitAlt on a buffer swap.
+		if mode == 3 {
+			if sb := g.Scrollback.Len(); sb > 0 {
+				g.Scrollback.DropBacking()
+				// Screen rows swapped in from the ring would keep its slab alive.
+				g.syncScrollbackGen()
+				// Reflow scratch too: with history gone there is nothing
+				// for the next Resize to re-carve.
+				g.reflowArena = rowArena{}
+				g.trimMarks(sb)
+				g.trimGraphics(sb)
+			}
+			g.ClearSelection()
+			g.ResetView()
+		}
+		g.markAllDirty()
+	}
+}
+
+// clearEraseWrap drops the wrap flag of row r after an erase blanked all of it:
+// an empty row joins nothing, and a stale flag makes the next Resize splice it
+// onto the row below as one logical line, moving that row's text (xterm
+// ClearBufRows does the same). A selective erase may leave protected text on
+// the row, so it keeps the flag.
+func (g *grid) clearEraseWrap(r int, selective bool) {
+	if !selective && r >= 0 && r < len(g.RowWrapped) {
+		g.RowWrapped[r] = false
+	}
+}
+
+// InsertLines implements CSI Ps L (IL): insert n blank lines at the
+// cursor row, pushing existing rows toward Bottom; rows pushed past
+// Bottom are discarded. No-op when the cursor is outside the active
+// scroll region (DEC behavior).
+//
+// The cursor column is left untouched. ECMA-48 specifies a move to the line
+// home position, but xterm, wezterm and tmux all preserve the column, and
+// cell-diffing TUI renderers (Bubble Tea/ultraviolet, notably crush) assume
+// that: homing the column here makes every following write on the row land
+// at the wrong offset, leaving the row's tail permanently unpainted.
+func (g *grid) InsertLines(n int) {
+	if n <= 0 || !g.regionValid() {
+		return
+	}
+	if g.CursorR < g.Top || g.CursorR > g.Bottom {
+		return
+	}
+	height := g.Bottom - g.CursorR + 1
+	if n > height {
+		n = height
+	}
+	// Rows below the cursor slide down inside the region and none of them
+	// reach scrollback, so images travel with them.
+	g.scrollGraphicsRegion(g.CursorR, g.Bottom, n, true)
+	if n < height {
+		g.rotateRowsDown(g.CursorR, g.Bottom, n)
+		copy(g.RowWrapped[g.CursorR+n:g.Bottom+1], g.RowWrapped[g.CursorR:g.Bottom+1-n])
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	for r := g.CursorR; r < g.CursorR+n && r <= g.Bottom; r++ {
+		row := g.row(r)
+		for i := range row {
+			row[i] = blank
+		}
+		g.RowWrapped[r] = false
+	}
+	g.markAllDirty()
+}
+
+// DeleteLines implements CSI Ps M (DL): delete n lines starting at the
+// cursor row, shifting rows below up; blank rows fill the bottom of
+// the region. No-op when cursor is outside the region. The cursor column
+// is preserved — see InsertLines for why.
+func (g *grid) DeleteLines(n int) {
+	if n <= 0 || !g.regionValid() {
+		return
+	}
+	if g.CursorR < g.Top || g.CursorR > g.Bottom {
+		return
+	}
+	height := g.Bottom - g.CursorR + 1
+	if n > height {
+		n = height
+	}
+	// Deleted rows are discarded, not pushed to scrollback, so images move
+	// up with the rows that survive and die with the ones that don't.
+	g.scrollGraphicsRegion(g.CursorR, g.Bottom, n, false)
+	if n < height {
+		g.rotateRowsUp(g.CursorR, g.Bottom, n)
+		copy(g.RowWrapped[g.CursorR:g.Bottom+1-n], g.RowWrapped[g.CursorR+n:g.Bottom+1])
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	for r := g.Bottom - n + 1; r <= g.Bottom; r++ {
+		row := g.row(r)
+		for i := range row {
+			row[i] = blank
+		}
+		g.RowWrapped[r] = false
+	}
+	g.markAllDirty()
+}
+
+// InsertChars implements CSI Ps @ (ICH): insert n blanks at the cursor,
+// shifting existing cells right within the row; cells past the right
+// margin are discarded. Blanks use current SGR bg/attrs. A shift can strand
+// half a wide pair at the gap's right edge or leave a head without room for
+// its continuation at the margin; both degrade to blanks in their own
+// colors, like sanitizeWideEdges.
+func (g *grid) InsertChars(n int) {
+	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
+		return
+	}
+	// At a pending wrap this acts on the last column (see resetPendingWrap).
+	g.resetPendingWrap()
+	if g.CursorC < 0 || g.CursorC >= g.Cols {
+		return
+	}
+	width := g.Cols - g.CursorC
+	if n > width {
+		n = width
+	}
+	g.eraseWideAt(g.CursorR, g.CursorC)
+	g.eraseWideAt(g.CursorR, g.Cols-1)
+	row := g.row(g.CursorR)
+	if n < width {
+		copy(row[g.CursorC+n:], row[g.CursorC:g.Cols-n])
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	for c := g.CursorC; c < g.CursorC+n; c++ {
+		row[c] = blank
+	}
+	if g.CursorC+n < g.Cols {
+		if orphan := &row[g.CursorC+n]; orphan.Width == 0 && orphan.Ch == 0 {
+			*orphan = blankCell(orphan.FG, orphan.BG, orphan.Attrs)
+		}
+	}
+	if tail := &row[g.Cols-1]; tail.Width == 2 {
+		*tail = blankCell(tail.FG, tail.BG, tail.Attrs)
+	}
+	g.markDirty(g.CursorR)
+}
+
+// DeleteChars implements CSI Ps P (DCH): delete n cells at the cursor,
+// shifting cells from the right inward; blanks fill at the right edge.
+// Stranded wide halves at the deletion point and at the end of the shifted
+// run degrade to blanks in their own colors.
+func (g *grid) DeleteChars(n int) {
+	if n <= 0 || g.CursorR < 0 || g.CursorR >= g.Rows {
+		return
+	}
+	// At a pending wrap this acts on the last column (see resetPendingWrap).
+	g.resetPendingWrap()
+	if g.CursorC < 0 || g.CursorC >= g.Cols {
+		return
+	}
+	width := g.Cols - g.CursorC
+	if n > width {
+		n = width
+	}
+	g.eraseWideAt(g.CursorR, g.CursorC)
+	g.eraseWideAt(g.CursorR, g.CursorC+n)
+	row := g.row(g.CursorR)
+	if n < width {
+		copy(row[g.CursorC:], row[g.CursorC+n:g.Cols])
+	}
+	blank := blankCell(g.CurFG, g.CurBG, g.CurAttrs)
+	for c := g.Cols - n; c < g.Cols; c++ {
+		row[c] = blank
+	}
+	if orphan := &row[g.CursorC]; orphan.Width == 0 && orphan.Ch == 0 {
+		*orphan = blankCell(orphan.FG, orphan.BG, orphan.Attrs)
+	}
+	if n < width {
+		if tail := &row[g.Cols-n-1]; tail.Width == 2 {
+			*tail = blankCell(tail.FG, tail.BG, tail.Attrs)
+		}
+	}
+	g.markDirty(g.CursorR)
+}

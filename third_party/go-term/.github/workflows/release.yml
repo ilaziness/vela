@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Nothing by default. Only the final job needs a write token, to attach
+# the assets, and only it asks for one.
+permissions: {}
+
+# Each job runs the same Makefile target a developer runs locally, so a
+# release can be rehearsed with `make release` before the tag is pushed.
+#
+# Only macOS needs a matching runner: the Metal backend is the one cgo
+# target. Linux and Windows are cgo-free -- the ConPTY layer is pure-Go
+# syscalls over golang.org/x/sys/windows, go-glyph's shaping stack is
+# pure Go, and go-gui reaches GL through purego -- so one ubuntu runner
+# cross-compiles both, for both architectures, with no C toolchain.
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # buildapp stamps the archive name from `git describe`, which
+        # needs the tag history a shallow clone leaves out.
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Package amd64 and arm64
+        run: make package-linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-asset
+          path: dist/falcon-*-linux-*.tar.gz
+
+  windows:
+    name: Windows
+    # Cross-compiled from Linux. The build is cgo-free, so the result is
+    # identical to one produced on a windows runner, and a single job
+    # covers both architectures without msys2.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Injects falcon.ico as the exe's icon resource and marks the PE as
+      # a GUI-subsystem image, so no console window opens behind falcon.
+      - name: Package amd64 and arm64
+        run: make package-windows
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-asset
+          path: dist/falcon-*-windows-*.zip
+
+  macos:
+    name: macOS
+    # A Mac is required: the Metal backend is cgo, and the bundle needs
+    # iconutil, lipo, hdiutil and codesign.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Builds arm64 and amd64, fuses them with lipo, bundles the result
+      # as Falcon.app and writes an ad-hoc signed .dmg. One download
+      # serves Apple silicon and Intel.
+      - name: Package universal .dmg
+        run: make package-macos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-asset
+          path: dist/falcon-*-macos.dmg
+
+  release:
+    name: Attach to GitHub Release
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    # Only this job writes. The build jobs above keep the workflow's
+    # empty permission set.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-asset'
+          merge-multiple: true
+          path: dist
+
+      # Pinned to a commit rather than the v3 tag: a tag can be moved to
+      # point at different code, a commit cannot.  This commit is release
+      # 3.0.3, which is what refs/tags/v3 dereferenced to when it was
+      # written.  Bump it deliberately, after reading the diff.
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          files: dist/*
+          generate_release_notes: true

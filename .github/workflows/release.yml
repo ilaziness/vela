@@ -9,22 +9,31 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            runs-on: windows-latest
+            artifact: Vela.exe
+            archive: Vela_${{ github.ref_name }}_windows_amd64.zip
+          - goos: linux
+            goarch: amd64
+            runs-on: ubuntu-latest
+            artifact: Vela
+            archive: Vela_${{ github.ref_name }}_linux_amd64.tar.gz
+          - goos: darwin
+            goarch: arm64
+            runs-on: macos-latest
+            artifact: Vela
+            archive: Vela_${{ github.ref_name }}_darwin_arm64.tar.gz
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev \
-            libwebkitgtk-6.0-dev \
-            libwayland-dev \
-            build-essential \
-            pkg-config
 
       - name: Setup Go
         uses: actions/setup-go@v7
@@ -32,235 +41,46 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: latest
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install Task and Wails CLI
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          go install github.com/go-task/task/v3/cmd/task@latest
-          WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
-          go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}"
-          wails3 version
+          mkdir -p bin
+          go build -trimpath -ldflags "-s -w -X github.com/ilaziness/vela/internal/buildinfo.Version=${{ github.ref_name }} -X github.com/ilaziness/vela/internal/buildinfo.Mode=release" -o "bin/${{ matrix.artifact }}" .
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install
-
-      - name: Build Linux
-        run: make build-linux VERSION=${{ github.ref_name }} MODE=release
-
-      - name: Archive Linux package
-        run: |
-          test -f bin/Vela
-          tar -C bin -czf bin/Vela_${{ github.ref_name }}_linux_amd64.tar.gz Vela
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-amd64
-          path: bin/Vela_${{ github.ref_name }}_linux_amd64.tar.gz
-          if-no-files-found: error
-
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
-    defaults:
-      run:
+      - name: Archive (zip)
+        if: matrix.goos == 'windows'
         shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: latest
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install Task and Wails CLI
         run: |
-          go install github.com/go-task/task/v3/cmd/task@latest
-          WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
-          go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}"
-          wails3 version
+          cd bin
+          7z a "${{ matrix.archive }}" "${{ matrix.artifact }}"
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install
-
-      # Avoid chocolatey make + SHELL="$$BASH" ($$ expands to PID under bash).
-      # Drive the same steps as Makefile build-windows via Git Bash.
-      - name: Build Windows
-        env:
-          VERSION: ${{ github.ref_name }}
-          MODE: release
-          CONFIG_FILE: internal/buildinfo/buildinfo.go
+      - name: Archive (tar)
+        if: matrix.goos != 'windows'
         run: |
-          set -euo pipefail
-          cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
-          GIT_INFO="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
-          BUILD_TIME="$(date -Iseconds 2>/dev/null || date "+%Y-%m-%dT%H:%M:%S%z" 2>/dev/null || echo unknown)"
-          sed -i "s/Mode      = \"debug\"/Mode      = \"$MODE\"/" "$CONFIG_FILE"
-          sed -i "s/Version   = \"v1.0.0\"/Version   = \"$VERSION\"/" "$CONFIG_FILE"
-          sed -i "s|GitInfo   = \".*\"|GitInfo   = \"$GIT_INFO\"|" "$CONFIG_FILE"
-          sed -i "s|BuildTime = \".*\"|BuildTime = \"$BUILD_TIME\"|" "$CONFIG_FILE"
-          status=0
-          wails3 build GOOS=windows VERSION="$VERSION" MODE="$MODE" || status=$?
-          mv "$CONFIG_FILE.bak" "$CONFIG_FILE"
-          exit $status
+          tar -C bin -czf "bin/${{ matrix.archive }}" "${{ matrix.artifact }}"
 
-      - name: Archive Windows package
-        shell: pwsh
-        run: |
-          if (-not (Test-Path bin/Vela.exe)) { throw "missing bin/Vela.exe" }
-          Compress-Archive -Path bin/Vela.exe -DestinationPath "bin/Vela_${{ github.ref_name }}_windows_amd64.zip" -Force
-
-      - name: Upload Windows artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: windows-amd64
-          path: bin/Vela_${{ github.ref_name }}_windows_amd64.zip
-          if-no-files-found: error
-
-  # Apple Silicon only. macos-latest is arm64; Intel (amd64) is intentionally omitted.
-  # The updater swaps the whole .app when the process runs inside one, and the
-  # archive must contain exactly one top-level entry. Filename must include
-  # both "darwin" and "arm64" so the GitHub asset matcher selects it.
-  build-macos:
-    name: Build macOS (Apple Silicon)
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: latest
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install Task and Wails CLI
-        run: |
-          go install github.com/go-task/task/v3/cmd/task@latest
-          WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
-          go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}"
-          wails3 version
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install
-
-      - name: Package macOS app
-        env:
-          VERSION: ${{ github.ref_name }}
-          MODE: release
-          CONFIG_FILE: internal/buildinfo/buildinfo.go
-        run: |
-          set -euo pipefail
-          cp "$CONFIG_FILE" "$CONFIG_FILE.orig"
-          GIT_INFO="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
-          BUILD_TIME="$(date -Iseconds 2>/dev/null || date "+%Y-%m-%dT%H:%M:%S%z" 2>/dev/null || echo unknown)"
-          # BSD sed requires a backup suffix. Keep it off the .orig restore copy.
-          sed -i.sedbak "s/Mode      = \"debug\"/Mode      = \"$MODE\"/" "$CONFIG_FILE"
-          sed -i.sedbak "s/Version   = \"v1.0.0\"/Version   = \"$VERSION\"/" "$CONFIG_FILE"
-          sed -i.sedbak "s|GitInfo   = \".*\"|GitInfo   = \"$GIT_INFO\"|" "$CONFIG_FILE"
-          sed -i.sedbak "s|BuildTime = \".*\"|BuildTime = \"$BUILD_TIME\"|" "$CONFIG_FILE"
-          rm -f "$CONFIG_FILE.sedbak"
-          status=0
-          wails3 package GOOS=darwin ARCH=arm64 VERSION="$VERSION" MODE="$MODE" || status=$?
-          mv "$CONFIG_FILE.orig" "$CONFIG_FILE"
-          exit $status
-
-      - name: Stamp bundle version and ad-hoc sign
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          APP="bin/Vela.app"
-          BIN="$APP/Contents/MacOS/Vela"
-          PLIST="$APP/Contents/Info.plist"
-          test -f "$BIN"
-          test -f "$PLIST"
-          file "$BIN" | grep -q arm64
-          # CFBundle version strings are numeric. The tag is v1.2.3.
-          sed -i.bak "s/{{.VERSION}}/${VERSION#v}/g" "$PLIST"
-          rm -f "$PLIST.bak"
-          # Ad-hoc signature only. It is not a Developer ID and is not notarized.
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --strict --verbose=2 "$APP"
-
-      - name: Archive macOS package
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          ARCHIVE="bin/Vela_${VERSION}_darwin_arm64.zip"
-          rm -f "$ARCHIVE"
-          # --keepParent makes Vela.app the single top-level entry.
-          # --norsrc skips AppleDouble __MACOSX, which the updater would reject.
-          ditto -c -k --keepParent --norsrc "bin/Vela.app" "$ARCHIVE"
-          python3 -c 'import sys,zipfile; tops={n.split("/")[0] for n in zipfile.ZipFile(sys.argv[1]).namelist() if n}; assert tops=={"Vela.app"}, sorted(tops)' "$ARCHIVE"
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: darwin-arm64
-          path: bin/Vela_${{ github.ref_name }}_darwin_arm64.zip
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/${{ matrix.archive }}
           if-no-files-found: error
 
   release:
-    name: Draft Release
-    needs: [build-linux, build-windows, build-macos]
+    name: Publish GitHub Release
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
 
-      - name: Generate SHA256SUMS
-        run: |
-          set -euo pipefail
-          cd dist
-          test -f "Vela_${{ github.ref_name }}_darwin_arm64.zip"
-          test -f "Vela_${{ github.ref_name }}_linux_amd64.tar.gz"
-          test -f "Vela_${{ github.ref_name }}_windows_amd64.zip"
-          sha256sum \
-            "Vela_${{ github.ref_name }}_darwin_arm64.zip" \
-            "Vela_${{ github.ref_name }}_linux_amd64.tar.gz" \
-            "Vela_${{ github.ref_name }}_windows_amd64.zip" \
-            > SHA256SUMS
-          cat SHA256SUMS
-
-      - name: Create draft release
-        uses: softprops/action-gh-release@v3
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: true
+          files: dist/**
           generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            dist/Vela_${{ github.ref_name }}_darwin_arm64.zip
-            dist/Vela_${{ github.ref_name }}_linux_amd64.tar.gz
-            dist/Vela_${{ github.ref_name }}_windows_amd64.zip
-            dist/SHA256SUMS

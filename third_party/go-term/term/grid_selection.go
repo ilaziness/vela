@@ -1,0 +1,161 @@
+package term
+
+import "strings"
+
+// posLess reports whether a comes before b in content order (row, then column).
+func posLess(a, b contentPos) bool {
+	return a.Row < b.Row || (a.Row == b.Row && a.Col < b.Col)
+}
+
+// selOrder returns the selection bounds in forward order (start <= end).
+// Caller holds Mu.
+func (g *grid) selOrder() (start, end contentPos) {
+	a, b := g.SelAnchor, g.SelHead
+	if posLess(b, a) {
+		a, b = b, a
+	}
+	return a, b
+}
+
+// selRowSpan returns the inclusive cell span [c0, c1] selected on content row
+// r, given the already-normalized bounds s and e from selOrder. ok is false
+// when the row carries no selected cell, which happens when a block band
+// collapses to zero width.
+//
+// This is the single place selection geometry is decided. Both the copy path
+// (SelectedText) and the render path (prepareSelection) call it, so the
+// highlight can never disagree with what actually lands on the clipboard —
+// they used to hold two independent copies of this arithmetic. Caller
+// guarantees s.Row <= r <= e.Row and that columns are already clamped to
+// [0, Cols]. Caller holds Mu.
+func (g *grid) selRowSpan(r int, s, e contentPos) (c0, c1 int, ok bool) {
+	if g.SelMode == selBlock {
+		// A rectangle: every row gets the same column band, taken from the
+		// two boundary columns rather than from first/last-row positions.
+		// Boundaries are half-open, so the right edge loses one cell.
+		c0, c1 = s.Col, e.Col-1
+		if s.Col > e.Col {
+			c0, c1 = e.Col, s.Col-1
+		}
+	} else {
+		// Linear: the first row starts at the anchor, the last row stops at
+		// the head, and every row between is full width.
+		c0, c1 = 0, g.Cols-1
+		if r == s.Row {
+			c0 = s.Col
+		}
+		if r == e.Row {
+			c1 = e.Col - 1
+		}
+	}
+	if c0 < 0 {
+		c0 = 0
+	}
+	if c1 > g.Cols-1 {
+		c1 = g.Cols - 1
+	}
+	return c0, c1, c1 >= c0
+}
+
+// maxSelGrow caps SelectedText's upfront reservation. The builder still
+// grows to the true size, so output is unchanged; the cap only stops a
+// select-all over a deep scrollback from grabbing ~100 MB up front.
+const maxSelGrow = 1 << 20
+
+// SelectedText extracts the selection as a UTF-8 string. Trailing
+// blanks per row are trimmed; row breaks emit '\n' (kitty convention),
+// except across soft-wrapped rows, which join as one logical line.
+// Returns "" when nothing is selected. Column coordinates are cell
+// *boundaries* (0..Cols) and the span is half-open [s.Col, e.Col), so a
+// one-cell drag yields one cell. Coordinates are content-relative and are
+// clamped so stale coords from a Resize never produce a negative span.
+// Caller holds Mu.
+func (g *grid) SelectedText() string {
+	if !g.SelActive || g.Rows <= 0 || g.Cols <= 0 {
+		return ""
+	}
+	// No alt-screen clamp: Shift+PageUp shows main-screen history above the
+	// alt screen, and a selection dragged over it must copy what it
+	// highlights. A stale main-screen selection cannot reach here, because
+	// EnterAlt and ExitAlt both clear the selection.
+	total := g.Scrollback.Len() + g.Rows
+	s, e := g.selOrder()
+	s.Row, s.Col = clamp(s.Row, 0, total-1), clamp(s.Col, 0, g.Cols)
+	e.Row, e.Col = clamp(e.Row, 0, total-1), clamp(e.Col, 0, g.Cols)
+	if s == e {
+		return ""
+	}
+	// A block whose band is empty selects nothing on every row, so bail out
+	// rather than emitting one blank line per row it spans.
+	if _, _, ok := g.selRowSpan(s.Row, s, e); g.SelMode == selBlock && !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(min((e.Row-s.Row+1)*g.Cols+(e.Row-s.Row), maxSelGrow))
+	for r := s.Row; r <= e.Row; r++ {
+		c0, c1, ok := g.selRowSpan(r, s, e)
+		if !ok {
+			// No cell selected on this row; still a line of its own.
+			if r < e.Row {
+				b.WriteByte('\n')
+			}
+			continue
+		}
+
+		// Soft-wrapped rows are one logical line: joining them keeps a
+		// wrapped path/URL copy-pasteable instead of splitting it with a
+		// newline. Block selections keep every row broken — the rectangle
+		// is the unit there, not the logical line.
+		joined := r < e.Row && g.SelMode != selBlock && g.contentRowWrapped(r)
+
+		end := c0 - 1
+		if joined {
+			// Blanks before a soft wrap are real text, not padding: trimming
+			// them would fuse the last word of this row with the first word
+			// of the next ("foo " + "bar" → "foobar"). The one exception is
+			// the blank a wide glyph leaves when it wraps early (attrWrapPad):
+			// it is padding, and copying it would split a CJK word.
+			end = c1
+			if c1 == g.Cols-1 && g.ContentCellAt(r, c1).Attrs&attrWrapPad != 0 {
+				end = c1 - 1
+			}
+		}
+		for c := c0; c <= c1 && !joined; c++ {
+			// A Kitty Unicode placeholder is an image, not text. Copying it
+			// verbatim would paste a private-use character plus combining
+			// diacritics into the user's clipboard, so it counts as blank here
+			// — including for the trailing-blank trim, so selecting a line of
+			// image and nothing else copies an empty line rather than a run of
+			// spaces.
+			cell := g.ContentCellAt(r, c)
+			if cell.Ch != ' ' && !isPlaceholderCell(cell) {
+				end = c
+			}
+		}
+		for c := c0; c <= end; c++ {
+			cell := g.ContentCellAt(r, c)
+			if isPlaceholderCell(cell) {
+				b.WriteByte(' ')
+				continue
+			}
+			if cell.clusterID != 0 && int(cell.clusterID) < len(g.clusters) {
+				b.WriteString(g.clusters[cell.clusterID])
+			} else if cell.Ch != 0 {
+				b.WriteRune(cell.Ch)
+			}
+		}
+		if r < e.Row && !joined {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// ClearSelection drops any active selection. Caller holds Mu.
+func (g *grid) ClearSelection() {
+	g.SelActive = false
+	g.SelAnchor = contentPos{}
+	g.SelHead = contentPos{}
+	g.hasSelAnchor = false
+	g.SelMode = selChar
+}

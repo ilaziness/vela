@@ -16,8 +16,8 @@ func TestTerminalConfigNormalize(t *testing.T) {
 	if c.LineHeight != 1 {
 		t.Fatalf("lineHeight=%v", c.LineHeight)
 	}
-	if c.Font == "" {
-		t.Fatal("font should fall back to default")
+	if c.Font != defaultTerminalFont {
+		t.Fatalf("font=%q want %q", c.Font, defaultTerminalFont)
 	}
 
 	c = TerminalConfig{Scrollback: 50, FontSize: 14, LineHeight: 1, Font: "Consolas"}

@@ -1,0 +1,1403 @@
+package term
+
+import (
+	"errors"
+	"math"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-gui-org/go-gui/gui"
+)
+
+// ---------------------------------------------------------------------------
+// Early-exit guards
+// ---------------------------------------------------------------------------
+
+func TestOnDraw_ZeroCellMetricReturnsEarly(t *testing.T) {
+	g := newGrid(24, 80)
+	tm := &Term{grid: g, cellW: 0, cellH: 0}
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
+	// nil textMeasure → TextWidth returns 0, so cellW stays 0.
+	dc := gui.NewDrawContext(800, 480, nil)
+	tm.onDraw(dc)
+	if len(dc.Texts()) != 0 || len(dc.Batches()) != 0 {
+		t.Error("zero cell metrics: expected no output")
+	}
+}
+
+func TestOnDraw_NaNCanvasWidthReturnsEarly(t *testing.T) {
+	tm, dc := newDrawTerm(24, 80, 10, 20)
+	dc.Width = float32(math.NaN())
+	tm.onDraw(dc)
+	if len(dc.Texts()) != 0 || len(dc.Batches()) != 0 {
+		t.Error("NaN canvas: expected no output")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Background pass
+// ---------------------------------------------------------------------------
+
+func TestOnDraw_DefaultBGSkipsBackgroundPass(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorVisible = false
+	g.CursorR = -1
+	g.CursorC = -1
+	// Use defaultCell() so BG=defaultColor (not ANSI 0=black).
+	for c := range g.Cols {
+		g.Cells[c] = defaultCell()
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	if len(dc.Texts()) != 0 {
+		t.Errorf("default bg grid: expected no text, got %d: %v", len(dc.Texts()), dc.Texts())
+	}
+	if len(dc.Batches()) != 0 {
+		t.Errorf("default bg grid: expected no batches, got %d: %v", len(dc.Batches()), dc.Batches())
+	}
+}
+
+func TestOnDraw_BackgroundNonDefaultSingleCell(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.Cells[0].BG = rgbColor(255, 0, 0)
+	// Set all cells to spaces for clean text pass.
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	batches := dc.Batches()
+	// One batch for the red cell at (0,0); rest is DefaultBG skipped.
+	if len(batches) < 1 {
+		t.Fatal("expected at least 1 batch for non-default bg")
+	}
+	found := false
+	for _, b := range batches {
+		if b.Color == gui.RGB(255, 0, 0) {
+			found = true
+			if len(b.Triangles) < 6 {
+				t.Error("red batch should have at least 6 floats (2 triangles)")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("no batch found with red color")
+	}
+}
+
+func TestOnDraw_BackgroundMultipleRuns(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	// Row 0: cols 0-1 red, 2-4 blue, 5-7 default
+	for c := range 2 {
+		g.Cells[c].BG = rgbColor(255, 0, 0)
+	}
+	for c := 2; c < 5; c++ {
+		g.Cells[c].BG = rgbColor(0, 0, 255)
+	}
+	// Set all chars to space.
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	batches := dc.Batches()
+	redCount, blueCount := 0, 0
+	for _, b := range batches {
+		if b.Color == gui.RGB(255, 0, 0) {
+			redCount++
+		}
+		if b.Color == gui.RGB(0, 0, 255) {
+			blueCount++
+		}
+	}
+	if redCount != 1 {
+		t.Errorf("expected 1 red batch, got %d", redCount)
+	}
+	if blueCount != 1 {
+		t.Errorf("expected 1 blue batch, got %d", blueCount)
+	}
+}
+
+func TestOnDraw_BackgroundPartialTopRow(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.ViewSubPx = 10
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	// With ViewSubPx > 0, partialTopRow is called. Scrollback is empty,
+	// so partialRow is nil and no row -1 batches appear. Verify OnDraw
+	// completes without panic — partialRow nil-path is exercised.
+}
+
+// The partial top row is deliberately emitted at a negative Y — it is the
+// sliver of the scrollback row that smooth scrolling has pushed off the top
+// of the viewport. Nothing in onDraw clamps it, so the canvas itself must be
+// clipped (see TestTerm_View_CanvasIsClipped); otherwise this text paints
+// over the workspace tab bar or the pane above it in a split.
+func TestOnDraw_PartialRowDrawsAboveCanvas(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	g := tm.grid
+	g.Mu.Lock()
+	g.ScrollbackCap = 100
+	// Push three distinct rows into scrollback.
+	for _, ch := range []rune{'A', 'B', 'C'} {
+		g.CursorR, g.CursorC = 0, 0
+		g.Put(ch)
+		g.ScrollUp(1)
+	}
+	// Viewport one row back, scrolled 5px into the row above it: "B" is the
+	// partial top row, "C" the first full viewport row.
+	g.ViewOffset = 1
+	g.ViewSubPx = 5
+	g.Mu.Unlock()
+
+	tm.onDraw(dc)
+
+	var partialY float32
+	found := false
+	for _, tx := range dc.Texts() {
+		if tx.Text == "B" {
+			partialY, found = tx.Y, true
+		}
+	}
+	if !found {
+		t.Fatal("partial top row not drawn")
+	}
+	// -cellH + ViewSubPx = -20 + 5.
+	if partialY != -15 {
+		t.Errorf("partial row Y = %v, want -15", partialY)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Foreground pass
+// ---------------------------------------------------------------------------
+
+func TestOnDraw_TextSingleRun(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	for c := range 5 {
+		g.Cells[c].Ch = rune('a' + c) // a,b,c,d,e
+		g.Cells[c].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	texts := dc.Texts()
+	if len(texts) < 1 {
+		t.Fatal("expected at least 1 text entry")
+	}
+	// All 5 chars same style → one coalesced run.
+	found := false
+	for _, te := range texts {
+		if strings.Contains(te.Text, "abcde") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected coalesced 'abcde', got texts: %v", texts)
+	}
+}
+
+func TestOnDraw_TextColorChangeBreaksRun(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorVisible = false // suppress cursor
+	g.Cells[0].Ch = 'a'
+	g.Cells[0].Width = 1
+	g.Cells[0].FG = rgbColor(255, 0, 0) // red
+	g.Cells[1].Ch = 'b'
+	g.Cells[1].Width = 1
+	g.Cells[1].FG = rgbColor(0, 0, 255) // blue
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	texts := dc.Texts()
+	// Should have at least 2 Text entries: one for 'a', one for 'b'
+	countA, countB := 0, 0
+	for _, te := range texts {
+		if strings.Contains(te.Text, "a") {
+			countA++
+		}
+		if strings.Contains(te.Text, "b") {
+			countB++
+		}
+	}
+	if countA != 1 || countB != 1 {
+		t.Errorf("expected 1 'a' and 1 'b' text entry, got %d/%d (all: %v)",
+			countA, countB, texts)
+	}
+}
+
+func TestOnDraw_WideCharEmitsSeparate(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.Cells[0].Ch = 'W'
+	g.Cells[0].Width = 2 // wide char
+	g.Cells[1].Ch = 0    // continuation cell
+	g.Cells[1].Width = 0 //
+	g.Cells[2].Ch = 'x'
+	g.Cells[2].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	texts := dc.Texts()
+	if len(texts) < 1 {
+		t.Fatal("expected at least 1 text entry")
+	}
+	// Wide char 'W' should be in its own Text entry.
+	// Continuation cell skipped. 'x' in a separate entry.
+	wFound, xFound := false, false
+	for _, te := range texts {
+		if strings.Contains(te.Text, "W") {
+			wFound = true
+		}
+		if strings.Contains(te.Text, "x") {
+			xFound = true
+		}
+	}
+	if !wFound {
+		t.Error("wide char 'W' not found in text entries")
+	}
+	if !xFound {
+		t.Error("'x' not found in text entries")
+	}
+}
+
+func TestOnDraw_PlainSpacesNotEmitted(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorVisible = false // suppress cursor output
+	g.CursorR = -1          // move cursor out of viewport
+	g.CursorC = -1
+	for c := range g.Cols {
+		g.Cells[c].Ch = ' '
+		g.Cells[c].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	// flushRun trims trailing spaces, so plain-space runs produce no text.
+	for _, te := range dc.Texts() {
+		if strings.TrimSpace(te.Text) == "" && len(te.Text) > 0 {
+			t.Errorf("unexpected whitespace-only text entry: %q", te.Text)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cursor rendering
+// ---------------------------------------------------------------------------
+
+func TestOnDraw_CursorBlock(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorR = 0
+	g.CursorC = 0
+	g.CursorVisible = true
+	g.cursorShape = CursorStyleBlock
+	g.Cells[0].Ch = 'X'
+	g.Cells[0].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	batches := dc.Batches()
+	// Block cursor: FilledRect at (0,0,10,20) with fg(cell) color,
+	// plus Text entry with inverted color.
+	if len(batches) < 1 {
+		t.Fatal("expected cursor batch")
+	}
+	// The cursor batch should be at x=0, y=0, w=10, h=20.
+	hasCursor := false
+	for _, b := range batches {
+		if len(b.Triangles) >= 6 && b.Triangles[0] == 0 && b.Triangles[1] == 0 {
+			hasCursor = true
+			break
+		}
+	}
+	if !hasCursor {
+		t.Error("no cursor batch found at (0,0)")
+	}
+}
+
+func TestOnDraw_CursorUnderline(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorR = 0
+	g.CursorC = 0
+	g.CursorVisible = true
+	g.cursorShape = CursorStyleUnderline
+	g.Cells[0].Ch = 'X'
+	g.Cells[0].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	batches := dc.Batches()
+	// Underline cursor: FilledRect at bottom of cell.
+	// cellH=20 → h = round(20/8) = 3 (thickness is pixel-snapped so both
+	// edges land on the pixel grid). y = 0 + 20 - 3 = 17.
+	found := false
+	for _, b := range batches {
+		if len(b.Triangles) < 6 {
+			continue
+		}
+		y0 := b.Triangles[1]
+		if y0 >= 17 && y0 < 18 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("no underline cursor batch at y≈17 found")
+	}
+}
+
+func TestOnDraw_CursorBarShape(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorR = 0
+	g.CursorC = 0
+	g.CursorVisible = true
+	g.cursorShape = CursorStyleBar
+	g.Cells[0].Ch = 'X'
+	g.Cells[0].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	batches := dc.Batches()
+	// Bar cursor: narrow vertical rect, w = max(2, cellW/6) = max(2, 10/6) = 2.
+	found := false
+	for _, b := range batches {
+		if len(b.Triangles) < 6 {
+			continue
+		}
+		// Bar rect should be at (0,0) with w=2.
+		if b.Triangles[0] == 0 && b.Triangles[1] == 0 {
+			// Width = Triangles[2] - Triangles[0] = w
+			w := b.Triangles[2] - b.Triangles[0]
+			if w == 2 {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Error("no bar cursor batch with w=2 found")
+	}
+}
+
+func TestOnDraw_CursorSuppressScrolledBack(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.ViewOffset = 10
+	g.CursorR = 0
+	g.CursorC = 0
+	g.CursorVisible = true
+	g.Cells[0].Ch = 'X'
+	g.Cells[0].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	// Cursor guard requires ViewOffset == 0. With ViewOffset=10, no cursor
+	// rect or inverted text should appear. Verify OnDraw completes without
+	// panic — the scrolled-back fast path correctly skips cursor rendering.
+}
+
+func TestOnDraw_CursorBlinkOffSupressed(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorR = 0
+	g.CursorC = 0
+	g.CursorVisible = true
+	g.CursorBlink = true
+	g.Cells[0].Ch = 'X'
+	g.Cells[0].Width = 1
+	tm.grid.Mu.Unlock()
+	// Advance epoch into the silent half of the blink cycle so
+	// cursorBlinkOff returns true.
+	tm.cursorEpoch = time.Now().Add(-cursorBlinkPeriod)
+	tm.onDraw(dc)
+	// Cursor guard: cursorBlinkOff=true → no cursor rect or inverted text.
+	// Verify OnDraw completes without panic in the blink-off path.
+}
+
+// ---------------------------------------------------------------------------
+// Search bar
+// ---------------------------------------------------------------------------
+
+func TestOnDraw_SearchBarActive(t *testing.T) {
+	tm, dc := newDrawTerm(4, 40, 10, 20)
+	tm.grid.Mu.Lock()
+	tm.search.active = true
+	tm.search.query = "hello"
+	// Set cells to spaces.
+	g := tm.grid
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	texts := dc.Texts()
+	found := false
+	for _, te := range texts {
+		if strings.Contains(te.Text, "Find (^R=regex): hello") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("search bar text not found in: %v", texts)
+	}
+}
+
+func TestOnDraw_SearchBarNoMatch(t *testing.T) {
+	tm, dc := newDrawTerm(4, 40, 10, 20)
+	tm.grid.Mu.Lock()
+	tm.search.active = true
+	tm.search.query = "NONEXISTENT"
+	tm.search.matches = nil // no matches
+	g := tm.grid
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	// Red background when no match. Read from the theme-derived overlay
+	// palette rather than a literal: the no-match fill is derived per theme
+	// now, so a hardcoded color would only ever test the default one.
+	found := false
+	for _, b := range dc.Batches() {
+		if b.Color == tm.grid.ov.searchNoMatchFill {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected red search bar background for no-match")
+	}
+}
+
+func TestOnDraw_SearchBarRegexInvalid(t *testing.T) {
+	tm, dc := newDrawTerm(4, 40, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorVisible = false
+	tm.search.active = true
+	tm.search.query = "bad["
+	tm.search.regex = true
+	tm.search.reErr = errors.New("parse error")
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	// Label format: "/re/ " + query + " [invalid]▌"
+	// query = "bad[" → "/re/ bad[ [invalid]▌"
+	found := false
+	for _, te := range dc.Texts() {
+		if strings.Contains(te.Text, "/re/ bad[") && strings.Contains(te.Text, "[invalid]") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected invalid regex label in: %v", dc.Texts())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Scrollbar
+// ---------------------------------------------------------------------------
+
+func TestOnDraw_ScrollbarVisibleWhenScrolledBack(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	// Initialize scrollback ring with capacity.
+	g.Scrollback.SetGeom(100, g.Cols)
+	row := make([]cell, g.Cols)
+	for i := range row {
+		row[i] = cell{Ch: ' ', Width: 1}
+	}
+	for range 60 {
+		g.Scrollback.Push(row, false)
+	}
+	g.ViewOffset = 50
+	tm.scrollbar.until = time.Now().Add(time.Second)
+	g.CursorVisible = false
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	batches := dc.Batches()
+	found := false
+	for _, b := range batches {
+		if b.Color == tm.grid.ov.thumb {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected scrollbar thumb batch with semi-transparent gray")
+	}
+}
+
+func TestOnDraw_ScrollbarHiddenLive(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.ViewOffset = 0
+	tm.scrollbar.until = time.Time{} // expired
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	for _, b := range dc.Batches() {
+		if b.Color == tm.grid.ov.thumb {
+			t.Error("scrollbar should be hidden at live viewport")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Bell flash
+// ---------------------------------------------------------------------------
+
+// bellFlashAlpha runs one onDraw on a fresh Term/DrawContext with the flash
+// ending at until (over a total-long flash) and reports the alpha of the
+// bell wash, or 0 when no overlay was emitted. A fresh context per call
+// matters: DrawContext accumulates batches, so reusing one across samples
+// would keep matching the first sample's overlay.
+func bellFlashAlpha(until time.Time, total time.Duration) uint8 {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	for i := range g.Cells {
+		g.Cells[i].Ch = ' '
+		g.Cells[i].Width = 1
+	}
+	// The block cursor also paints an opaque white rect; suppress it so
+	// only the bell overlay can match.
+	g.CursorVisible = false
+	tm.grid.Mu.Unlock()
+
+	tm.bell.flashNanos.Store(int64(total))
+	tm.bell.flashUntil.Store(until.UnixNano())
+	tm.onDraw(dc)
+	// Match on the theme-derived wash color rather than a literal white: the
+	// wash follows the theme now (see palette_overlay.go), so a hardcoded
+	// color here would only test the default theme.
+	wash := tm.grid.ov.bellFlash
+	for _, b := range dc.Batches() {
+		if b.Color.R == wash.R && b.Color.G == wash.G && b.Color.B == wash.B &&
+			b.Color.A > 0 {
+			return b.Color.A
+		}
+	}
+	return 0
+}
+
+func TestOnDraw_BellFlash(t *testing.T) {
+	// Just-fired bell: overlay present, at or just below the peak alpha.
+	alpha := bellFlashAlpha(time.Now().Add(time.Second), time.Second)
+	if alpha == 0 {
+		t.Fatal("expected bell flash overlay")
+	}
+	if alpha > bellFlashPeakAlpha {
+		t.Errorf("alpha %d exceeds peak %d", alpha, bellFlashPeakAlpha)
+	}
+}
+
+func TestOnDraw_BellFlashFadesOut(t *testing.T) {
+	const total = time.Second
+	// Sample early / mid / late in the flash by moving the end instant
+	// closer to now; alpha must decrease monotonically.
+	early := bellFlashAlpha(time.Now().Add(total), total)
+	mid := bellFlashAlpha(time.Now().Add(total/2), total)
+	late := bellFlashAlpha(time.Now().Add(total/20), total)
+
+	if early <= mid || mid <= late {
+		t.Errorf("expected fade-out, got early=%d mid=%d late=%d",
+			early, mid, late)
+	}
+}
+
+func TestOnDraw_BellFlashExpired(t *testing.T) {
+	// Flash window already elapsed: no overlay at all.
+	if a := bellFlashAlpha(time.Now().Add(-time.Second), time.Second); a != 0 {
+		t.Errorf("expected no overlay after flash expiry, got alpha %d", a)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Draw primitives (direct calls, no OnDraw)
+// ---------------------------------------------------------------------------
+
+func TestDrawCursor_CustomColor(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	tm.grid.CursorColor = 0xFF0000 // red
+	tm.grid.Mu.Unlock()
+	cell := cell{Ch: 'X', Width: 1}
+	tm.drawCursorShape(dc, 0, 0, cell, CursorStyleBlock, gui.TextStyle{})
+	batches := dc.Batches()
+	found := false
+	for _, b := range batches {
+		if b.Color == gui.RGB(255, 0, 0) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected cursor fill with custom CursorColor=red")
+	}
+}
+
+func TestFillRun_DefaultBGSkipped(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	before := len(dc.Batches())
+	tm.fillRun(dc, 0, 0, 5, tm.grid.Theme.DefaultBG, 0, false)
+	if len(dc.Batches()) != before {
+		t.Error("fillRun should skip DefaultBG")
+	}
+}
+
+func TestFillRun_NonDefaultBG(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.fillRun(dc, 0, 2, 5, gui.RGB(0, 255, 0), 0, false)
+	batches := dc.Batches()
+	if len(batches) != 1 {
+		t.Fatalf("expected 1 batch, got %d", len(batches))
+	}
+	b := batches[0]
+	if b.Color != gui.RGB(0, 255, 0) {
+		t.Error("wrong color")
+	}
+	// x=2*10=20, y=0, w=3*10=30, h=20
+	if b.Triangles[0] != 20 || b.Triangles[1] != 0 {
+		t.Errorf("expected (20,0) got (%f,%f)", b.Triangles[0], b.Triangles[1])
+	}
+	if b.Triangles[2] != 50 || b.Triangles[3] != 0 {
+		t.Errorf("expected (50,0) got (%f,%f)", b.Triangles[2], b.Triangles[3])
+	}
+}
+
+func TestEmitCell_Plain(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	cell := cell{Ch: 'Z', Width: 1}
+	k := runKey{color: gui.RGB(255, 255, 255)}
+	tm.emitCell(dc, 0, 0, 10, cell, k, gui.TextStyle{})
+	texts := dc.Texts()
+	if len(texts) != 1 {
+		t.Fatalf("expected 1 text entry, got %d", len(texts))
+	}
+	if texts[0].Text != "Z" {
+		t.Errorf("expected 'Z', got %q", texts[0].Text)
+	}
+}
+
+func TestEmitCell_WithUnderline(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	cell := cell{Ch: 'U', Width: 1}
+	k := runKey{
+		color:   gui.RGB(255, 255, 255),
+		ulStyle: ulSingle,
+		ulColor: gui.RGB(255, 255, 255),
+	}
+	tm.emitCell(dc, 0, 0, 10, cell, k, gui.TextStyle{})
+	if len(dc.Texts()) != 1 {
+		t.Error("expected 1 text entry for underline cell")
+	}
+	// Underline decor emits an additional FilledRect batch.
+	if len(dc.Batches()) < 1 {
+		t.Error("expected underline decor batch")
+	}
+}
+
+func TestDrawUnderlineDecor_Single(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	// cellH=20 → thick = 20/14 ≈ 1.43, baseY = 20 - 2*1.43 - 1 ≈ 16.14
+	tm.drawUnderlineDecor(dc, 0, 0, 50, ulSingle, gui.RGB(255, 255, 255))
+	if len(dc.Batches()) != 1 {
+		t.Fatalf("expected 1 batch, got %d", len(dc.Batches()))
+	}
+	b := dc.Batches()[0]
+	baseY := float32(0) + tm.cellH - 2*(tm.cellH/14) - 1
+	y := b.Triangles[1]
+	if y < baseY-0.001 || y > baseY+0.001 {
+		t.Errorf("expected y≈%f, got y=%f", baseY, y)
+	}
+}
+
+func TestDrawUnderlineDecor_Double(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.drawUnderlineDecor(dc, 0, 0, 50, ulDouble, gui.RGB(255, 255, 255))
+	// Double: two rect bars with same color → merged into one batch.
+	// At least 2 triangles per rect, 4 rects → valid if we have triangle data.
+	if len(dc.Batches()) < 1 {
+		t.Fatal("expected at least 1 batch for double underline")
+	}
+}
+
+func TestDrawUnderlineDecor_Curly(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.drawUnderlineDecor(dc, 0, 0, 50, ulCurly, gui.RGB(255, 255, 255))
+	// Curly: alternating up/down segments. Should produce at least 1 batch.
+	if len(dc.Batches()) < 1 {
+		t.Error("expected batches for curly underline")
+	}
+}
+
+func TestDrawUnderlineDecor_Dotted(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.drawUnderlineDecor(dc, 0, 0, 50, ulDotted, gui.RGB(255, 255, 255))
+	// Dotted: small rectangles with gaps. Should produce batches.
+	if len(dc.Batches()) < 1 {
+		t.Error("expected batches for dotted underline")
+	}
+}
+
+func TestDrawUnderlineDecor_Dashed(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.drawUnderlineDecor(dc, 0, 0, 50, ulDashed, gui.RGB(255, 255, 255))
+	if len(dc.Batches()) < 1 {
+		t.Error("expected batches for dashed underline")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// prepareSelection — half-open boundary span
+// ---------------------------------------------------------------------------
+
+// TestPrepareSelection_HalfOpenSpan verifies the highlight span for the end
+// row stops one cell short of the boundary column (c1 == e.Col-1), matching
+// the half-open selection model used by SelectedText.
+func TestPrepareSelection_HalfOpenSpan(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 0, Col: 5} // half-open cols 2..4
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	rb := ds.rowSel[0]
+	if !rb.active || rb.c0 != 2 || rb.c1 != 4 {
+		t.Errorf("half-open span: got %+v, want {c0:2 c1:4 active:true}", rb)
+	}
+}
+
+// TestPrepareSelection_EmptySpanNotHighlighted verifies that an end row whose
+// boundary collapses to zero width (e.Col-1 < c0) is not highlighted, so a
+// selection ending exactly at a row's start column leaves that row clean.
+func TestPrepareSelection_EmptySpanNotHighlighted(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	// Anchor at start of row 1, head at boundary 0 of row 1: c1 = -1 < c0 = 0.
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 0}
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	if ds.rowSel[1].active {
+		t.Errorf("row 1 empty span should not be highlighted: %+v", ds.rowSel[1])
+	}
+	// Row 0 (the full start row) should still be highlighted end-to-end.
+	if rb := ds.rowSel[0]; !rb.active || rb.c0 != 0 || rb.c1 != g.Cols-1 {
+		t.Errorf("row 0 span: got %+v, want full row", rb)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// selection highlight — tint, not inversion
+// ---------------------------------------------------------------------------
+
+// TestResolveCell_SelectionTintKeepsForeground verifies the Terminal.app-style
+// highlight: a selected cell keeps its own foreground color and only its
+// background moves, blended toward the theme foreground. The old behavior
+// (toggling attrInverse) swapped fg/bg and destroyed the text color.
+func TestResolveCell_SelectionTintKeepsForeground(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.Cells[0].Ch = 'A'
+	g.Cells[0].FG = rgbColor(255, 0, 0) // red text on default bg
+	g.SelActive = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 0, Col: 1}
+
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	sel := ds.resolveCell(0, 0)
+
+	if got, want := g.fgOf(sel), gui.RGB(255, 0, 0); got != want {
+		t.Errorf("selected fg: got %+v, want unchanged %+v", got, want)
+	}
+	plainBG := g.Theme.DefaultBG
+	selBG := g.bgOf(sel)
+	if selBG == plainBG {
+		t.Errorf("selected bg unchanged (%+v); expected tinted", selBG)
+	}
+	if want := g.selectionBG(plainBG); selBG != want {
+		t.Errorf("selected bg: got %+v, want %+v", selBG, want)
+	}
+	if sel.Attrs&attrInverse != 0 {
+		t.Error("selection must not leave attrInverse set")
+	}
+}
+
+// TestHighlightSelected_InverseCellResolvedFirst verifies a cell already
+// carrying SGR 7 has its inverse materialized before the tint is applied, so
+// the highlight does not read as un-inverted text.
+func TestHighlightSelected_InverseCellResolvedFirst(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	c := cell{Ch: 'A', FG: rgbColor(255, 0, 0), BG: rgbColor(0, 0, 255), Attrs: attrInverse, Width: 1}
+	sel := g.highlightSelected(c)
+
+	if got, want := g.fgOf(sel), gui.RGB(0, 0, 255); got != want {
+		t.Errorf("inverse fg: got %+v, want the cell's bg %+v", got, want)
+	}
+	if got, want := g.bgOf(sel), g.selectionBG(gui.RGB(255, 0, 0)); got != want {
+		t.Errorf("inverse bg: got %+v, want tint over the cell's fg %+v", got, want)
+	}
+}
+
+// TestSelectionBG_TintAlwaysVisible pins the blend-target choice. A cell whose
+// background already *is* the theme foreground (every reverse-video cell) must
+// not be blended with itself — that would leave the background untouched and
+// the selection invisible. Both theme endpoints must move.
+func TestSelectionBG_TintAlwaysVisible(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+
+	for _, tc := range []struct {
+		name string
+		bg   gui.Color
+	}{
+		{"default background", g.Theme.DefaultBG},
+		{"default foreground (reverse video)", g.Theme.DefaultFG},
+	} {
+		got := g.selectionBG(tc.bg)
+		if got == tc.bg {
+			t.Errorf("%s: selectionBG(%+v) unchanged; selection would be invisible",
+				tc.name, tc.bg)
+		}
+	}
+}
+
+// TestResolveCell_SearchMatchThenSelectionStillTints covers the overlap case:
+// a cell that is both a search match (rendered inverse) and selected. The two
+// effects must compose, not cancel — the match keeps its inverted colors and
+// the selection tint is still applied on top of them.
+func TestResolveCell_SearchMatchThenSelectionStillTints(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.Cells[0].Ch = 'A'
+	g.SelActive = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 0, Col: 1}
+
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	ds.vMatchesByRow = make([][]vMatch, g.Rows)
+	ds.vMatchesByRow[0] = []vMatch{{col: 0, len: 1}}
+	tm.prepareSelection(ds)
+	sel := ds.resolveCell(0, 0)
+
+	// Inverse of a default cell puts DefaultFG in the background; the tint then
+	// has to move it, otherwise selecting a search hit shows no highlight.
+	matchBG := g.Theme.DefaultFG
+	if got := g.bgOf(sel); got == matchBG {
+		t.Errorf("selected search match bg: got %+v, want tinted away from %+v",
+			got, matchBG)
+	}
+	if got, want := g.bgOf(sel), g.selectionBG(matchBG); got != want {
+		t.Errorf("selected search match bg: got %+v, want %+v", got, want)
+	}
+	// The match's inverted foreground survives the tint.
+	if got, want := g.fgOf(sel), g.Theme.DefaultBG; got != want {
+		t.Errorf("selected search match fg: got %+v, want %+v", got, want)
+	}
+}
+
+// A block selection highlights the same column band on every row it spans.
+// prepareSelection and SelectedText share selRowSpan precisely so the two can
+// never disagree about which cells are selected.
+func TestPrepareSelection_BlockBand(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 2, Col: 5} // band: cells 2..4, all rows
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	for r := range 3 {
+		rb := ds.rowSel[r]
+		if !rb.active || rb.c0 != 2 || rb.c1 != 4 {
+			t.Errorf("row %d: got %+v, want {c0:2 c1:4 active:true}", r, rb)
+		}
+	}
+}
+
+// A block dragged up-left produces the same band as one dragged down-right.
+func TestPrepareSelection_BlockReversed(t *testing.T) {
+	tm, _ := newDrawTerm(3, 8, 10, 20)
+	g := tm.grid
+	g.SelActive = true
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 2, Col: 5}
+	g.SelHead = contentPos{Row: 0, Col: 2}
+	ds := &drawState{g: g, rows: g.Rows, cols: g.Cols}
+	tm.prepareSelection(ds)
+	for r := range 3 {
+		if rb := ds.rowSel[r]; !rb.active || rb.c0 != 2 || rb.c1 != 4 {
+			t.Errorf("row %d: got %+v, want {c0:2 c1:4 active:true}", r, rb)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sub-cell remainder at the canvas edges
+// ---------------------------------------------------------------------------
+
+// TestFillRun_BleedsIntoEdgeRemainder covers the strip of canvas that belongs
+// to no cell: rows and cols are floor(canvas/cell), so a window whose pixel
+// size is not an exact multiple of the cell leaves up to one cell short on the
+// right and bottom. That remainder keeps the canvas fill — the theme's
+// background — which is invisible until the content disagrees with the theme,
+// and then reads as a bright rim down the side of a full-screen app.
+func TestFillRun_BleedsIntoEdgeRemainder(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 10, 20
+	// 4×8 cells is 80×80 px; the canvas is 7 px wider and 6 px taller, which
+	// is the remainder no cell covers.
+	newDC := func() *gui.DrawContext {
+		return gui.NewDrawContext(87, 86, testTextMeasurer{cellW: cellW, cellH: cellH})
+	}
+	tm, _ := newDrawTerm(4, 8, cellW, cellH)
+	fill := gui.RGB(16, 20, 29) // an alt-screen app's own dark background
+
+	t.Run("last_column_reaches_the_right_edge", func(t *testing.T) {
+		dc := newDC()
+		tm.fillRun(dc, 0, 6, 8, fill, 0, false)
+		_, _, x1, _, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if x1 != dc.Width {
+			t.Errorf("run ends at x=%v, want %v (the canvas edge)", x1, dc.Width)
+		}
+	})
+
+	t.Run("last_row_reaches_the_bottom_edge", func(t *testing.T) {
+		dc := newDC()
+		tm.fillRun(dc, 3, 0, 8, fill, 0, true)
+		_, _, _, y1, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if y1 != dc.Height {
+			t.Errorf("run ends at y=%v, want %v (the canvas edge)", y1, dc.Height)
+		}
+	})
+
+	t.Run("interior_runs_are_untouched", func(t *testing.T) {
+		// Only the runs that already abut an edge may grow. An interior run
+		// that stretched would paint over its neighbour.
+		dc := newDC()
+		tm.fillRun(dc, 1, 2, 4, fill, 0, false)
+		x0, y0, x1, y1, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if x0 != 20 || x1 != 40 || y0 != 20 || y1 != 40 {
+			t.Errorf("interior run = (%v,%v)..(%v,%v), want (20,20)..(40,40)",
+				x0, y0, x1, y1)
+		}
+	})
+
+	t.Run("smooth_scroll_does_not_bleed_from_an_interior_row", func(t *testing.T) {
+		// Smooth scrolling shifts every row down by ViewSubPx. Once that
+		// offset exceeds the canvas remainder (6 px here), the second-to-last
+		// row also ends within one cell of the bottom — but a row still sits
+		// below it, so it must not stretch. Without the row-index gate this
+		// paints the row above's background over the last row.
+		dc := newDC()
+		tm.fillRun(dc, 2, 0, 2, fill, 10, false)
+		_, _, _, y1, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if want := float32(2*cellH + 10 + cellH); y1 != want {
+			t.Errorf("interior run ends at y=%v, want %v (its own height)", y1, want)
+		}
+	})
+
+	t.Run("default_background_still_skips", func(t *testing.T) {
+		// When the run's color is the theme default there is nothing to fix:
+		// the canvas fill already agrees, and drawing it again would cost a
+		// rect per row for no visible change.
+		dc := newDC()
+		tm.fillRun(dc, 3, 0, 8, tm.grid.defaultBG(), 0, true)
+		if len(dc.Batches()) != 0 {
+			t.Errorf("default-bg run drew %d batches, want 0", len(dc.Batches()))
+		}
+	})
+}
+
+// TestDrawBgResolved_BottomBleedOnlyForAUniformRow pins the gate that keeps
+// fish's history-search highlight from smearing under the last line. When the
+// prompt sits on the bottom row, the highlighted span is a partial-width
+// colored run there; bleeding it into the sub-cell remainder below draws a
+// detached block of color that reads as a phantom highlight on a line that
+// does not exist. Only a last row that is one uniform color may bleed.
+func TestDrawBgResolved_BottomBleedOnlyForAUniformRow(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 10, 20
+	const rows, cols = 4, 8
+	hl := gui.RGB(90, 90, 90) // fish's search-match background
+
+	// Canvas is 6 px taller than the 4 rows cover — the remainder no cell owns.
+	setup := func() (*Term, *gui.DrawContext, *drawState) {
+		tm, _ := newDrawTerm(rows, cols, cellW, cellH)
+		dc := gui.NewDrawContext(cols*cellW, rows*cellH+6,
+			testTextMeasurer{cellW: cellW, cellH: cellH})
+		ds := &drawState{
+			dc: dc, g: tm.grid, slots: tm.grid.slots, rowMap: tm.grid.rowMap, live: true,
+			rows: rows, cols: cols, renderRows: rows,
+			bidiVisRows: make([][]cell, rows),
+		}
+		return tm, dc, ds
+	}
+	paint := func(g *grid, r, c0, c1 int, bg uint32) {
+		for c := c0; c < c1; c++ {
+			g.Cells[r*cols+c].BG = bg
+		}
+	}
+
+	t.Run("partial_run_stops_at_its_own_row", func(t *testing.T) {
+		tm, dc, ds := setup()
+		paint(tm.grid, rows-1, 2, 6, rgbColor(90, 90, 90))
+		tm.drawBgResolved(dc, rows-1, 0, ds)
+		_, _, _, y1, ok := batchBounds(dc, hl)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if want := float32(rows * cellH); y1 != want {
+			t.Errorf("highlight ends at y=%v, want %v (its own row, not the "+
+				"canvas edge at %v)", y1, want, dc.Height)
+		}
+	})
+
+	t.Run("uniform_row_still_covers_the_remainder", func(t *testing.T) {
+		// The rim case bleedToEdge exists for: a full-screen app whose own
+		// background disagrees with the theme must not leave a bright strip.
+		tm, dc, ds := setup()
+		paint(tm.grid, rows-1, 0, cols, rgbColor(90, 90, 90))
+		tm.drawBgResolved(dc, rows-1, 0, ds)
+		_, _, _, y1, ok := batchBounds(dc, hl)
+		if !ok {
+			t.Fatal("no fill drawn")
+		}
+		if y1 != dc.Height {
+			t.Errorf("uniform row ends at y=%v, want %v (the canvas edge)",
+				y1, dc.Height)
+		}
+	})
+}
+
+// Cell origins must land on the physical pixel grid, and adjacent spans must
+// tile exactly — that is what keeps a column of box-drawing glyphs from
+// alternating between crisp and half-lit down the screen (see Term.snapPx).
+func TestSnapPx_CellOriginsAlignToPixelGrid(t *testing.T) {
+	// Deliberately fractional metrics, the normal case for a real font.
+	tm, _ := newDrawTerm(4, 8, 8.43, 19.2)
+
+	for _, scale := range []float32{1, 2} {
+		tm.draw.pxScale = scale
+		for c := range 8 {
+			x := tm.colX(c)
+			if got := x * scale; got != float32(math.Round(float64(got))) {
+				t.Errorf("scale %v col %d: x=%v not on pixel grid", scale, c, x)
+			}
+			// Spans tile: this cell's right edge is the next cell's origin.
+			if got, want := x+tm.spanW(c, c+1), tm.colX(c+1); got != want {
+				t.Errorf("scale %v col %d: right edge %v != next origin %v",
+					scale, c, got, want)
+			}
+		}
+		for r := range 4 {
+			y := tm.rowY(r, 0)
+			if got := y * scale; got != float32(math.Round(float64(got))) {
+				t.Errorf("scale %v row %d: y=%v not on pixel grid", scale, r, y)
+			}
+			// Rows tile by construction — the height is a difference of two
+			// snapped origins — so the check is that neither origin drifts.
+			if next := tm.rowY(r+1, 0); next <= y {
+				t.Errorf("scale %v row %d: next origin %v not below %v",
+					scale, r, next, y)
+			}
+		}
+	}
+
+	// Snapped origins stay within half a pixel of the unsnapped ideal, so no
+	// accumulated drift: column 7 must not slide into column 8's cell.
+	tm.draw.pxScale = 2
+	for c := range 8 {
+		ideal := float32(c) * tm.cellW
+		if d := math.Abs(float64(tm.colX(c) - ideal)); d > 0.5 {
+			t.Errorf("col %d drifted %v from ideal %v", c, d, ideal)
+		}
+	}
+
+	// Unset scale (tests driving phases directly) must be a no-op.
+	tm.draw.pxScale = 0
+	if got, want := tm.colX(3), 3*tm.cellW; got != want {
+		t.Errorf("pxScale 0: colX(3)=%v, want unsnapped %v", got, want)
+	}
+}
+
+// The smooth-scroll sub-cell offset rides through the snap: rows shift with it
+// instead of freezing, they just quantize to whole device pixels.
+func TestSnapPx_SmoothScrollOffsetMoves(t *testing.T) {
+	tm, _ := newDrawTerm(4, 8, 8.43, 19.2)
+	tm.draw.pxScale = 2
+
+	base := tm.rowY(1, 0)
+	if shifted := tm.rowY(1, 5); shifted <= base {
+		t.Errorf("yOff 5 did not move row 1: %v -> %v", base, shifted)
+	}
+	// Every intermediate offset still lands on a whole *device* pixel, which
+	// at scale 2 is half a logical pixel — the finest step the display has.
+	for _, off := range []float32{0.1, 0.37, 1.9, 7.25} {
+		y := tm.rowY(1, off) * tm.draw.pxScale
+		if y != float32(math.Round(float64(y))) {
+			t.Errorf("yOff %v: row 1 at %v not on the device pixel grid", off, y)
+		}
+	}
+}
+
+// The bleed decision has to be made on unsnapped geometry. Snapping moves the
+// run's right edge up to half a pixel either way, and on a canvas whose
+// remainder is just under one cell that is enough to make the remainder read
+// as *over* a cell — so the bleed is skipped and the rim it exists to prevent
+// comes back.
+func TestBleedSnapped_SnappedEdgeStillReachesCanvasEdge(t *testing.T) {
+	t.Parallel()
+
+	const cell float32 = 8.43
+	const cols = 10
+	ideal := float32(cols) * cell // 84.3 — the true right edge
+	const snapped float32 = 84    // what snapping rounds it to
+	const extent float32 = 92.7   // canvas: an 8.4px remainder, just under a cell
+
+	// Sanity: deciding on the snapped edge reads the remainder as 8.7 — over a
+	// full cell — and declines to bleed. That is the regression.
+	if got := bleedToEdge(0, snapped, extent, cell); got != snapped {
+		t.Fatalf("premise broken: naive bleed returned %v, want %v", got, snapped)
+	}
+
+	if got := bleedSnapped(0, snapped, 0, ideal, extent, cell); got != extent {
+		t.Errorf("bleedSnapped = %v, want %v (the canvas edge)", got, extent)
+	}
+}
+
+func TestBleedSnapped_InteriorRunKeepsSnappedWidth(t *testing.T) {
+	t.Parallel()
+
+	const cell float32 = 8.43
+	// Columns 2..4 of a 10-column canvas: nowhere near the edge.
+	if got, want := bleedSnapped(17, 17, 2*cell, 2*cell, 92.7, cell), float32(17); got != want {
+		t.Errorf("interior run = %v, want %v (unchanged)", got, want)
+	}
+}
+
+// A degenerate sub-pixel cell metric can put the snapped origin past the edge
+// the unsnapped one sat inside. Bleeding to the edge from there is negative;
+// no bleed is the safer answer.
+func TestBleedSnapped_NeverReturnsNegativeSize(t *testing.T) {
+	t.Parallel()
+
+	if got := bleedSnapped(100, 5, 99.6, 0.2, 100, 0.3); got < 0 {
+		t.Errorf("bleedSnapped = %v, want a non-negative size", got)
+	}
+}
+
+// finite() admits an absurd cell metric, and v*scale can then overflow float32
+// to Inf. spanW subtracts two snapped coordinates, so an Inf would become a
+// NaN width handed straight to FilledRect.
+func TestSnapPx_OverflowFallsBackToUnsnapped(t *testing.T) {
+	t.Parallel()
+
+	tm, _ := newDrawTerm(4, 8, 3e38, 20)
+	tm.draw.pxScale = 2
+
+	if got := tm.snapPx(3e38); got != 3e38 {
+		t.Errorf("snapPx(3e38) = %v, want the unsnapped input back", got)
+	}
+	if w := tm.spanW(0, 1); !realNumber(w) {
+		t.Errorf("spanW with an overflowing cell metric = %v, want a real number", w)
+	}
+	if h := tm.rowY(1, 0) - tm.rowY(0, 0); !realNumber(h) {
+		t.Errorf("row height with an overflowing cell metric = %v, want a real number", h)
+	}
+}
+
+// Background runs must tile exactly under fractional metrics: run k's right
+// edge is run k+1's left edge. Rounding each run's width independently would
+// leave a half-lit seam between two background colors.
+func TestFillRun_FractionalMetricsTileWithoutSeam(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 8.43, 19.2
+	tm, _ := newDrawTerm(4, 8, cellW, cellH)
+	tm.draw.pxScale = 2
+	fill := gui.RGB(16, 20, 29)
+
+	var prevX1 float32
+	for c := range 6 {
+		dc := gui.NewDrawContext(1000, 1000,
+			testTextMeasurer{cellW: cellW, cellH: cellH})
+		tm.fillRun(dc, 0, c, c+1, fill, 0, false)
+		x0, _, x1, _, ok := batchBounds(dc, fill)
+		if !ok {
+			t.Fatalf("col %d: no fill drawn", c)
+		}
+		if c > 0 && x0 != prevX1 {
+			t.Errorf("col %d starts at %v, but col %d ended at %v (seam)",
+				c, x0, c-1, prevX1)
+		}
+		if x0*2 != float32(math.Round(float64(x0*2))) {
+			t.Errorf("col %d starts at %v, off the device pixel grid", c, x0)
+		}
+		prevX1 = x1
+	}
+}
+
+// Each composition glyph starts on its own snapped cell origin. Accumulating a
+// fractional advance instead would drift the tail of a long composition off
+// the cells its background strip covers.
+func TestDrawIME_GlyphsSitOnSnappedCellOrigins(t *testing.T) {
+	t.Parallel()
+
+	const cellW, cellH = 8.43, 19.2
+	tm, dc := newDrawTerm(4, 8, cellW, cellH)
+	tm.draw.pxScale = 2
+	tm.ime.composing = true
+	tm.ime.compText = "abcd"
+	tm.grid.CursorR, tm.grid.CursorC = 0, 1
+
+	ds := drawState{dc: dc, g: tm.grid, cols: 8, rows: 4, renderRows: 4}
+	tm.drawIME(&ds)
+
+	texts := dc.Texts()
+	if len(texts) != 4 {
+		t.Fatalf("drew %d composition glyphs, want 4", len(texts))
+	}
+	for i, te := range texts {
+		if want := tm.colX(1 + i); te.X != want {
+			t.Errorf("glyph %d at x=%v, want the snapped origin of col %d (%v)",
+				i, te.X, 1+i, want)
+		}
+	}
+}
+
+// A resize during a selection drag or scrollbar drag makes onDraw drop the drag.
+// The gui mouse unlock that goes with it must run after grid.Mu is released: the
+// grid lock is never held across a go-gui call.
+func TestOnDraw_StuckDragUnlockOutsideGridLock(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(tm *Term)
+	}{
+		{"selection", func(tm *Term) { tm.mouse.dragging = true }},
+		{"scrollbar", func(tm *Term) { tm.scrollbar.dragging = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tm, _ := newDrawTerm(4, 8, 10, 20)
+			tc.setup(tm)
+			tm.mouse.locked = true
+			// The canvas is larger than the grid, so onDraw sees a resize.
+			dc := gui.NewDrawContext(120, 120, testTextMeasurer{cellW: 10, cellH: 20})
+
+			calls := 0
+			unlockMouseHook = func(h *Term) {
+				if h != tm {
+					return
+				}
+				calls++
+				if !tm.grid.Mu.TryLock() {
+					t.Error("unlockMouse ran while grid.Mu was held")
+					return
+				}
+				tm.grid.Mu.Unlock()
+			}
+			defer func() { unlockMouseHook = nil }()
+
+			tm.onDraw(dc)
+			if calls != 1 {
+				t.Errorf("unlockMouse calls = %d, want 1", calls)
+			}
+			if tm.mouse.locked || tm.mouse.dragging || tm.scrollbar.dragging {
+				t.Errorf("locked=%v dragging=%v sbDragging=%v, want all false",
+					tm.mouse.locked, tm.mouse.dragging, tm.scrollbar.dragging)
+			}
+		})
+	}
+}
+
+// A zero-valued cell (Ch==0, Width==0) whose left neighbour is not a wide
+// character is a gap, not a wide-char continuation. The fg pass must close the
+// open run at it: coalescing across the gap draws every following glyph one
+// column to the left, which is what "> i" rendering as ">i" looks like.
+func TestOnDraw_GapCellBreaksRun(t *testing.T) {
+	tm, dc := newDrawTerm(4, 8, 10, 20)
+	tm.grid.Mu.Lock()
+	g := tm.grid
+	g.CursorVisible = false
+	g.Cells[0].Ch = '>'
+	g.Cells[0].Width = 1
+	g.Cells[1] = cell{} // gap: not the continuation of a wide char
+	g.Cells[2].Ch = 'i'
+	g.Cells[2].Width = 1
+	tm.grid.Mu.Unlock()
+	tm.onDraw(dc)
+	for _, te := range dc.Texts() {
+		switch te.Text {
+		case ">i":
+			t.Fatalf("run coalesced across the gap cell: %q at x=%v", te.Text, te.X)
+		case "i":
+			if want := tm.colX(2); te.X != want {
+				t.Errorf("'i' drawn at x=%v, want %v (column 2)", te.X, want)
+			}
+			return
+		}
+	}
+	t.Errorf("no 'i' text entry; got %v", dc.Texts())
+}

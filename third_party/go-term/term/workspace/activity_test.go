@@ -1,0 +1,471 @@
+package workspace
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
+)
+
+// ---------------------------------------------------------------------------
+// notify-after parsing
+// ---------------------------------------------------------------------------
+
+func TestParseConfig_NotifyAfter(t *testing.T) {
+	tests := []struct {
+		val     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"30", 30 * time.Second, false},  // bare seconds
+		{"30s", 30 * time.Second, false}, // Go duration
+		{"2m", 2 * time.Minute, false},   // ditto
+		{"1500ms", 1500 * time.Millisecond, false},
+		{"0", 0, false},   // explicit off
+		{"-5", 0, true},   // negative is meaningless
+		{"90m", 0, true},  // past maxNotifyAfter
+		{"soon", 0, true}, // not a duration
+		{"", 0, true},     // empty value
+		// A bare second count large enough that scaling it to a Duration
+		// overflows int64 must be rejected on its magnitude, not wrapped into
+		// a small or negative threshold that passes the range check.
+		{"9223372036854775", 0, true},
+	}
+	for _, tc := range tests {
+		in := "[general]\nnotify-after = " + tc.val + "\n"
+		cfg, errs := parseConfig(strings.NewReader(in))
+		if tc.wantErr {
+			if len(errs) == 0 {
+				t.Errorf("notify-after = %q: expected an error, got none", tc.val)
+			}
+			if cfg.hasNotifyAfter {
+				t.Errorf("notify-after = %q: rejected value must not be recorded", tc.val)
+			}
+			continue
+		}
+		if len(errs) != 0 {
+			t.Errorf("notify-after = %q: unexpected errors %v", tc.val, errs)
+			continue
+		}
+		if !cfg.hasNotifyAfter {
+			t.Errorf("notify-after = %q: hasNotifyAfter not set", tc.val)
+		}
+		if cfg.notifyAfter != tc.want {
+			t.Errorf("notify-after = %q: got %v; want %v", tc.val, cfg.notifyAfter, tc.want)
+		}
+	}
+}
+
+// A key deleted from the file must revert to the embedder's default rather
+// than leaving the last-loaded value applied — the reload contract every other
+// [general] key follows.
+func TestApplySettings_NotifyAfterRevertsWhenAbsent(t *testing.T) {
+	base := Cfg{}
+	with, _ := parseConfig(strings.NewReader("[general]\nnotify-after = 45\n"))
+	if got := applySettings(base, with, nil).opts.notifyAfter; got != 45*time.Second {
+		t.Fatalf("notifyAfter = %v; want 45s", got)
+	}
+	without, _ := parseConfig(strings.NewReader("[general]\n"))
+	if got := applySettings(base, without, nil).opts.notifyAfter; got != 0 {
+		t.Errorf("notifyAfter = %v after the key was removed; want 0", got)
+	}
+}
+
+// The resolved setting has to reach a pane's term.Cfg, or the config key is
+// parsed and then dropped on the floor.
+func TestTermCfg_CarriesNotifyAfter(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.cfg.opts.notifyAfter = 90 * time.Second
+	cfg := (&tab{}).termCfg(&gui.Window{}, ws.cfg, "pane", "", ws.hooks())
+	if cfg.NotifyAfter != 90*time.Second {
+		t.Errorf("term.Cfg.NotifyAfter = %v; want 90s", cfg.NotifyAfter)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// tab indicators
+// ---------------------------------------------------------------------------
+
+// activityWorkspace builds a two-tab workspace. tab 0 is active, so tab 1 is
+// the one that accumulates indicator state.
+func activityWorkspace(t *testing.T) *Workspace {
+	t.Helper()
+	ws := newTestWorkspace(t)
+	ws.tabs = []*tab{
+		{id: "tab-0", terms: map[string]*term.Term{"pane-0": nil}},
+		{id: "tab-1", terms: map[string]*term.Term{"pane-1": nil}},
+	}
+	ws.activeTab = 0
+	return ws
+}
+
+func TestTabIndicator_CommandEnds(t *testing.T) {
+	ws := activityWorkspace(t)
+	tab := ws.tabs[1]
+
+	if got := tab.indicator(); got != indicatorNone {
+		t.Errorf("fresh tab indicator = %v; want none", got)
+	}
+
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := tab.indicator(); got != indicatorCommandDone {
+		t.Errorf("after a successful command indicator = %v; want done", got)
+	}
+
+	// A failure among several commands is the one worth surfacing, whichever
+	// order they finished in.
+	ws.onPaneActivity("pane-1", term.ActivityCommandFailed)
+	if got := tab.indicator(); got != indicatorCommandFailed {
+		t.Errorf("after a failure indicator = %v; want failed", got)
+	}
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := tab.indicator(); got != indicatorCommandFailed {
+		t.Errorf("a later success demoted the failure to %v", got)
+	}
+}
+
+// Screen output is not reported by Term at all, so a repainting application
+// in a background tab leaves the tab bar alone. This pins the contract from
+// the workspace side: an ActivityKind it does not recognize marks nothing.
+func TestTabIndicator_UnknownKindMarksNothing(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.onPaneActivity("pane-1", term.ActivityKind(99))
+	if got := ws.tabs[1].indicator(); got != indicatorNone {
+		t.Errorf("indicator = %v; want none", got)
+	}
+}
+
+// A pane that is closing may still deliver one last report after the workspace
+// dropped its Term — the lookup misses every tab and must be a no-op, not a
+// panic.
+func TestTabIndicator_StalePaneIDIsNoOp(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.onPaneActivity("gone-pane", term.ActivityBell)
+	ws.onPaneActivity("gone-pane", term.ActivityCommandFailed)
+	for _, tab := range ws.tabs {
+		if got := tab.indicator(); got != indicatorNone {
+			t.Errorf("stale report lit tab %s as %v; want none", tab.id, got)
+		}
+	}
+}
+
+// All panes of a tab report through the same latch — a tab with several panes
+// shows the most interesting event across all of them, not just one.
+func TestTabIndicator_MultiPaneTabSharesState(t *testing.T) {
+	ws := newTestWorkspace(t)
+	ws.tabs = []*tab{
+		{id: "tab-0", terms: map[string]*term.Term{"pane-0": nil}},
+		{id: "tab-1", terms: map[string]*term.Term{"pane-1": nil, "pane-2": nil}},
+	}
+	ws.activeTab = 0
+
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := ws.tabs[1].indicator(); got != indicatorCommandDone {
+		t.Fatalf("indicator after pane-1 = %v; want done", got)
+	}
+	ws.onPaneActivity("pane-2", term.ActivityCommandFailed)
+	if got := ws.tabs[1].indicator(); got != indicatorCommandFailed {
+		t.Errorf("indicator after pane-2 = %v; want failed", got)
+	}
+	if ws.tabs[0].indicator() != indicatorNone {
+		t.Error("events leaked to the active tab")
+	}
+}
+
+// A bell outranks the command markers: it is the signal the child asked for
+// by name rather than one derived from an exit status.
+func TestTabIndicator_BellOutranksAndPersists(t *testing.T) {
+	ws := activityWorkspace(t)
+	tab := ws.tabs[1]
+
+	ws.onPaneActivity("pane-1", term.ActivityBell)
+	if got := tab.indicator(); got != indicatorBell {
+		t.Errorf("indicator = %v; want bell", got)
+	}
+	// Later command ends must not demote it.
+	ws.onPaneActivity("pane-1", term.ActivityCommandFailed)
+	ws.onPaneActivity("pane-1", term.ActivityCommandDone)
+	if got := tab.indicator(); got != indicatorBell {
+		t.Errorf("indicator after later command ends = %v; want bell", got)
+	}
+}
+
+// The active tab is on screen, so the user already saw whatever happened.
+func TestTabIndicator_ActiveTabAccumulatesNothing(t *testing.T) {
+	ws := activityWorkspace(t)
+
+	ws.onPaneActivity("pane-0", term.ActivityBell)
+	if got := ws.tabs[0].indicator(); got != indicatorNone {
+		t.Errorf("active tab indicator = %v; want none", got)
+	}
+	if ws.tabs[0].bell || ws.tabs[0].cmdDone || ws.tabs[0].cmdFailed {
+		t.Error("active tab recorded activity state")
+	}
+}
+
+func TestTabIndicator_ClearedOnActivation(t *testing.T) {
+	ws := activityWorkspace(t)
+	tab := ws.tabs[1]
+
+	ws.onPaneActivity("pane-1", term.ActivityBell)
+	ws.onPaneActivity("pane-1", term.ActivityCommandFailed)
+	if got := tab.indicator(); got != indicatorBell {
+		t.Fatalf("setup: indicator = %v; want bell", got)
+	}
+
+	tab.clearActivity()
+	if got := tab.indicator(); got != indicatorNone {
+		t.Errorf("indicator after clear = %v; want none", got)
+	}
+}
+
+// The glyph is what the user actually reads, so the mapping is pinned rather
+// than left to whatever the render call happens to pass through.
+func TestTabIndicator_Glyphs(t *testing.T) {
+	tests := []struct {
+		in   tabIndicator
+		want string
+	}{
+		{indicatorNone, ""},
+		{indicatorCommandDone, "✓"},
+		{indicatorCommandFailed, "✗"},
+		{indicatorBell, "!"},
+		{indicatorWorking, "…"},
+		{indicatorBlocked, "?"},
+	}
+	for _, tc := range tests {
+		if got := tc.in.glyph(); got != tc.want {
+			t.Errorf("indicator %v glyph = %q; want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// tabGlyph is the render-path entry point: the active tab never shows latched
+// news, even when state somehow survived on it, but does show live state.
+func TestTabGlyph_ActiveTabShowsOnlyLiveState(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.tabs[0].bell = true
+	if got := ws.tabGlyph(ws.tabs[0], true); got != "" {
+		t.Errorf("active tab glyph = %q; want empty", got)
+	}
+	if got := ws.tabGlyph(ws.tabs[0], false); got != "!" {
+		t.Errorf("background glyph = %q; want \"!\"", got)
+	}
+	// The user watching the tab still needs to see that its program is busy
+	// or waiting — with one tab focused, nothing else on the bar says so.
+	ws.tabs[0].noteProgramStatus("pane-0", recs("", term.ProgramWorking), false)
+	if got := ws.tabGlyph(ws.tabs[0], true); got != "…" {
+		t.Errorf("active working glyph = %q; want \"…\"", got)
+	}
+	ws.tabs[0].noteProgramStatus("pane-0", recs("", term.ProgramBlocked), false)
+	if got := ws.tabGlyph(ws.tabs[0], true); got != "?" {
+		t.Errorf("active blocked glyph = %q; want \"?\"", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OSC 7501 program status
+// ---------------------------------------------------------------------------
+
+// recs builds a pane's record set from id/state pairs.
+func recs(pairs ...any) []term.ProgramStatus {
+	var out []term.ProgramStatus
+	for i := 0; i < len(pairs); i += 2 {
+		out = append(out, term.ProgramStatus{
+			ID: pairs[i].(string), State: pairs[i+1].(term.ProgramState), Progress: -1,
+		})
+	}
+	return out
+}
+
+// Working and blocked are live: the marker follows the current records and
+// goes away with them, without the user having to visit the tab.
+func TestProgramStatus_LiveStates(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), true)
+	if got := tab.indicator(); got != indicatorWorking {
+		t.Fatalf("working: indicator = %v", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking, "job", term.ProgramBlocked), true)
+	if got := tab.indicator(); got != indicatorBlocked {
+		t.Fatalf("blocked: indicator = %v", got)
+	}
+	// The prompt came back: Term dropped both records.
+	tab.noteProgramStatus("p", nil, true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("after drop: indicator = %v", got)
+	}
+	if len(tab.status) != 0 {
+		t.Fatalf("empty pane kept an entry: %v", tab.status)
+	}
+}
+
+// Blocked outranks every latched event, including the bell.
+func TestProgramStatus_BlockedOutranksBell(t *testing.T) {
+	tab := &tab{bell: true, cmdFailed: true}
+	tab.noteProgramStatus("p", recs("", term.ProgramBlocked), true)
+	if got := tab.indicator(); got != indicatorBlocked {
+		t.Fatalf("indicator = %v; want blocked", got)
+	}
+}
+
+// A program's own error report outranks the bell; a bare failed exit does not
+// (that ordering predates OSC 7501 and is kept).
+func TestProgramStatus_ErrorOrdering(t *testing.T) {
+	tab := &tab{bell: true}
+	if got := tab.indicator(); got != indicatorBell {
+		t.Fatalf("bell alone = %v", got)
+	}
+	tab.cmdFailed = true
+	if got := tab.indicator(); got != indicatorBell {
+		t.Fatalf("bell + failed command = %v; want bell", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramError), true)
+	if got := tab.indicator(); got != indicatorCommandFailed {
+		t.Fatalf("bell + status error = %v; want failed", got)
+	}
+}
+
+// Done latches on the transition and clears on activation. A done record that
+// is still present must not re-light the tab when some other record changes.
+func TestProgramStatus_DoneLatchesOnTransitionOnly(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), true)
+	tab.noteProgramStatus("p", recs("", term.ProgramDone), true)
+	if got := tab.indicator(); got != indicatorCommandDone {
+		t.Fatalf("after done: indicator = %v", got)
+	}
+	tab.clearActivity() // the user visited the tab
+	tab.noteProgramStatus("p", recs("", term.ProgramDone, "other", term.ProgramIdle), true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("stale done re-lit the tab: indicator = %v", got)
+	}
+}
+
+// Done reported while the tab was active is seen; it must not light the tab
+// once the user switches away.
+func TestProgramStatus_DoneWhileActiveIsSeen(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramDone), false)
+	tab.noteProgramStatus("p", recs("", term.ProgramDone, "x", term.ProgramIdle), true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("indicator = %v; want none", got)
+	}
+}
+
+// Working stays visible after activation: it is current state, not news.
+func TestProgramStatus_ActivationKeepsLiveState(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), true)
+	tab.clearActivity()
+	if got := tab.indicator(); got != indicatorWorking {
+		t.Fatalf("indicator = %v; want working", got)
+	}
+}
+
+// Closing a pane takes its live state with it.
+func TestProgramStatus_RemovePaneDropsState(t *testing.T) {
+	tab := &tab{terms: map[string]*term.Term{}, titles: map[string]string{}}
+	tab.noteProgramStatus("p", recs("", term.ProgramBlocked), true)
+	tab.removePane("p") // no Term registered: exercises only the map cleanup
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("indicator = %v; want none", got)
+	}
+}
+
+// Each pane's records are its own: one pane's prompt dropping its records must
+// not clear another pane's blocked marker in the same tab.
+func TestProgramStatus_PanesAreIndependent(t *testing.T) {
+	tab := &tab{}
+	tab.noteProgramStatus("a", recs("", term.ProgramBlocked), true)
+	tab.noteProgramStatus("b", recs("", term.ProgramWorking), true)
+	tab.noteProgramStatus("b", nil, true)
+	if got := tab.indicator(); got != indicatorBlocked {
+		t.Fatalf("indicator = %v; want blocked from pane a", got)
+	}
+	tab.noteProgramStatus("a", nil, true)
+	if got := tab.indicator(); got != indicatorNone {
+		t.Fatalf("indicator = %v; want none", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Window title marker
+// ---------------------------------------------------------------------------
+
+// The active tab draws no tab-bar marker, and a lone tab has no tab bar at all.
+// The window title is where the user watching a pane sees its live state —
+// Claude Code drops its own title spinner once the terminal answers the OSC
+// 7501 query, so without this nothing on screen says it is working.
+func TestWindowTitle_LiveStateMarker(t *testing.T) {
+	tab := &tab{focused: "p", titles: map[string]string{"p": "Claude Code"}}
+	if got := tab.windowTitle(); got != "Claude Code" {
+		t.Fatalf("no status: title = %q", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramWorking), false)
+	if got := tab.windowTitle(); got != "… Claude Code" {
+		t.Fatalf("working: title = %q", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramBlocked), false)
+	if got := tab.windowTitle(); got != "? Claude Code" {
+		t.Fatalf("blocked: title = %q", got)
+	}
+	tab.noteProgramStatus("p", recs("", term.ProgramDone), false)
+	if got := tab.windowTitle(); got != "Claude Code" {
+		t.Fatalf("done: title = %q; want no marker", got)
+	}
+}
+
+// Latched news (bell, command ends, done) belongs to the tab bar, which shows
+// what happened while a tab was hidden. The window title shows the active tab,
+// which the user is looking at, so only live state goes there.
+func TestWindowTitle_IgnoresLatchedEvents(t *testing.T) {
+	tab := &tab{
+		focused: "p", titles: map[string]string{"p": "sh"},
+		bell: true, cmdFailed: true, cmdDone: true, statusDone: true, statusError: true,
+	}
+	if got := tab.windowTitle(); got != "sh" {
+		t.Fatalf("title = %q; want no marker", got)
+	}
+}
+
+// A live-state change on the active tab must reach the window title. Before
+// this, onPaneProgramStatus repainted only background tabs, so the title kept
+// whatever it showed when the program started.
+func TestProgramStatus_ActiveTabUpdatesWindowTitle(t *testing.T) {
+	ws := activityWorkspace(t)
+	// The focused leaf has a title but no Term entry: the fixture's Terms are
+	// nil placeholders, and refresh would call SetFocused on one.
+	ws.tabs[0].focused = "pane-x"
+	ws.tabs[0].titles = map[string]string{"pane-x": "Claude Code"}
+	ws.refresh()
+	if got := ws.w.Config.Title; got != "Claude Code" {
+		t.Fatalf("setup: title = %q", got)
+	}
+	ws.applyProgramStatus(0, ws.tabs[0], "pane-0", recs("", term.ProgramWorking))
+	if got := ws.w.Config.Title; got != "… Claude Code" {
+		t.Fatalf("working: title = %q", got)
+	}
+	ws.applyProgramStatus(0, ws.tabs[0], "pane-0", nil)
+	if got := ws.w.Config.Title; got != "Claude Code" {
+		t.Fatalf("cleared: title = %q", got)
+	}
+}
+
+// The window title belongs to the active tab. A background tab's live state
+// goes to its tab-bar marker and must not leak into the title.
+func TestProgramStatus_BackgroundTabLeavesWindowTitle(t *testing.T) {
+	ws := activityWorkspace(t)
+	ws.tabs[0].focused = "pane-x" // titled leaf with no Term; see above
+	ws.tabs[0].titles = map[string]string{"pane-x": "sh"}
+	ws.refresh()
+	ws.applyProgramStatus(1, ws.tabs[1], "pane-1", recs("", term.ProgramWorking))
+	if got := ws.w.Config.Title; got != "sh" {
+		t.Fatalf("title = %q; want the active tab's unmarked title", got)
+	}
+	if got := ws.tabs[1].indicator(); got != indicatorWorking {
+		t.Fatalf("background indicator = %v; want working", got)
+	}
+}

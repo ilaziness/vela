@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/ilaziness/vela)](https://github.com/ilaziness/vela/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vela/releases)
 [![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
+[![go-gui](https://img.shields.io/badge/go--gui-native-0A7EA4)](https://github.com/go-gui-org/go-gui)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
 A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for developers and operators.
@@ -15,7 +15,7 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 
 ## 📖 Overview
 
-**Vela** is a cross-platform desktop client for SSH logins, SFTP file management, local serial consoles, and a sidebar AI assistant. It is built with Go and [Wails v3](https://wails.io) and runs natively on Windows, macOS, and Linux. The UI is available in English, Simplified Chinese, and Traditional Chinese.
+**Vela** is a cross-platform desktop client for SSH logins, SFTP file management, local serial consoles, and a sidebar AI assistant. It is built with Go, [go-gui](https://github.com/go-gui-org/go-gui), and [go-term](https://github.com/go-gui-org/go-term), and runs natively on Windows, macOS, and Linux. The UI is available in English, Simplified Chinese, and Traditional Chinese.
 
 ---
 

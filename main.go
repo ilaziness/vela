@@ -1,82 +1,50 @@
 package main
 
 import (
-	"embed"
+	_ "embed"
 	"log"
 
-	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui/backend"
 
-	"github.com/ilaziness/vela/internal/command"
-	"github.com/ilaziness/vela/internal/config"
-	"github.com/ilaziness/vela/internal/system"
-	"github.com/ilaziness/vela/services"
+	"github.com/ilaziness/vela/ui/app"
+	"github.com/ilaziness/vela/ui/fonts"
+	"github.com/ilaziness/vela/ui/shell"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
-//go:embed data/commands/*.json
-var commandsFS embed.FS
+//go:embed assets/appicon.png
+var appIconPNG []byte
 
 func main() {
-	logService := services.NewLogService()
-	cfgStore, err := config.Load(logService.Logger())
+	rt, err := app.Bootstrap()
 	if err != nil {
 		log.Fatal(err)
 	}
-	app := application.New(application.Options{
-		Name: "Vela",
-		Services: []application.Service{
-			application.NewService(logService),
+
+	// UI: system sans; terminal/mono: system monospace; missing glyphs → system CJK.
+	fonts.Apply(rt.Store.Config)
+
+	win := gui.NewWindow(gui.WindowCfg{
+		Title:   "Vela",
+		Width:   1280,
+		Height:  800,
+		IconPNG: appIconPNG,
+		State:   &app.State{},
+		OnInit: func(w *gui.Window) {
+			rt.BindWindow(w)
+			w.SetView(func(w *gui.Window) gui.View {
+				return shell.Root(w, rt.Ctrl)
+			})
+			w.OnEvent = func(e *gui.Event, w *gui.Window) {
+				st := gui.State[app.State](w)
+				rt.Ctrl.HandleWindowEvent(e, st)
+			}
 		},
-		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
-		},
-		Mac: application.MacOptions{
-			ApplicationShouldTerminateAfterLastWindowClosed: true,
-		},
-		Windows: application.WindowsOptions{
-			WebviewUserDataPath: system.GetExecutableDir(),
+		OnCloseRequest: func(w *gui.Window) {
+			// OnCloseRequest vetoes the OS close unless Close() is called.
+			rt.Ctrl.Shutdown()
+			w.Close()
 		},
 	})
-
-	mainWindow := app.Window.NewWithOptions(mainWindowOptions(app, cfgStore))
-
-	commandsLoader := command.LoaderFromFS(commandsFS, "data/commands")
-	if err := services.RegisterServices(app, mainWindow, cfgStore, logService.Logger(), commandsLoader); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := app.Run(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func mainWindowOptions(app *application.App, store *config.Store) application.WebviewWindowOptions {
-	frameless := store.Config.General.Frameless
-	st := store.Window()
-	width, height := st.EffectiveSize()
-	if primary := app.Screen.GetPrimary(); primary != nil {
-		width, height = config.ClampToWorkArea(width, height, primary.WorkArea.Width, primary.WorkArea.Height)
-	}
-	opts := application.WebviewWindowOptions{
-		Title:                      "Vela",
-		URL:                        "/",
-		Width:                      width,
-		Height:                     height,
-		Frameless:                  frameless,
-		DefaultContextMenuDisabled: true,
-		EnableFileDrop:             true,
-	}
-	if st.Maximised {
-		opts.StartState = application.WindowStateMaximised
-	}
-	if frameless {
-		opts.Mac = application.MacWindow{
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
-		}
-	}
-	return opts
+	backend.Run(win)
 }

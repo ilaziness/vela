@@ -18,23 +18,10 @@ import (
 
 const FileName = "config.toml"
 
-var defaultFontFamily = []string{
-	"'Noto Sans Mono'",
-	"'ui-monospace'",
-	"'Cascadia Code'",
-	"Consolas",
-	"Menlo",
-	"Monaco",
-	"'DejaVu Sans Mono'",
-	"'Ubuntu Mono'",
-	"'Liberation Mono'",
-	"'Courier New'",
-	"'Microsoft YaHei'",
-	"'PingFang SC'",
-	"'Heiti SC'",
-	"'WenQuanYi Micro Hei'",
-	"monospace",
-}
+// defaultTerminalFont is the generic system monospace. go-glyph maps it to the
+// platform face (Consolas / Menlo / …); missing glyphs fall back to system
+// sans/CJK fonts. Leave empty in user config to keep this default.
+const defaultTerminalFont = "monospace"
 
 type Config struct {
 	General     GeneralConfig     `toml:"general"`
@@ -106,7 +93,7 @@ func Default() *Config {
 			FontSize:    14,
 		},
 		Terminal: TerminalConfig{
-			Font:            strings.Join(defaultFontFamily, ","),
+			Font:            defaultTerminalFont,
 			FontSize:        14,
 			LineHeight:      1,
 			Scrollback:      defaultTerminalScrollback,

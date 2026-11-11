@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/ilaziness/vela)](https://github.com/ilaziness/vela/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vela/releases)
 [![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
+[![go-gui](https://img.shields.io/badge/go--gui-native-0A7EA4)](https://github.com/go-gui-org/go-gui)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
 面向开发与运维的跨平台 SSH / SFTP / 串口桌面客户端，内置 AI 助手。
@@ -15,7 +15,7 @@
 
 ## 📖 简介
 
-**Vela** 是一款跨平台桌面客户端，用来做 SSH 远程登录、SFTP 文件管理、本机串口控制，以及侧栏里的 AI 助手。基于 Go 和 [Wails v3](https://wails.io) 构建，原生运行于 Windows、macOS 和 Linux。界面支持英语、简体中文和繁体中文。
+**Vela** 是一款跨平台桌面客户端，用来做 SSH 远程登录、SFTP 文件管理、本机串口控制，以及侧栏里的 AI 助手。基于 Go、[go-gui](https://github.com/go-gui-org/go-gui) 与 [go-term](https://github.com/go-gui-org/go-term) 构建，原生运行于 Windows、macOS 和 Linux。界面支持英语、简体中文和繁体中文。
 
 ---
 

@@ -1,0 +1,1439 @@
+package term
+
+import (
+	"log"
+	"math"
+	"net/url"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/internal/opener"
+)
+
+// mouseSGRBaseButton maps a go-gui MouseButton to its SGR (?1006) base
+// code. Returns false for unsupported buttons (e.g. MouseInvalid),
+// signaling "do not report".
+func mouseSGRBaseButton(b gui.MouseButton) (int, bool) {
+	switch b {
+	case gui.MouseLeft:
+		return 0, true
+	case gui.MouseMiddle:
+		return 1, true
+	case gui.MouseRight:
+		return 2, true
+	}
+	return 0, false
+}
+
+// SGR mouse modifier bits, per xterm ctlseqs documentation.
+const (
+	mouseModShift = 4
+	mouseModAlt   = 8
+	mouseModCtrl  = 16
+)
+
+// mouseModBits encodes shift/alt/ctrl modifier bits into the xterm
+// mouse-button byte. Values from xterm ctlseqs: shift=4, alt/meta=8,
+// ctrl=16. Super/Cmd has no standard mapping and is ignored.
+func mouseModBits(m gui.Modifier) int {
+	bits := 0
+	if m.Has(gui.ModShift) {
+		bits += mouseModShift
+	}
+	if m.Has(gui.ModAlt) {
+		bits += mouseModAlt
+	}
+	if m.Has(gui.ModCtrl) {
+		bits += mouseModCtrl
+	}
+	return bits
+}
+
+// encodeMouseSGR appends an SGR-1006 mouse report to buf:
+// "\x1b[<{cb};{col};{row}{M|m}". Coordinates are converted to 1-based
+// per spec. press=true emits 'M' (press / motion / wheel-tick);
+// press=false emits 'm' (release).
+func encodeMouseSGR(buf []byte, cb, col, row int, press bool) []byte {
+	final := byte('M')
+	if !press {
+		final = 'm'
+	}
+	buf = append(buf, '\x1b', '[', '<')
+	buf = strconv.AppendInt(buf, int64(cb), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(col+1), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(row+1), 10)
+	buf = append(buf, final)
+	return buf
+}
+
+// mouseReleaseButton rewrites a button byte for the two encodings with no
+// release final: both spell release as button 3, keeping the modifier and
+// motion bits that sit above the low two.
+func mouseReleaseButton(cb int) int { return cb&^3 | 3 }
+
+// maxX10Coord is the first coordinate the legacy byte encoding cannot carry:
+// the byte is 32+coord (1-based), and 255 is the last single byte xterm
+// writes. Reports past it are dropped rather than wrapped — a wrapped
+// coordinate is indistinguishable from a real one near the origin.
+const maxX10Coord = 223
+
+// encodeMouseX10 appends a legacy (pre-?1006) mouse report to buf:
+// "\x1b[M" then three bytes, 32 + button, 32 + 1-based column, 32 + 1-based
+// row. Reports false when either coordinate is out of range; the caller then
+// sends nothing.
+func encodeMouseX10(buf []byte, cb, col, row int, press bool) ([]byte, bool) {
+	if !press {
+		cb = mouseReleaseButton(cb)
+	}
+	if col+1 > maxX10Coord || row+1 > maxX10Coord {
+		return buf, false
+	}
+	return append(buf, '\x1b', '[', 'M',
+		byte(32+cb), byte(32+col+1), byte(32+row+1)), true
+}
+
+// encodeMouseURXVT appends a urxvt-style (?1015) mouse report to buf:
+// "\x1b[{32+cb};{col};{row}M". Coordinates are decimal and 1-based, so the
+// X10 range limit does not apply, but the final is always 'M' — release still
+// goes out as button 3.
+func encodeMouseURXVT(buf []byte, cb, col, row int, press bool) []byte {
+	if !press {
+		cb = mouseReleaseButton(cb)
+	}
+	buf = append(buf, '\x1b', '[')
+	buf = strconv.AppendInt(buf, int64(32+cb), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(col+1), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendInt(buf, int64(row+1), 10)
+	return append(buf, 'M')
+}
+
+// encodeMouseReport appends one report in snap's wire form, reporting false
+// when the encoding cannot represent it (legacy coordinates only). col/row are
+// the coordinates the child should see: cells, or device pixels under SGR with
+// ?1016.
+func encodeMouseReport(buf []byte, snap mouseSnap, cb, col, row int, press bool) ([]byte, bool) {
+	switch snap.encoding() {
+	case mouseEncSGR:
+		return encodeMouseSGR(buf, cb, col, row, press), true
+	case mouseEncURXVT:
+		return encodeMouseURXVT(buf, cb, col, row, press), true
+	}
+	return encodeMouseX10(buf, cb, col, row, press)
+}
+
+// mouseEncoding is the wire form the child asked for.
+type mouseEncoding int
+
+const (
+	mouseEncX10   mouseEncoding = iota // no encoding mode set
+	mouseEncURXVT                      // ?1015
+	mouseEncSGR                        // ?1006
+)
+
+// mouseSnap reports the current mouse-mode state under the grid lock.
+// Reporting requires a live viewport — when scrolled back into history we
+// suppress reports so the user can select / scroll without the host
+// consuming the events.
+type mouseSnap struct {
+	report bool // any of ?1000/?1002/?1003 active
+	drag   bool // ?1002
+	any    bool // ?1003
+	sgr    bool // ?1006
+	urxvt  bool // ?1015
+	pixels bool // ?1016 — pixel-precise SGR coordinates
+	live   bool // ViewOffset == 0 && ViewSubPx == 0
+	alt    bool // alt screen active — the wheel drives arrow keys instead
+}
+
+func (t *Term) mouseSnap() mouseSnap {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return mouseSnap{
+		report: t.grid.MouseReporting(),
+		drag:   t.grid.MouseTrackBtn,
+		any:    t.grid.MouseTrackAny,
+		sgr:    t.grid.MouseSGR,
+		urxvt:  t.grid.MouseURXVT,
+		pixels: t.grid.MouseSGRPixels,
+		live:   t.grid.ViewOffset == 0 && t.grid.ViewSubPx == 0,
+		alt:    t.grid.AltActive,
+	}
+}
+
+// encoding picks the wire form for a report. ?1006 outranks ?1015 (xterm
+// resolves the pair the same way), and a child that enabled neither gets the
+// legacy byte encoding — dropping its reports instead is why mouse input
+// looked dead under any app using the default xterm encoding.
+func (m mouseSnap) encoding() mouseEncoding {
+	switch {
+	case m.sgr:
+		return mouseEncSGR
+	case m.urxvt:
+		return mouseEncURXVT
+	}
+	return mouseEncX10
+}
+
+// shouldReport reports whether mouse events should encode to the pty
+// rather than drive local selection. Requires reporting on and a live
+// viewport; every encoding is supported, so no encoding mode is needed.
+func (m mouseSnap) shouldReport() bool { return m.report && m.live }
+
+// posToCell maps shape-local (x, y) pixels to viewport (row, col).
+// Returns clamped coordinates so out-of-bounds drag positions still
+// pin to the nearest cell. NaN/Inf inputs collapse to (0, 0) — int()
+// of a non-finite float is undefined and would otherwise leak through
+// to selection logic as a pseudo-random row/col.
+func (t *Term) posToCell(x, y float32) (int, int) {
+	if !finite(t.cellW) || !finite(t.cellH) {
+		return 0, 0
+	}
+	if !realNumber(x) {
+		x = 0
+	}
+	if !realNumber(y) {
+		y = 0
+	}
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	// When smooth-scrolled the renderer shifts every visible row down by
+	// ViewSubPx (drawState.renderYOff), so viewport row r spans the pixel
+	// band [r*cellH+ViewSubPx, (r+1)*cellH+ViewSubPx). Invert with the same
+	// offset — floor, not truncation, so the band math holds at r == 0 —
+	// or clicks land a row off while the viewport is between cells.
+	r := int(math.Floor(float64((y - t.grid.ViewSubPx) / t.cellH)))
+	c := int(x / t.cellW)
+	if r < 0 {
+		r = 0
+	}
+	if c < 0 {
+		c = 0
+	}
+	if r >= t.grid.Rows {
+		r = t.grid.Rows - 1
+	}
+	if c >= t.grid.Cols {
+		c = t.grid.Cols - 1
+	}
+	return r, c
+}
+
+// posToSelCol maps shape-local x pixels to a selection boundary column in
+// [0, Cols]. Selection endpoints are cell *boundaries* (nearest edge), not cell
+// indices, so a one-cell drag spans exactly one cell and the selected span is
+// half-open [min, max) — matching macOS Terminal / Ghostty. Nearest-edge
+// snapping (round, not floor) keeps the behavior symmetric in both drag
+// directions. Compare posToCell, which floors to a cell index for xterm mouse
+// reports.
+func (t *Term) posToSelCol(x float32) int {
+	if !finite(t.cellW) {
+		return 0
+	}
+	if !realNumber(x) {
+		x = 0
+	}
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	b := int(math.Floor(float64(x/t.cellW) + 0.5))
+	if b < 0 {
+		b = 0
+	}
+	if b > t.grid.Cols {
+		b = t.grid.Cols
+	}
+	return b
+}
+
+// devicePx converts a pointer position in logical points (what go-gui
+// reports) to the device pixels ?1016 reports use. CSI 14t and CSI 16t report
+// sizes in device pixels (grid.CellPxW is cellW*pxScale), so an app dividing
+// a pixel position by the cell size from CSI 16t needs both in the same unit.
+// Without the scale, every click on a 2x display mapped to half its real
+// position. NaN/Inf become 0: posToCell sanitizes cell-mode coordinates, but
+// pixel mode takes MouseX/MouseY from the GUI framework as they are.
+//
+// Negative positions become 0. A reported drag holds the mouse lock, so its
+// motion and release arrive from outside the pane too, and a negative number
+// is not a valid SGR parameter. Positions past the right or bottom edge stay
+// as they are: they are still well-formed, and clamping them would need
+// grid.Cols under Mu.
+func (t *Term) devicePx(x, y float32) (int, int) {
+	s := t.draw.pxScale
+	if !(s > 0) || !realNumber(s) {
+		s = 1
+	}
+	if !realNumber(x) || x < 0 {
+		x = 0
+	}
+	if !realNumber(y) || y < 0 {
+		y = 0
+	}
+	// A float past int range converts to an arbitrary int, so a bogus huge
+	// position from the backend is capped well past any real display first.
+	return int(min(x*s, maxDevicePx)), int(min(y*s, maxDevicePx))
+}
+
+// maxDevicePx caps a ?1016 coordinate; see devicePx.
+const maxDevicePx = 1 << 20
+
+// writeMouse emits a mouse report in the encoding snap selects. Under SGR
+// with ?1016 active, pixX/pixY (0-based widget position in logical points;
+// see devicePx) are used; otherwise col/row (0-based cell indices) are. Both
+// forms report 1-based coordinates per spec. ?1016 is an SGR refinement only:
+// neither legacy encoding can carry pixels, so they keep reporting cells.
+func (t *Term) writeMouse(cb, col, row int, pixX, pixY float32, snap mouseSnap, press bool) {
+	if snap.pixels && snap.encoding() == mouseEncSGR {
+		col, row = t.devicePx(pixX, pixY)
+	}
+	var buf [32]byte
+	out, ok := encodeMouseReport(buf[:0], snap, cb, col, row, press)
+	if !ok {
+		return
+	}
+	if _, err := t.pw.Write(out); err != nil {
+		log.Printf("term: pty mouse: %v", err)
+	}
+}
+
+// lockMouse engages a gui mouse lock routing motion/release to the widget's
+// handlers, and records that lock-callback coordinates are now absolute.
+// Every MouseLock must go through here so t.mouse.locked stays truthful.
+func (t *Term) lockMouse(w *gui.Window) {
+	if w == nil {
+		return
+	}
+	t.mouse.locked = true
+	w.MouseLock(gui.MouseLockCfg{
+		MouseMove: t.onMouseMove,
+		MouseUp:   t.onMouseUp,
+	})
+}
+
+// unlockMouse releases the mouse lock and clears the absolute-coordinate
+// flag. Safe to call when no lock is held. Counterpart to lockMouse; every
+// MouseUnlock must go through here, including the stuck-drag safety nets.
+func (t *Term) unlockMouse(w *gui.Window) {
+	t.mouse.locked = false
+	if unlockMouseHook != nil {
+		unlockMouseHook(t)
+	}
+	if w != nil {
+		w.MouseUnlock()
+	}
+}
+
+// unlockMouseHook, when set by a test, runs in unlockMouse at the point where the
+// go-gui MouseUnlock call happens. Tests use it to check that grid.Mu is not held
+// across that call. It is always nil outside tests.
+var unlockMouseHook func(*Term)
+
+// toCanvasRel converts a mouse event's coordinates from absolute window
+// space to canvas-relative when the event arrived through a mouse-lock
+// callback. Lock callbacks bypass go-gui's callRelative, so without this a
+// canvas offset by UI chrome (e.g. a tab bar) shifts every hit-test by the
+// chrome's height. Events dispatched to the same handlers via the canvas
+// config are already relative and must be left alone.
+func (t *Term) toCanvasRel(e *gui.Event) {
+	if !t.mouse.locked {
+		return
+	}
+	e.MouseX -= t.ime.layoutX
+	e.MouseY -= t.ime.layoutY
+}
+
+// multiClickInterval is how long after a click a second one still counts as a
+// double. 500 ms is the common platform default (macOS ships 500 ms, Windows
+// 500 ms) and is what kitty and iTerm2 use.
+const multiClickInterval = 500 * time.Millisecond
+
+// nextClickCount advances the multi-click counter for a click at (x, y) and
+// returns it: 1 plain, 2 double, 3 triple, wrapping back to 1 on a fourth so
+// continued clicking cycles the granularities rather than sticking on
+// line-wise. A click only counts as a repeat when it lands both soon enough
+// and close enough to the previous one — without the position test, clicking
+// two different words in quick succession would word-extend across both.
+// Main-thread only.
+func (t *Term) nextClickCount(x, y float32) int {
+	now := time.Now()
+	near := realNumber(x) && realNumber(y) &&
+		realNumber(t.mouse.lastClickX) && realNumber(t.mouse.lastClickY) &&
+		math.Abs(float64(x-t.mouse.lastClickX)) <= float64(t.cellW)/2 &&
+		math.Abs(float64(y-t.mouse.lastClickY)) <= float64(t.cellH)/2
+	count := 1
+	if t.mouse.clickCount > 0 && near &&
+		now.Sub(t.mouse.lastClickAt) <= multiClickInterval {
+		count = t.mouse.clickCount%3 + 1
+	}
+	t.mouse.clickCount = count
+	t.mouse.lastClickAt = now
+	t.mouse.lastClickX, t.mouse.lastClickY = x, y
+	return count
+}
+
+// resetClickCount forgets the multi-click run, so the next click starts a
+// fresh gesture. Called by gestures that are not clicks (Shift+click) and by
+// the stuck-drag safety nets.
+func (t *Term) resetClickCount() {
+	t.mouse.clickCount = 0
+	t.mouse.lastClickAt = time.Time{}
+}
+
+// selectUnitAt selects the whole word (or smart unit — see unitBoundsAt) or
+// logical line containing cp, per the grid's current SelMode, and records the unit's bounds so a following drag
+// can pivot around it. Boundary columns are half-open, hence the +1 on the
+// inclusive end cell — the same conversion syncSelection does for copy mode.
+// Caller holds Mu; SelMode must already be selWord or selLine.
+func (t *Term) selectUnitAt(cp contentPos) {
+	g := t.grid
+	var start, end contentPos // inclusive cells
+	if g.SelMode == selLine {
+		sRow, eRow := g.lineBoundsAt(cp.Row)
+		start, end = contentPos{Row: sRow}, contentPos{Row: eRow, Col: g.Cols - 1}
+	} else {
+		start, end = g.unitBoundsAt(cp)
+	}
+	t.mouse.selUnitStart, t.mouse.selUnitEnd = start, end
+	g.SelAnchor = start
+	g.SelHead = contentPos{Row: end.Row, Col: end.Col + 1}
+	g.SelActive = g.SelHead != g.SelAnchor
+}
+
+// extendUnitSelection re-derives the selection for a word- or line-wise drag
+// so it always covers whole units, pivoting around the unit the gesture
+// started on: dragging past the origin in either direction grows from the
+// far edge of the origin, and dragging back onto the origin collapses to it.
+// Caller holds Mu. No-op in char and block modes.
+func (t *Term) extendUnitSelection(cp contentPos) {
+	g := t.grid
+	var us, ue contentPos // unit under the pointer, inclusive cells
+	switch g.SelMode {
+	case selWord:
+		us, ue = g.unitBoundsAt(cp)
+	case selLine:
+		sRow, eRow := g.lineBoundsAt(cp.Row)
+		us, ue = contentPos{Row: sRow}, contentPos{Row: eRow, Col: g.Cols - 1}
+	default:
+		return
+	}
+	os, oe := t.mouse.selUnitStart, t.mouse.selUnitEnd
+	oeBound := contentPos{Row: oe.Row, Col: oe.Col + 1}
+	switch {
+	case posLess(oe, us): // pointer unit lies wholly after the origin
+		g.SelAnchor, g.SelHead = os, contentPos{Row: ue.Row, Col: ue.Col + 1}
+	case posLess(ue, os): // wholly before: anchor flips to the origin's far edge
+		g.SelAnchor, g.SelHead = oeBound, us
+	default: // overlapping the origin unit
+		g.SelAnchor, g.SelHead = os, oeBound
+	}
+	g.SelActive = g.SelHead != g.SelAnchor
+}
+
+// onClick handles a button-down event. Under mouse reporting, encodes
+// a press report for any supported button and arms drag tracking.
+// Otherwise (the default) starts a left-button selection anchor.
+func (t *Term) onClick(ctx gui.EventCtx) {
+	if t.cfg.OnClickFocus != nil {
+		t.cfg.OnClickFocus()
+	}
+	// A click is the user reaching for the mouse: hand selection back to it
+	// rather than letting a keyboard copy cursor and a drag fight over the
+	// same SelAnchor/SelHead.
+	if t.copy.active {
+		t.exitCopyMode(ctx.Window)
+	}
+	// Same reasoning for hints: reaching for the mouse means Cmd+click is the
+	// gesture now, so the labels have no reason to stay up.
+	if t.hints.active {
+		t.exitHints(ctx.Window)
+	}
+	// Scrollbar takes priority over selection and host mouse reporting: it is
+	// a local overlay drawn on top of the grid. Only interactive while the
+	// thumb is visible, so a faded scrollbar never swallows clicks.
+	if ctx.Event.MouseButton == gui.MouseLeft && t.scrollbarClick(ctx.Event, ctx.Window) {
+		ctx.Consume()
+		return
+	}
+	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
+	snap := t.mouseSnap()
+	// A Cmd+click that lands on a link is a local gesture even while the child
+	// is reading the mouse. Super has no SGR modifier bit (see mouseModBits), so
+	// the child could not have distinguished this click from a plain one — it
+	// loses nothing it could have acted on. The exception is deliberately narrow:
+	// only a click actually on a link is taken, so every other click, and every
+	// drag, still reports and a full-screen app's own mouse handling is intact.
+	cmdLink := ctx.Event.MouseButton == gui.MouseLeft &&
+		ctx.Event.Modifiers.Has(gui.ModSuper) &&
+		t.linkURLAt(r, c) != ""
+	if snap.shouldReport() && !cmdLink {
+		base, ok := mouseSGRBaseButton(ctx.Event.MouseButton)
+		if !ok {
+			return
+		}
+		cb := base + mouseModBits(ctx.Event.Modifiers)
+		// The child grid is logical; the pointer is visual.
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, ctx.Event.MouseX, ctx.Event.MouseY, snap, true)
+		t.mouse.dragging = true
+		t.mouse.dragButton = ctx.Event.MouseButton
+		t.mouse.dragReport = true
+		t.mouse.lastR, t.mouse.lastC = r, c
+		t.mouse.lastPX, t.mouse.lastPY = t.devicePx(ctx.Event.MouseX, ctx.Event.MouseY)
+		// Lock like a selection drag does. Without the lock, a release outside
+		// the pane (on the tab bar, or off the window) never reached onMouseUp:
+		// the child got a press with no release and stayed in its drag or
+		// visual mode, and drag motion outside the pane was never reported.
+		t.lockMouse(ctx.Window)
+		ctx.Consume()
+		return
+	}
+	// Middle-click paste. Below shouldReport(), so a child that enabled mouse
+	// reporting still gets the button rather than having pastes injected.
+	if ctx.Event.MouseButton == gui.MouseMiddle {
+		if t.cfg.MiddleClickPaste && t.pasteFromPrimary(ctx.Window) {
+			ctx.Consume()
+		}
+		return
+	}
+	if ctx.Event.MouseButton != gui.MouseLeft {
+		return
+	}
+	selCol := t.posToSelCol(ctx.Event.MouseX)
+	// Shift+click extends the existing selection from its fixed anchor instead
+	// of starting a new one — matching xterm/iTerm2/kitty. Only extends when a
+	// prior anchor exists (hasSelAnchor); a Shift+click with no prior selection
+	// falls through to the normal re-anchor below.
+	shiftExtend := ctx.Event.Modifiers.Has(gui.ModShift)
+	// Shift+click is an extend gesture, not a repeat of the previous click, so
+	// it neither advances nor inherits the click count.
+	count := 1
+	if !shiftExtend {
+		count = t.nextClickCount(ctx.Event.MouseX, ctx.Event.MouseY)
+	} else {
+		t.resetClickCount()
+	}
+	// Alt+drag selects a rectangle. Only reachable here, past the
+	// shouldReport() return above, so an app that asked for mouse events
+	// still receives Alt+drag as ordinary reports.
+	block := ctx.Event.Modifiers.Has(gui.ModAlt)
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		contentR := t.grid.viewportToContent(r)
+		cols := t.grid.Cols
+		v2l := t.v2lForViewportRow(r)
+		// Pointer geometry is visual; grid coordinates are logical.
+		head := contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
+		lc := logicalCell(v2l, c, cols)
+		extended := false
+		switch {
+		case shiftExtend && t.grid.hasSelAnchor:
+			// Keep SelAnchor; move only the head to the click point. A one-cell
+			// span (head == anchor) is not a real selection, so leave inactive.
+			t.grid.SelHead = head
+			t.grid.SelActive = head != t.grid.SelAnchor
+			extended = true
+		case count == 2:
+			// Double click: the word under the *cell*, not the boundary.
+			t.grid.SelMode = selWord
+			t.selectUnitAt(contentPos{Row: contentR, Col: lc})
+		case count == 3:
+			t.grid.SelMode = selLine
+			t.selectUnitAt(contentPos{Row: contentR, Col: lc})
+		default:
+			t.grid.SelMode = selChar
+			if block {
+				t.grid.SelMode = selBlock
+			}
+			t.grid.SelAnchor = head
+			t.grid.SelHead = head
+			t.grid.SelActive = false
+		}
+		t.grid.hasSelAnchor = true
+		t.mouse.selStartV, t.mouse.selStartRow = selCol, contentR
+		t.mouse.selStartAnchor = head
+		t.mouse.selStartSet = !extended
+	}()
+	t.mouse.dragging = true
+	t.mouse.dragButton = ctx.Event.MouseButton
+	t.mouse.dragReport = false
+	t.lockMouse(ctx.Window)
+	t.bumpVersion()
+	ctx.Window.InvalidateLayout()
+	ctx.Consume()
+}
+
+// onMouseMove handles pointer motion. Under ?1002/?1003 with a button
+// held, emits a drag report; under ?1003 with no button held, emits an
+// any-motion report. Falls through to selection extension when this
+// drag was started outside of a reporting mode.
+func (t *Term) onMouseMove(ctx gui.EventCtx) {
+	t.toCanvasRel(ctx.Event)
+	// Track Cmd state for hyperlink styling. When it changes, the next
+	// frame will reflect the new state via cmdHeld in the draw pass.
+	cmd := ctx.Event.Modifiers.Has(gui.ModSuper)
+	prevCmd := t.mouse.cmdHeld.Swap(cmd)
+	if cmd != prevCmd {
+		t.bumpVersion()
+	}
+	// Track scrollbar hover for thumb brightness.
+	if t.scrollbar.active && realNumber(ctx.Event.MouseX) && realNumber(ctx.Event.MouseY) {
+		inHit := ctx.Event.MouseX >= t.scrollbar.hitX0 &&
+			ctx.Event.MouseY >= 0 && ctx.Event.MouseY < t.scrollbar.viewH
+		if inHit != t.scrollbar.hovered {
+			t.scrollbar.hovered = inHit
+			t.bumpVersion()
+			if ctx.Window != nil {
+				ctx.Window.InvalidateLayout()
+			}
+		}
+	}
+
+	// Scrollbar thumb drag: repositions the viewport, independent of the
+	// selection / mouse-report paths below.
+	if t.scrollbar.dragging {
+		t.scrollbarDrag(ctx.Event, ctx.Window)
+		return
+	}
+	// Any pointer motion means the user's hand is on the input device again;
+	// cancel a coasting momentum scroll so they get immediate control.
+	t.momentum.mu.Lock()
+	coasting := t.momentum.coasting
+	t.momentum.mu.Unlock()
+	if coasting {
+		t.cancelMomentum()
+	}
+
+	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
+	// so an OSC 22 shape has to be re-applied on every move. It happens here
+	// and not only in updateHover because the mouse-reporting branches below
+	// return before updateHover is ever reached — and an application driving
+	// ?1002/?1003 is precisely the kind that sets OSC 22, so gating the shape
+	// on the non-reporting path would leave it unreachable in practice.
+	// updateHover re-applies it afterwards on the paths that do reach it,
+	// which is what lets a hovered link outrank the shape.
+	if shape := t.pointerShapeSnap(); shape != pointerDefault {
+		applyPointerShape(ctx.Window, shape)
+	}
+
+	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
+	snap := t.mouseSnap()
+	if t.motionReport(ctx.Event, snap, r, c) {
+		// The motion belongs to the child, but a Cmd-held pointer still has to
+		// resolve the link under it: without this, an app driving ?1002/?1003
+		// (Claude Code, mdr, anything bubbletea's EnableMouseAllMotion) never
+		// reached updateHover, so Cmd-hover highlighted nothing at all. The
+		// report went out either way — Super carries no SGR modifier bit (see
+		// mouseModBits), so the child cannot tell the difference.
+		if cmd {
+			t.updateHover(r, c, ctx.Window)
+		} else {
+			// No link resolution without Cmd, but the pointer cell still has to
+			// be recorded: a later Cmd press resolves the link at the *stored*
+			// cell (syncHoverForModifiers), so leaving it stale highlighted
+			// whichever link the pointer last sat on while Cmd was down —
+			// typically the one just Cmd+clicked.
+			t.mouse.hoverR.Store(int32(r))
+			t.mouse.hoverC.Store(int32(c))
+		}
+		return
+	}
+	if !t.mouse.dragging || t.mouse.dragReport {
+		// Update hover for hyperlink highlighting even when not dragging.
+		t.updateHover(r, c, ctx.Window)
+		return
+	}
+	selCol := t.posToSelCol(ctx.Event.MouseX)
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		rows := t.grid.Rows
+		widgetH := float32(rows) * t.cellH
+		if t.cellH > 0 {
+			switch {
+			case ctx.Event.MouseY < 0:
+				t.grid.ScrollView(1)
+				t.setAutoScrollDir(1)
+			case ctx.Event.MouseY > widgetH:
+				t.grid.ScrollView(-1)
+				t.setAutoScrollDir(-1)
+			default:
+				t.setAutoScrollDir(0)
+			}
+		}
+		contentR := t.grid.viewportToContent(r)
+		cols := t.grid.Cols
+		v2l := t.v2lForViewportRow(r)
+		// A drag begun with a double or triple click keeps that granularity:
+		// the selection snaps to whole words / lines as the pointer moves.
+		if t.grid.SelMode == selWord || t.grid.SelMode == selLine {
+			t.extendUnitSelection(contentPos{Row: contentR, Col: logicalCell(v2l, c, cols)})
+			return
+		}
+		if t.mouse.selStartSet && contentR == t.mouse.selStartRow && t.grid.SelMode == selChar {
+			// Same-row char drag: map the whole visual range to its
+			// covering logical span so the selected glyphs are exactly
+			// the dragged ones (point-mapping each end would drift by
+			// a cell on reversed rows).
+			l0, l1, ok := logicalSpan(v2l, t.mouse.selStartV, selCol, cols)
+			if !ok {
+				// Back at the press point (or over padding only): nothing is
+				// selected. Collapse onto the press anchor so no stale span of
+				// an earlier move stays behind.
+				t.grid.SelAnchor = t.mouse.selStartAnchor
+				t.grid.SelHead = t.mouse.selStartAnchor
+				t.grid.SelActive = false
+				return
+			}
+			// The span end nearer the press point is the anchor. That keeps the
+			// anchor at the drag origin, so a later cross-row move or a
+			// shift-click extends from where the user pressed, not from
+			// whichever span end is lower.
+			a, h := l0, l1
+			if absInt(l1-t.mouse.selStartAnchor.Col) < absInt(l0-t.mouse.selStartAnchor.Col) {
+				a, h = l1, l0
+			}
+			t.grid.SelAnchor = contentPos{Row: contentR, Col: a}
+			t.grid.SelHead = contentPos{Row: contentR, Col: h}
+			t.grid.SelActive = true
+			return
+		}
+		// Cross-row drags (and the block band): the anchor row runs to its
+		// edge via selRowSpan, so only the head needs mapping here. A same-row
+		// move above may have moved SelAnchor to a span end; put it back on
+		// the press point.
+		if t.mouse.selStartSet {
+			t.grid.SelAnchor = t.mouse.selStartAnchor
+		}
+		t.grid.SelHead = contentPos{Row: contentR, Col: logicalBoundary(v2l, selCol, cols)}
+		if t.grid.SelHead != t.grid.SelAnchor {
+			t.grid.SelActive = true
+		}
+	}()
+	t.bumpVersion()
+	ctx.Window.InvalidateLayout()
+	t.updateHover(r, c, ctx.Window)
+}
+
+// motionReport emits the drag report (?1002, or ?1003 which is its
+// superset per xterm) or the ?1003 any-motion report for this move,
+// when the current modes call for one. Returns true when the event
+// belongs to the child, i.e. the local selection and hover paths in
+// onMouseMove must not also act on it.
+func (t *Term) motionReport(e *gui.Event, snap mouseSnap, r, c int) bool {
+	if !snap.report || !snap.live {
+		return false
+	}
+	// Dedupe: only emit when the position the child sees changed. That is the
+	// cell, or under ?1016 the device pixel: deduping pixel reports by cell
+	// threw away the sub-cell motion that is the point of asking for pixels.
+	px, py := t.devicePx(e.MouseX, e.MouseY)
+	same := r == t.mouse.lastR && c == t.mouse.lastC
+	if snap.pixels {
+		same = px == t.mouse.lastPX && py == t.mouse.lastPY
+	}
+	if same {
+		if t.mouse.dragReport {
+			return true
+		}
+		// Local-selection drag: still fall through to update
+		// SelHead at unchanged coords (cheap; avoids stale state).
+	}
+	switch {
+	case t.mouse.dragReport && (snap.drag || snap.any):
+		base, ok := mouseSGRBaseButton(t.mouse.dragButton)
+		if !ok {
+			return true
+		}
+		cb := base + mouseModBits(e.Modifiers) + 32
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap, true)
+		t.mouse.lastR, t.mouse.lastC = r, c
+		t.mouse.lastPX, t.mouse.lastPY = px, py
+		return true
+	case !t.mouse.dragging && snap.any:
+		cb := 35 + mouseModBits(e.Modifiers) // 3+32 = motion, no button
+		t.writeMouse(cb, t.logicalMouseCol(r, c), r, e.MouseX, e.MouseY, snap, true)
+		t.mouse.lastR, t.mouse.lastC = r, c
+		t.mouse.lastPX, t.mouse.lastPY = px, py
+		return true
+	}
+	return false
+}
+
+// pointerShapeSnap copies the OSC 22 shape out from under g.Mu so the caller
+// can hand it to go-gui with the lock released — grid.Mu is never held across
+// a call into another subsystem.
+func (t *Term) pointerShapeSnap() pointerShape {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	return t.grid.PointerShape
+}
+
+// applyPointerShape maps an OSC 22 shape onto go-gui's window cursor calls.
+// The only place in the widget that knows both vocabularies; pointer.go owns
+// the grid-side enum and stays free of go-gui. Nil-safe: hover and move paths
+// run in tests without a window.
+func applyPointerShape(w *gui.Window, s pointerShape) {
+	if w == nil {
+		return
+	}
+	switch s {
+	case pointerIBeam:
+		w.SetMouseCursorIBeam()
+	case pointerPointingHand:
+		w.SetMouseCursorPointingHand()
+	case pointerCrosshair:
+		w.SetMouseCursorCrosshair()
+	case pointerArrow:
+		w.SetMouseCursorArrow()
+	case pointerAll:
+		w.SetMouseCursorAll()
+	case pointerNS:
+		w.SetMouseCursorNS()
+	case pointerEW:
+		w.SetMouseCursorEW()
+	case pointerNESW:
+		w.SetMouseCursorResizeNESW()
+	case pointerNWSE:
+		w.SetMouseCursorResizeNWSE()
+	case pointerNotAllowed:
+		w.SetMouseCursorNotAllowed()
+	}
+}
+
+// syncHoverForModifiers updates cmdHeld from the current modifier state and
+// re-evaluates the hover highlight at the last known pointer position. Called
+// from onKeyDown/onKeyUp so pressing Cmd without moving the mouse still shows
+// the link underline/blue recolor (issue: visual cue missing until mouse move).
+// Main-thread only.
+func (t *Term) syncHoverForModifiers(m gui.Modifier, w *gui.Window) {
+	cmd := m.Has(gui.ModSuper)
+	if cmd == t.mouse.cmdHeld.Load() {
+		return
+	}
+	t.mouse.cmdHeld.Store(cmd)
+	// Bump for OSC 8 recolor: cellRunKey reads cmdHeld directly, and
+	// updateHover's same-cell path only bumps for implicit-URL changes, so a
+	// modifier-only press over an OSC 8 link would otherwise not repaint.
+	t.bumpVersion()
+	if w != nil {
+		w.InvalidateLayout()
+	}
+	r, c := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+	if r >= 0 && c >= 0 {
+		t.updateHover(r, c, w)
+	}
+}
+
+// updateHover updates t.hoverR/C, requests a redraw when entering or leaving
+// a hyperlinked cell run, and sets the cursor to a pointing hand when Cmd is
+// held over a link.
+func (t *Term) updateHover(r, c int, w *gui.Window) {
+	oldR, oldC := int(t.mouse.hoverR.Load()), int(t.mouse.hoverC.Load())
+	cmd := t.mouse.cmdHeld.Load()
+	moved := oldR != r || oldC != c
+
+	// Resolve what is under the pointer. Explicit OSC 8 links win; only when the
+	// cell carries no LinkID and Cmd is held do we run implicit URL detection
+	// (bounded to one logical line, off the render path — see detectURLAt).
+	var prevLink, curLink uint16
+	var url string
+	var spans []urlSpan
+	var shape pointerShape
+	func() {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		v2l := t.v2lForViewportRow(r)
+		cols := t.grid.Cols
+		// Pointer geometry is visual; grid coordinates are logical.
+		lc := logicalCell(v2l, c, cols)
+		if oldR >= 0 && oldC >= 0 {
+			oldLC := oldC
+			if oldV2L := t.v2lForViewportRow(oldR); oldV2L != nil {
+				oldLC = logicalCell(oldV2L, oldC, cols)
+			}
+			prevLink = t.grid.ViewCellAt(oldR, oldLC).LinkID
+		}
+		curLink = t.grid.ViewCellAt(r, lc).LinkID
+		if cmd && curLink == 0 {
+			cp := contentPos{Row: t.grid.viewportToContent(r), Col: lc}
+			url, spans, _ = t.grid.detectURLAt(cp)
+		}
+		shape = t.grid.PointerShape
+	}()
+
+	// Pointing-hand cursor over any actionable link — explicit or detected.
+	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
+	// so re-apply on every call, even when the coords haven't changed.
+	//
+	// A hovered link outranks OSC 22: the link is a property of the cell under
+	// the pointer *right now*, while the OSC 22 shape is a pane-wide default the
+	// application set at some earlier point.
+	if w != nil {
+		switch {
+		case cmd && (curLink != 0 || url != ""):
+			w.SetMouseCursorPointingHand()
+		case shape != pointerDefault:
+			applyPointerShape(w, shape)
+		}
+	}
+
+	prevURL := t.mouse.hoverURL
+	t.mouse.hoverURL = url
+	t.mouse.hoverSpans = spans
+
+	if !moved {
+		// Same cell: only the detected URL could have changed (a Cmd press
+		// without motion doesn't reach here). Redraw if the highlight differs.
+		if url != prevURL {
+			t.bumpVersion()
+			if w != nil {
+				w.InvalidateLayout()
+			}
+		}
+		return
+	}
+	t.mouse.hoverR.Store(int32(r))
+	t.mouse.hoverC.Store(int32(c))
+	if prevLink != 0 || curLink != 0 || url != prevURL {
+		t.bumpVersion()
+		if w != nil {
+			w.InvalidateLayout()
+		}
+	}
+}
+
+// reportLostRelease sends the release of a reported drag whose real release
+// never arrived (a window resize took the mouse-up, see cancelSelectDrag). The
+// child pairs every press with a release; without one it stays in its drag or
+// visual mode. Reported at the last position the child saw, with no
+// modifiers, since the real ones are unknown. Takes grid.Mu, so the caller
+// must not hold it.
+func (t *Term) reportLostRelease() {
+	if !t.mouse.dragReport {
+		return
+	}
+	snap := t.mouseSnap()
+	base, ok := mouseSGRBaseButton(t.mouse.dragButton)
+	if !ok {
+		return
+	}
+	x, y := t.logicalMouseCol(t.mouse.lastR, t.mouse.lastC), t.mouse.lastR
+	// Device pixels are already recorded for the last reported position, so
+	// encode here rather than through writeMouse, which would re-derive them
+	// from logical points we no longer have.
+	if snap.pixels && snap.encoding() == mouseEncSGR {
+		x, y = t.mouse.lastPX, t.mouse.lastPY
+	}
+	var buf [32]byte
+	out, ok := encodeMouseReport(buf[:0], snap, base, x, y, false)
+	if !ok {
+		return
+	}
+	if _, err := t.pw.Write(out); err != nil {
+		log.Printf("term: pty mouse: %v", err)
+	}
+}
+
+// onMouseUp handles button-release. A drag started under reporting
+// emits a release report regardless of whether the mode is still on
+// (the host expects every press to be paired with a release).
+func (t *Term) onMouseUp(ctx gui.EventCtx) {
+	t.toCanvasRel(ctx.Event)
+	// Scrollbar thumb drag release: unlock and stop dragging. The scrollbar
+	// drag path never sets t.mouse.dragging, so handle it before that guard.
+	if t.scrollbar.dragging {
+		t.scrollbar.dragging = false
+		t.unlockMouse(ctx.Window)
+		t.scheduleViewUpdate(ctx.Window)
+		ctx.Consume()
+		return
+	}
+	if !t.mouse.dragging {
+		return
+	}
+	t.setAutoScrollDir(0)
+	t.unlockMouse(ctx.Window)
+	r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
+	if t.mouse.dragReport {
+		snap := t.mouseSnap()
+		// No mode check: a press was reported, so the child is owed its
+		// release even if it has since turned reporting off.
+		if base, ok := mouseSGRBaseButton(t.mouse.dragButton); ok {
+			cb := base + mouseModBits(ctx.Event.Modifiers)
+			t.writeMouse(cb, t.logicalMouseCol(r, c), r,
+				ctx.Event.MouseX, ctx.Event.MouseY, snap, false)
+		}
+		t.mouse.dragging = false
+		t.mouse.dragReport = false
+		ctx.Consume()
+		return
+	}
+	t.mouse.dragging = false
+	// Single click (no drag) with Cmd/Ctrl on a hyperlink → open URL. An
+	// explicit OSC 8 link wins; otherwise fall back to implicit URL detection
+	// at the click cell, matching the Cmd-hover highlight.
+	//
+	// SelActive is read under grid.Mu: the reader goroutine clears the
+	// selection (ClearSelection) when output overwrites it or the alt screen
+	// is entered.
+	t.grid.Mu.Lock()
+	selActive := t.grid.SelActive
+	t.grid.Mu.Unlock()
+	if !selActive {
+		if ctx.Event.Modifiers&gui.ModSuper != 0 || ctx.Event.Modifiers&gui.ModCtrl != 0 {
+			url := t.linkURLAt(r, c)
+			if url != "" {
+				openURLFn(url)
+				ctx.Consume()
+				return
+			}
+		}
+	}
+	if !t.copySelection(ctx.Window) {
+		// Nothing selected (plain click, or a drag too small to span a cell).
+		// Deactivate the selection but keep SelAnchor and hasSelAnchor so a
+		// following Shift+click extends from this click point — a full
+		// ClearSelection here would wipe the anchor and break click-then-
+		// Shift+click. onClick already set SelHead == SelAnchor at the click,
+		// so there is no stale head to reset.
+		func() {
+			t.grid.Mu.Lock()
+			defer t.grid.Mu.Unlock()
+			t.grid.SelActive = false
+		}()
+	}
+	t.bumpVersion()
+	if ctx.Window != nil {
+		ctx.Window.InvalidateLayout()
+	}
+	ctx.Event.IsHandled = true
+}
+
+// linkURLAt resolves the link at viewport cell (r,c) in visual coordinates.
+// An explicit OSC 8 destination wins; otherwise implicit URL detection runs
+// at the same cell, matching the precedence the Cmd-hover highlight uses.
+// Returns "" when the cell carries no link.
+//
+// Destination-wins is the standard OSC 8 semantic (every hyperlink-capable
+// terminal resolves the same way), so a dest that disagrees with the visible
+// text is inherent to the protocol, not a bug here. The open path stays safe
+// because openURLCommand allowlists the scheme and rejects control bytes;
+// the copy path is gated separately by safeClipboardText.
+func (t *Term) linkURLAt(r, c int) string {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	lc := logicalCell(t.v2lForViewportRow(r), c, t.grid.Cols)
+	cell := t.grid.ViewCellAt(r, lc)
+	if u := t.grid.LinkURL(cell.LinkID); u != "" {
+		return u
+	}
+	cp := contentPos{Row: t.grid.viewportToContent(r), Col: lc}
+	u, _, _ := t.grid.detectURLAt(cp)
+	return u
+}
+
+// openURLFn is the indirection the widget calls instead of openURL directly, so
+// a test can assert that a gesture reached the open path without launching a
+// real browser. Production never reassigns it.
+var openURLFn = openURL
+
+// openURLCommand builds the OS command that opens url with the default
+// browser/handler, or nil when the URL is not permitted. Only http, https,
+// and mailto schemes are permitted; other URI schemes (file://, custom
+// handlers, javascript:) are silently dropped to prevent a malicious OSC 8
+// hyperlink from invoking arbitrary OS handlers.
+// The URL is terminal output — untrusted — so it must never reach a shell:
+// opener.Command passes it as one argv element of a non-shell program (open,
+// rundll32, xdg-open), and the charset check keeps control characters
+// (including DEL, 0x7F) and quotes out of even that argv.
+func openURLCommand(rawURL string) *exec.Cmd {
+	switch {
+	case strings.HasPrefix(rawURL, "https://"),
+		strings.HasPrefix(rawURL, "http://"),
+		strings.HasPrefix(rawURL, "mailto:"):
+		// permitted
+	default:
+		return nil
+	}
+	for i := 0; i < len(rawURL); i++ {
+		if rawURL[i] < 0x20 || rawURL[i] == 0x7F || rawURL[i] == '"' {
+			return nil // invalid in a URL; reject before it reaches any handler
+		}
+	}
+	return opener.Command(rawURL)
+}
+
+// startOpener is opener.Start, replaceable so tests can simulate a missing
+// handler.
+var startOpener = opener.Start
+
+// openURL opens url with the OS default browser/handler. A URL
+// openURLCommand rejects is silently dropped. See openURLCommand for the
+// permit rules. A handler that fails to start (no xdg-open on a minimal Linux)
+// is logged: the click has no other visible result, so without the log line
+// the failure leaves no trace at all.
+func openURL(rawURL string) {
+	cmd := openURLCommand(rawURL)
+	if cmd == nil {
+		return
+	}
+	if err := startOpener(cmd); err != nil {
+		log.Printf("term: open %s: %v", redactURL(rawURL), err)
+	}
+}
+
+// redactURL keeps only the scheme and host of url, for logs. The rest can
+// carry secrets: a password in the userinfo, a token in the query (password
+// reset and magic-login links), or a personal address in a mailto. The host
+// is enough to tell which link failed.
+func redactURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" {
+		return "<unparsable URL>"
+	}
+	if u.Host == "" {
+		return u.Scheme + ":"
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// trackpadSensitivity converts a precise (trackpad / high-res) delta
+// into scroll pixels. The Metal backend pre-scales precise deltas by
+// 0.075 (kPreciseScrollScale in gui/backend/metal), so this factor
+// lands the effective finger-travel multiplier at ~2.0x raw points —
+// the same ratio Ghostty arrives at with its 2x AppKit pre-scale and a
+// mouse-scroll-multiplier.precision of 1.0. The previous value of 10
+// gave 0.75x, so a line took ~2.7x the finger travel Ghostty needed,
+// which read as laggy next to it. wheelReportTicks completes the parity
+// by accumulating against a cellH x backingScale threshold (physical
+// pixels, like Ghostty's), so on a 2x display a line takes one logical
+// cell of finger travel — Ghostty's exact retina behavior.
+const trackpadSensitivity float32 = 2.0 / 0.075
+
+// scrollSensitivity selects the delta→pixel factor for a scroll event.
+//
+// A discrete wheel delta arrives in lines (gui.Event.ScrollY's unit when
+// ScrollPrecise is false), so the factor is the cell height: one
+// reported line scrolls exactly one grid row, and a notch moves the
+// three rows every backend reports — the same distance xterm, kitty and
+// Windows Terminal travel. It was a flat 5px, tuned against the Metal
+// backend's old 2.5-per-notch pre-scale; Win32 and X11 reported a bare
+// 1.0 for the same notch, which landed them at 5px — barely a quarter of
+// a row, so the wheel felt dead on both.
+//
+// Precise deltas are points of finger travel, not lines, and keep the
+// pixel factor.
+func (t *Term) scrollSensitivity(precise bool) float32 {
+	if precise {
+		return trackpadSensitivity
+	}
+	return t.cellH
+}
+
+// maxWheelTicks caps the SGR wheel reports emitted for a single scroll
+// event so a huge accelerated delta cannot flood the pty.
+const maxWheelTicks = 32
+
+// wheelReportTicks converts a wheel delta into the number of SGR wheel
+// reports to emit. The delta is scaled to pixels (wheel or trackpad
+// factor per the precise flag) and divided by the accumulation
+// threshold, so one report is sent per row of scroll distance —
+// matching how far the local scrollback viewport would move. The
+// fractional remainder accumulates in mouse.wheelResidual across events
+// (reset on direction change) so trackpad pans add up instead of being
+// truncated. The precise threshold is cellH x backingScale — physical
+// pixels, like Ghostty's — so on a 2x Retina display a sub-cell delta
+// needs double the travel to emit; this is what keeps ~1pt trailing
+// inertia events (wheel coast-down, trackpad jitter) from crossing a
+// logical cell and emitting a spurious report where Ghostty emits
+// nothing. A precise delta below the threshold emits nothing and
+// carries the residual forward; a discrete wheel delta below one row
+// still emits a single tick, so a slow notch never feels dead.
+// Main-thread only.
+func (t *Term) wheelReportTicks(scrollY float32, precise bool) int {
+	if !realNumber(scrollY) || !finite(t.cellH) {
+		return 1
+	}
+	threshold := float64(t.cellH)
+	if precise {
+		threshold *= t.backingScale()
+	}
+	dir := 1
+	if scrollY < 0 {
+		dir = -1
+	}
+	if dir != t.mouse.wheelDir {
+		t.mouse.wheelDir = dir
+		t.mouse.wheelResidual = 0
+	}
+	total := float64(t.mouse.wheelResidual) +
+		math.Abs(float64(scrollY))*float64(t.scrollSensitivity(precise))
+	// Pre-cap: converting a quotient beyond maxWheelTicks to int could
+	// overflow (a pathological delta makes total/threshold exceed the
+	// int range), and the cap below runs only after that conversion.
+	if total >= float64(maxWheelTicks)*threshold {
+		t.mouse.wheelResidual = 0
+		return maxWheelTicks
+	}
+	ticks := int(total / threshold)
+	if ticks < 1 {
+		if precise {
+			// Trackpad pan below one row of travel: keep the residual
+			// so a slow pan accumulates and scrolls once it crosses a
+			// full row, instead of emitting one report per event (the
+			// pre-threshold behavior scrolled on the slightest touch).
+			t.mouse.wheelResidual = float32(total)
+			return 0
+		}
+		// Discrete wheel: emit a single tick and drop the residual so a
+		// slow notch never feels dead and sub-line notches don't burst
+		// later.
+		t.mouse.wheelResidual = 0
+		return 1
+	}
+	t.mouse.wheelResidual = float32(total - float64(ticks)*threshold)
+	return ticks
+}
+
+// backingScale returns the window's device pixel ratio for scroll
+// threshold math, defaulting to 1 when unset (tests, or a window before
+// its first backend frame) or non-finite.
+func (t *Term) backingScale() float64 {
+	if t.win == nil || !realNumber(t.win.BackingScale) || t.win.BackingScale <= 0 {
+		return 1
+	}
+	return float64(t.win.BackingScale)
+}
+
+// wheelArrows sends one Up/Down cursor key per row of scroll distance,
+// standing in for a wheel the application cannot see. Reuses
+// wheelReportTicks so the trackpad residual and the maxWheelTicks flood cap
+// behave exactly as they do for real wheel reports.
+//
+// Goes through writeRaw, not writeBytes: like a mouse report this describes
+// this pane's viewport, so a workspace broadcasting input to sibling panes
+// must not mirror it — scrolling one pager would otherwise scroll them all.
+func (t *Term) wheelArrows(scrollY float32, precise bool) {
+	final := byte('A') // wheel up → cursor up
+	if scrollY < 0 {
+		final = 'B'
+	}
+	seq := arrowSeq(final, t.keyModes().appCursor)
+	ticks := t.wheelReportTicks(scrollY, precise)
+	// Both arrow forms are 3 bytes and ticks is capped at maxWheelTicks, so
+	// the whole burst fits a stack buffer — no allocation per wheel event.
+	var buf [maxWheelTicks * 3]byte
+	out := buf[:0]
+	for range ticks {
+		out = append(out, seq...)
+	}
+	t.writeRaw(out)
+}
+
+// onMouseScroll forwards wheel events to the application as SGR mouse
+// reports when reporting + SGR are active and the viewport is live;
+// otherwise moves the local scrollback viewport. Positive ScrollY
+// reveals older content (wheel-up); negative reveals newer (down).
+// Each event also feeds the momentum EMA so that releasing the trackpad
+// produces a brief coast rather than an abrupt stop.
+func (t *Term) onMouseScroll(ctx gui.EventCtx) {
+	// Zero-delta: macOS sends this when a finger touches the trackpad during
+	// a momentum coast. Cancel immediately so the user gets instant control.
+	if ctx.Event.ScrollY == 0 {
+		t.cancelMomentum()
+		return
+	}
+	snap := t.mouseSnap()
+	if snap.shouldReport() {
+		r, c := t.posToCell(ctx.Event.MouseX, ctx.Event.MouseY)
+		base := 64
+		if ctx.Event.ScrollY < 0 {
+			base = 65
+		}
+		cb := base + mouseModBits(ctx.Event.Modifiers)
+		lc := t.logicalMouseCol(r, c)
+		for range t.wheelReportTicks(ctx.Event.ScrollY, ctx.Event.ScrollPrecise) {
+			t.writeMouse(cb, lc, r, ctx.Event.MouseX, ctx.Event.MouseY, snap, true)
+		}
+		ctx.Event.IsHandled = true
+		return
+	}
+	if !realNumber(ctx.Event.ScrollY) || !finite(t.cellH) {
+		return
+	}
+
+	// Alt screen without mouse reporting: `less`, `man`, and friends take the
+	// alt screen but never enable ?1000, and the local scroll path is a no-op
+	// there because the alt buffer contributes nothing to scrollback — so the
+	// wheel is simply dead. Synthesize cursor keys instead, which is what
+	// kitty, iTerm2, and Ghostty do. Gated on the literal alt screen rather
+	// than on viewport state, so a scrolled-back main screen still scrolls.
+	if snap.alt && !snap.report {
+		t.wheelArrows(ctx.Event.ScrollY, ctx.Event.ScrollPrecise)
+		ctx.Consume()
+		return
+	}
+
+	// Mouse-wheel vs trackpad: the backend flags precise (trackpad /
+	// high-res) deltas via ScrollPrecise. Non-precise deltas are discrete
+	// wheel notches — no momentum. Backends that never set the flag get
+	// wheel behavior throughout, matching the pre-flag feel.
+	isMouseWheel := !ctx.Event.ScrollPrecise
+
+	// Pixel-perfect scroll: pass the raw scaled delta directly to ScrollViewPx
+	// which accumulates it into ViewOffset + ViewSubPx. No integer truncation.
+	deltaPx := ctx.Event.ScrollY * t.scrollSensitivity(ctx.Event.ScrollPrecise)
+	changed := func() bool {
+		t.grid.Mu.Lock()
+		defer t.grid.Mu.Unlock()
+		prevOff, prevSub := t.grid.ViewOffset, t.grid.ViewSubPx
+		t.grid.ScrollViewPx(deltaPx, t.cellH)
+		return t.grid.ViewOffset != prevOff || t.grid.ViewSubPx != prevSub
+	}()
+	if changed {
+		t.scheduleViewUpdate(ctx.Window)
+	}
+
+	// Mouse wheel: no momentum. Cancel any in-progress coast and return.
+	if isMouseWheel {
+		t.cancelMomentum()
+		ctx.Consume()
+		return
+	}
+
+	// Coast velocity tracks the *latest* sample, not the gesture peak.
+	// macOS already delivers its own momentum phase as a decaying stream of
+	// precise scroll events, so holding the peak would restart a second,
+	// full-speed coast once that stream ended — the visible symptom being an
+	// extra line of scroll after the OS momentum had already settled. Taking
+	// the last sample makes the synthetic coast a continuation of whatever
+	// motion was actually in flight: on macOS the tail is near zero and the
+	// coast is a no-op, while backends that emit no momentum of their own
+	// still see the finger's live speed at lift-off. Cap prevents a huge
+	// flick from coasting forever.
+	const (
+		momentumScale = float64(trackpadSensitivity) // coast starts at live-scroll speed
+		momentumCap   = 600.0
+		coastDelay    = 50 * time.Millisecond
+	)
+	func() {
+		t.momentum.mu.Lock()
+		defer t.momentum.mu.Unlock()
+		t.momentum.vel = math.Max(-momentumCap, math.Min(momentumCap, float64(ctx.Event.ScrollY)*momentumScale))
+		t.momentum.cellH = t.cellH
+		t.momentum.coasting = false
+		// Set before the timer is re-armed below, so the timer never fires
+		// ahead of the deadline it is checked against.
+		t.momentum.kickAt = time.Now().Add(coastDelay)
+	}()
+	if t.momentum.timer == nil {
+		t.momentum.timer = time.AfterFunc(coastDelay, t.kickMomentum)
+	} else {
+		t.momentum.timer.Reset(coastDelay)
+	}
+	ctx.Consume()
+}
+
+// cancelMomentum stops any in-progress momentum coast immediately.
+func (t *Term) cancelMomentum() {
+	if t.momentum.timer != nil {
+		t.momentum.timer.Stop()
+	}
+	t.momentum.mu.Lock()
+	defer t.momentum.mu.Unlock()
+	t.momentum.vel = 0
+	t.momentum.coasting = false
+	t.momentum.kickAt = time.Time{}
+}
+
+// kickMomentum is the AfterFunc callback fired 50 ms after the last scroll
+// event. It marks the momentum state as coasting and wakes momentumLoop.
+//
+// Timer.Stop and Timer.Reset cannot recall a callback that has already
+// started, so this one may run late: after a cancel (the user touched the
+// trackpad again), or after a newer scroll re-armed the timer. kickAt tells
+// those apart. A cancel zeroed it, and a newer scroll moved it past now, so
+// either way this stale kick starts nothing; the re-armed timer brings its
+// own.
+func (t *Term) kickMomentum() {
+	t.momentum.mu.Lock()
+	defer t.momentum.mu.Unlock()
+	if t.momentum.kickAt.IsZero() || time.Now().Before(t.momentum.kickAt) {
+		return
+	}
+	t.momentum.kickAt = time.Time{}
+	t.momentum.coasting = true
+	kick(t.momentum.kick)
+}
+
+// momentumLoop decelerates the scroll velocity after the user lifts their
+// finger. Ticks at ~60 fps; each tick passes the decaying pixel velocity
+// to ScrollViewPx for sub-cell-accurate smooth scrolling.
+//
+// The ticker runs only while a coast is live: kickMomentum starts it, and the
+// first tick that finds the coast finished stops it. A 60 Hz ticker left
+// running at idle was this widget's single largest energy cost — 62 wakeups a
+// second per pane, and enough to keep the Go runtime's sysmon from parking.
+func (t *Term) momentumLoop() {
+	defer t.loopWg.Done()
+	defer recoverLoop("momentumLoop")
+	const (
+		tickDur       = 16 * time.Millisecond
+		frictionFast  = 0.82  // decelerate at high speed — avoids linear feel
+		frictionCoast = 0.88  // gentle tail once slow — covers real distance
+		phaseVel      = 120.0 // px/tick threshold between phases
+		minVel        = 2.0   // px/tick below which coast stops
+	)
+	tk := &parkedTicker{rate: tickDur}
+	defer tk.stop()
+	for {
+		select {
+		case <-t.blinkDone:
+			return
+		case <-t.momentum.kick:
+			// coasting flag already set; arm the ticker to run the coast
+			tk.arm()
+		case <-tk.tick:
+			deltaPx, cellH, coasting := func() (float32, float32, bool) {
+				t.momentum.mu.Lock()
+				defer t.momentum.mu.Unlock()
+				if !t.momentum.coasting {
+					return 0, 0, false
+				}
+				friction := frictionCoast
+				if math.Abs(t.momentum.vel) > phaseVel {
+					friction = frictionFast
+				}
+				t.momentum.vel *= friction
+				cellH := t.momentum.cellH
+				if math.Abs(t.momentum.vel) < minVel {
+					t.momentum.coasting = false
+					t.momentum.vel = 0
+				}
+				return float32(t.momentum.vel), cellH, t.momentum.coasting
+			}()
+			if !coasting {
+				tk.stop() // coast finished (or was cancelled) — park
+				continue
+			}
+			if deltaPx != 0 && finite(cellH) {
+				func() {
+					t.grid.Mu.Lock()
+					defer t.grid.Mu.Unlock()
+					t.grid.ScrollViewPx(deltaPx, cellH)
+				}()
+				t.bumpVersion()
+				t.queueCommand(func(w *gui.Window) {
+					t.showScrollbar()
+					w.InvalidateLayout()
+				})
+			}
+		}
+	}
+}

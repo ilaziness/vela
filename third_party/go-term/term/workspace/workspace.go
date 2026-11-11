@@ -1,0 +1,1061 @@
+package workspace
+
+import (
+	"errors"
+	"math"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
+)
+
+// Cfg configures a Workspace. All fields are optional.
+type Cfg struct {
+	TextStyle gui.TextStyle
+	Themes    []term.NamedTheme
+
+	// Identity names this terminal to every pane's child via TERM_PROGRAM
+	// and the XTVERSION reply. Empty (default) advertises "go-term"; see
+	// term.Cfg.Identity. The config file's [env] section can override
+	// TERM_PROGRAM per-user; it does not reach XTVERSION.
+	Identity string
+
+	// IdentityVersion is the embedder's version, reported beside Identity;
+	// see term.Cfg.IdentityVersion.
+	IdentityVersion string
+
+	// ConfigPath is the path to the human-edited config file (INI-style).
+	// When empty, the default location is used: $XDG_CONFIG_HOME/go-term/config,
+	// ~/.config/go-term/config, or os.UserConfigDir()/go-term/config.
+	// A missing file is silently ignored (defaults apply).
+	ConfigPath string
+
+	// SavePath is where the Cmd+S save command writes the workspace
+	// layout. When empty, the default workspace path is used (see
+	// DefaultWorkspacePath). It does not affect the quit-time save: the
+	// embedder owns that, typically with the same path (falcon saves
+	// here and on quit, so the two agree).
+	SavePath string
+
+	// RecordDir is where Cmd+Shift+R writes session recordings. When empty,
+	// a "recordings" subdirectory of the go-term config directory is used.
+	RecordDir string
+
+	// RecordInput adds keystrokes to session recordings started from this
+	// workspace. Off by default — see term.Cfg.RecordInput.
+	RecordInput bool
+
+	// DownloadDir is where OSC 1337 File= transfers from panes in this
+	// workspace are saved. Empty (default) disables file transfers — see
+	// term.Cfg.DownloadDir.
+	DownloadDir string
+
+	// ExitWhenLastShellExits closes the window when the last shell
+	// process exits, rather than replacing it with a fresh tab.
+	ExitWhenLastShellExits bool
+
+	// OnLastShellExit, when non-nil, runs *instead of* the direct window
+	// close that ExitWhenLastShellExits performs. It exists because
+	// gui.Window.Close only raises the close flag — it does not invoke the
+	// window's OnCloseRequest hook — so an embedder that persists state on
+	// quit would silently skip that work on this path. The callback owns
+	// closing the window. Ignored when ExitWhenLastShellExits is false.
+	//
+	// The exiting pane's tab is still in the workspace when it runs, so a
+	// Save here records that tab (CWD, font size) and the next launch
+	// restores a fresh shell there. After it returns the workspace reads the
+	// window's close flag: if the hook closed the window, the tab stays for
+	// the rest of the frame (its pane's Term already closed) and later
+	// closes, splits and new tabs are ignored. If the hook kept the window
+	// open, the dead tab is removed — replaced by a fresh shell when it was
+	// the only tab — so the window never sits on a pane that cannot exit.
+	//
+	// It runs only when no dialog is open. If one is up when the last shell
+	// exits, the call waits until that dialog closes. A hook may open an
+	// in-app dialog (a "quit?" confirmation) and return at once; the workspace
+	// waits for that dialog to close before it reads the close flag.
+	OnLastShellExit func(w *gui.Window)
+
+	// OnColorScheme, when non-nil, runs when the active theme's light/dark
+	// character is first established and whenever it changes — the same
+	// question, and the same answer, that the panes report to a subscribed
+	// child through mode 2031.
+	//
+	// It exists because the workspace has no business calling gui.SetTheme
+	// itself: go-gui's theme is process-global and the embedder's chrome is
+	// the embedder's policy (falcon, for one, wants borders on). This hands
+	// over the fact and lets the host decide what to do with it. Runs on the
+	// main thread, before the workspace refreshes the window, so a
+	// gui.SetTheme here lands in the same frame as the pane repaint.
+	OnColorScheme func(dark bool)
+
+	// ExtraCommands are embedder-provided window commands (falcon's About
+	// and Settings, for example). They are appended to the built-in table
+	// in buildCommands, so they are registered on the window, listed in
+	// the command palette, and re-registered on every config reload —
+	// which is why they live here rather than in a separate
+	// RegisterCommand call the reload would not know about. Entries with
+	// no Shortcut are palette-only; entries with one also appear in the
+	// help overlay and can be rebound from the config file by full ID.
+	ExtraCommands []gui.Command
+
+	// opts carries the per-Term settings resolved from the config file. The
+	// workspace fills it in; embedders configure these through the config
+	// file, not here.
+	opts termOpts
+}
+
+// Workspace manages a multi-tab, multi-pane terminal workspace.
+// Create via New, render via View, tear down via Close.
+type Workspace struct {
+	w *gui.Window
+	// cfg is the effective config: baseCfg with the config file layered on
+	// top. baseCfg is the embedder's pristine copy, kept so every reload
+	// recomputes from the same starting point — otherwise a setting removed
+	// from the file would stay applied until restart.
+	cfg     Cfg
+	baseCfg Cfg
+
+	tabs      []*tab
+	activeTab int
+	nextTabID int
+
+	commands    []gui.Command // metadata source for the help overlay
+	helpVisible bool
+
+	// browser is the full-window theme browser's state. Zero value is
+	// "closed"; see themebrowser.go.
+	browser themeBrowser
+
+	// palette is the command palette's state. Zero value is "closed";
+	// see palette.go.
+	palette palette
+
+	// viewInstalled records whether the view generator has been handed to
+	// go-gui. Installing it is a one-time act; see refresh.
+	viewInstalled bool
+
+	// schemeDark caches the light/dark character last handed to
+	// Cfg.OnColorScheme, so the callback fires on a change rather than on
+	// every theme swap. schemeKnown separates "dark" from "never reported",
+	// which is what makes the first call happen at startup.
+	schemeKnown bool
+	schemeDark  bool
+
+	// pendingExit is a last-shell exit whose OnLastShellExit hook left a dialog
+	// open (a "quit?" confirmation). The hook's answer is not known until the
+	// dialog closes, so View settles it then; see exitLastShell.
+	pendingExit *lastShellExit
+
+	prevOnEvent func(*gui.Event, *gui.Window)
+}
+
+// lastShellExit names the pane whose exit is waiting on the hook's dialog.
+type lastShellExit struct {
+	tab    *tab
+	leafID string
+	// hookPending is set when another dialog was open at the exit, so the
+	// hook has not run yet; see exitLastShell.
+	hookPending bool
+}
+
+// notifyColorScheme tells the embedder the active theme's light/dark
+// character when it changes (and once when it is first established), so a host
+// that themes its own chrome can follow the panes it wraps.
+//
+// Reads the effective theme rather than taking one as an argument: config
+// reload and the theme picker reach it by different routes, and the two must
+// not be able to disagree about what is active.
+func (ws *Workspace) notifyColorScheme() {
+	if ws.cfg.OnColorScheme == nil {
+		return
+	}
+	th, ok := effectiveTheme(ws.cfg)
+	if !ok {
+		return // no themes configured; the embedder's chrome choice stands
+	}
+	dark := th.IsDark()
+	if ws.schemeKnown && ws.schemeDark == dark {
+		return
+	}
+	ws.schemeKnown, ws.schemeDark = true, dark
+	ws.cfg.OnColorScheme(dark)
+}
+
+// New creates a Workspace with a single tab containing a single terminal.
+func New(w *gui.Window, cfg Cfg) (*Workspace, error) {
+	ws, err := newWorkspace(w, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ws.addTabIn(""); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
+
+// newWorkspace builds the Workspace and resolves its configuration without
+// spawning anything. Split out from New so the restore path can settle the
+// effective theme *before* the first pane exists: a pane's COLORFGBG is fixed
+// at spawn and cannot be corrected afterwards (see paneThemes).
+func newWorkspace(w *gui.Window, cfg Cfg) (*Workspace, error) {
+	if w == nil {
+		return nil, errors.New("workspace.New: nil window")
+	}
+	ws := &Workspace{
+		w:           w,
+		cfg:         cfg,
+		baseCfg:     cfg,
+		prevOnEvent: w.OnEvent,
+	}
+	w.OnEvent = ws.onWindowEvent
+	// Reads the config file, resolves settings and keybindings, and registers
+	// the command table. Runs before the first tab so panes are built with the
+	// configured font, theme, and scrollback rather than being corrected after.
+	ws.loadAndApplyConfig()
+	return ws, nil
+}
+
+// addTab creates a new tab and appends it. dir sets the shell's working
+// directory (empty = inherit the process CWD).
+func (ws *Workspace) addTabIn(dir string) (*tab, error) {
+	tabID := "tab-" + strconv.Itoa(ws.nextTabID)
+	ws.nextTabID++
+	tab, err := newTab(ws.w, ws.cfg, tabID, dir, ws.hooks())
+	if err != nil {
+		return nil, err
+	}
+	ws.tabs = append(ws.tabs, tab)
+	ws.activeTab = len(ws.tabs) - 1
+	return tab, nil
+}
+
+// removeTab closes all Terms in the tab and removes it. The last tab is
+// replaced with a fresh one (the workspace is never empty). Returns false
+// only when the replacement fails; the window has already been scheduled
+// for close in that case and callers must not touch workspace state further.
+func (ws *Workspace) removeTab(idx int) bool {
+	if idx < 0 || idx >= len(ws.tabs) {
+		return true
+	}
+	ws.tabs[idx].closeAll()
+	ws.tabs = append(ws.tabs[:idx], ws.tabs[idx+1:]...)
+	// A tab removed left of the active one shifts the active tab down one
+	// slot; follow it. Without this the tab to its right became active while
+	// the real active tab's pane still held focus.
+	if idx < ws.activeTab {
+		ws.activeTab--
+	}
+	if len(ws.tabs) == 0 {
+		if _, err := ws.addTabIn(""); err != nil {
+			ws.w.Close()
+			return false
+		}
+	}
+	if ws.activeTab >= len(ws.tabs) {
+		ws.activeTab = len(ws.tabs) - 1
+	}
+	return true
+}
+
+// closeTabAt closes the tab at idx, focuses a survivor, and refreshes
+// the view. Used by the tab bar close button.
+func (ws *Workspace) closeTabAt(idx int) {
+	if ws.w.CloseRequested() {
+		return // see closePaneInTab: no respawn into a closing window
+	}
+	wasActive := idx == ws.activeTab
+	if !ws.removeTab(idx) {
+		return // window is closing
+	}
+	if wasActive {
+		// Focus the new active tab's pane.
+		tab := ws.tabs[ws.activeTab]
+		if t, ok := tab.terms[tab.focused]; ok {
+			setTermFocused(t, true)
+		}
+	}
+	ws.refresh()
+}
+
+// hooks returns the per-pane callback set every construction path hands to
+// newTab / addPane.
+func (ws *Workspace) hooks() paneHooks {
+	return paneHooks{
+		onExit:     ws.onPaneExit,
+		onFocus:    ws.onPaneFocus,
+		onTitle:    ws.onPaneTitle,
+		onInput:    ws.onPaneInput,
+		onActivity: ws.onPaneActivity,
+		onStatus:   ws.onPaneProgramStatus,
+	}
+}
+
+// onPaneFocus is called synchronously from Term.onClick when the user
+// clicks on a terminal pane.
+func (ws *Workspace) onPaneFocus(leafID string) {
+	for _, tab := range ws.tabs {
+		if _, ok := tab.terms[leafID]; ok {
+			if tab.focused != leafID {
+				ws.focusPaneInTab(tab, leafID)
+			}
+			return
+		}
+	}
+}
+
+// onPaneExit is called via QueueCommand when a shell exits.
+func (ws *Workspace) onPaneExit(leafID string) {
+	for _, tab := range ws.tabs {
+		if _, ok := tab.terms[leafID]; ok {
+			ws.closePaneInTab(tab, leafID)
+			return
+		}
+	}
+}
+
+// closePaneInTab closes a pane within a specific tab.
+func (ws *Workspace) closePaneInTab(tab *tab, leafID string) {
+	// Once the window close is requested the workspace is being torn down.
+	// gui.Window.Close only raises a flag, so a Cmd+W, a tab-bar click or a
+	// second exit queued for the same frame still arrives here. Acting on it
+	// would run the exit hook again (a second Save) or respawn a shell into a
+	// window that is going away. The flag never clears, so this is final.
+	//
+	// The pane's Term is still released: its pty, capture tee and recording
+	// must not stay open until Workspace.Close, which an embedder is not
+	// required to call. It stays in the map, because the View and a Save read
+	// it until teardown.
+	if ws.w.CloseRequested() {
+		if tm, ok := tab.terms[leafID]; ok {
+			_ = tm.Close()
+		}
+		return
+	}
+	// Computed once: the same condition decides both "run the exit hook
+	// with live state" and "close the window instead of respawning".
+	lastPane := tab.root.isLeaf()
+	if lastPane && ws.cfg.ExitWhenLastShellExits && len(ws.tabs) == 1 {
+		ws.exitLastShell(tab, leafID)
+		return
+	}
+	if lastPane {
+		// Last pane in this tab, but other tabs remain (or the embedder
+		// wants a replacement): drop the tab. closeTabAt closes the Term,
+		// focuses the survivor and rebuilds the view.
+		if i := slices.Index(ws.tabs, tab); i >= 0 {
+			ws.closeTabAt(i)
+		}
+		return
+	}
+	tab.removePane(leafID)
+	if newRoot, survivor := removeLeaf(tab.root, leafID); newRoot != nil {
+		tab.root = newRoot
+		tab.focused = survivor
+		if t, ok := tab.terms[survivor]; ok {
+			setTermFocused(t, true)
+		}
+	}
+	ws.refresh()
+}
+
+// exitLastShell handles the last pane of the last tab going away when the
+// embedder asked for the window to close on that.
+//
+// The hook (or the direct close) runs with the tab still in place, so a Save
+// from the hook records the real tab: the exiting pane's CWD and font size are
+// still readable from its Term, and the next launch restores a fresh shell
+// there, same as after Cmd+Q. The hook is how quit-time work happens on this
+// path at all — w.Close alone bypasses OnCloseRequest.
+//
+// What happens next depends on what the hook did, read back from the window's
+// close flag rather than guessed:
+//
+//   - Close requested: the tab stays in ws.tabs. The close takes effect a frame
+//     later, and events and commands already queued for this frame index
+//     ws.tabs[ws.activeTab]. The dead pane's Term is closed now, though, so its
+//     pty, capture tee and recording are released without waiting for
+//     Workspace.Close (which an embedder is not required to call).
+//   - Window kept open (a cancelled "quit?" dialog, or a hook that opened a tab
+//     of its own): the dead tab is removed like any other closed tab. If it was
+//     the only one, removeTab replaces it with a fresh shell, so the window
+//     never sits on a frozen pane whose shell can no longer exit.
+//   - Dialog still open: go-gui's in-app dialogs are asynchronous, so a hook
+//     that asks "quit?" returns before the user answers. Deciding now would
+//     start a fresh shell behind the dialog, and a Save from its Yes button
+//     would then record that shell instead of the real tab. The decision waits
+//     in pendingExit until View sees the dialog gone.
+//
+// The hook runs only when no dialog is open. go-gui shows one dialog at a
+// time, so with one already up (About, an error) a hook that asks "quit?"
+// either returns early without asking or replaces that dialog, and the
+// workspace could not tell which dialog it then waits on. Instead the whole
+// exit waits in pendingExit, with the hook not yet run, until that dialog
+// closes; see settlePendingExit.
+//
+// With no hook there is nothing to wait for: the direct close opens no dialog,
+// so an unrelated open one does not delay it.
+func (ws *Workspace) exitLastShell(tab *tab, leafID string) {
+	if ws.cfg.OnLastShellExit == nil {
+		ws.w.Close()
+		ws.finishLastShellExit(tab, leafID)
+		return
+	}
+	if ws.w.DialogIsVisible() {
+		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID, hookPending: true}
+		return
+	}
+	ws.cfg.OnLastShellExit(ws.w)
+	// No dialog was open before the hook, so a visible one now is the hook's.
+	if !ws.w.CloseRequested() && ws.w.DialogIsVisible() {
+		ws.pendingExit = &lastShellExit{tab: tab, leafID: leafID}
+		return
+	}
+	ws.finishLastShellExit(tab, leafID)
+}
+
+// finishLastShellExit acts on the exit hook's outcome, read from the window's
+// close flag. See exitLastShell for both cases.
+func (ws *Workspace) finishLastShellExit(tab *tab, leafID string) {
+	if ws.w.CloseRequested() {
+		if tm, ok := tab.terms[leafID]; ok {
+			_ = tm.Close()
+		}
+		return
+	}
+	if i := slices.Index(ws.tabs, tab); i >= 0 {
+		ws.closeTabAt(i)
+	}
+}
+
+// settlePendingExit resumes a last-shell exit that was waiting on a dialog,
+// once that dialog has closed. When the dialog was the hook's own, the exit is
+// finished from the hook's outcome. When it was some other dialog, the hook has
+// not run yet, and runs now.
+//
+// It runs from View. That is enough because go-gui's DialogDismiss, which
+// every way of closing an in-app dialog goes through, marks the layout for a
+// rebuild and wakes the main loop (go-gui gui/view_dialog.go, DialogDismiss),
+// so View runs on the frame after any dialog closes. The work itself is
+// queued: it may run the hook, spawn a shell and change the tab list, which
+// View must not do while it builds the tree.
+func (ws *Workspace) settlePendingExit(w *gui.Window) {
+	p := ws.pendingExit
+	if p == nil || w.DialogIsVisible() {
+		return
+	}
+	ws.pendingExit = nil
+	w.QueueCommand(func(*gui.Window) { ws.resumePendingExit(p) })
+}
+
+// resumePendingExit is the queued half of settlePendingExit.
+//
+// When the hook has not run yet, the exit waited on a dialog it did not open,
+// for as long as the user left that dialog up. The workspace may have changed
+// meanwhile: Workspace.Close ran (Cmd+Q), the window close was requested, or a
+// new tab or split means this shell is no longer the last one. So the exit
+// goes through closePaneInTab again, which checks all of that, instead of
+// straight to the hook.
+func (ws *Workspace) resumePendingExit(p *lastShellExit) {
+	if p.hookPending {
+		if !slices.Contains(ws.tabs, p.tab) {
+			return // workspace closed, or the tab is gone
+		}
+		if _, ok := p.tab.terms[p.leafID]; !ok {
+			return // the dead pane was already closed
+		}
+		ws.closePaneInTab(p.tab, p.leafID)
+		return
+	}
+	ws.finishLastShellExit(p.tab, p.leafID)
+}
+
+// Close tears down all terminals and restores the original OnEvent.
+func (ws *Workspace) Close() error {
+	ws.w.OnEvent = ws.prevOnEvent
+	for _, tab := range ws.tabs {
+		tab.closeAll()
+	}
+	ws.tabs = nil
+	return nil
+}
+
+// LiveTermCount returns the number of terminal panes with a live shell
+// process across all tabs. Useful for confirm-before-quit prompts.
+func (ws *Workspace) LiveTermCount() int {
+	n := 0
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			if tm.Alive() {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// ActivePane returns the focused *term.Term, or nil.
+func (ws *Workspace) ActivePane() *term.Term {
+	tab := ws.activeTabPtr()
+	if tab == nil {
+		return nil
+	}
+	return tab.terms[tab.focused]
+}
+
+// blurAllPanes tells every pane in every tab that it is in the background.
+//
+// A Term that has never seen a focus event assumes it is on screen, which is
+// the right default for the standalone case but wrong for a workspace that
+// constructs many panes at once and focuses one of them. The rest would keep
+// gating their long-running-command notifications on a focus state that never
+// became false, and stay silent forever. Every incremental path — a split, a
+// new tab, a tab switch — already unfocuses the pane it moves away from; this
+// exists for the one path that has no "away from" to unfocus.
+//
+// SetFocused alone carries this: pane visibility and window focus are separate
+// inputs to the notification gate, and only the window half may reach the child
+// as a ?1004 report. Nothing here touches that half.
+func (ws *Workspace) blurAllPanes() {
+	for _, tab := range ws.tabs {
+		for _, t := range tab.terms {
+			setTermFocused(t, false)
+		}
+	}
+}
+
+// tight creates a ContainerCfg with all inherited spacing zeroed.
+func tight(sizing gui.Sizing) gui.ContainerCfg {
+	return gui.ContainerCfg{
+		Sizing:     sizing,
+		Padding:    gui.NoPadding,
+		Spacing:    gui.NoSpacing,
+		SizeBorder: gui.NoBorder,
+	}
+}
+
+// scrollGutter is the right padding a vertically scrollable container needs so
+// its scrollbar gets a lane of its own. go-gui draws the bar as an overlay on
+// the container's content box, so without a reserved gutter the thumb sits on
+// top of the right-most text — the palette's key column, the theme browser's
+// prose. Matches go-gui's own idiom (scroll_demo, showcase): bar size plus a
+// few pixels of breathing room.
+func scrollGutter() float32 {
+	return gui.CurrentTheme().ScrollbarStyle.Size + 5
+}
+
+// revealListRow scrolls a list overlay's container the minimum distance needed
+// to bring the row at idx into view, and does nothing when it is already there.
+//
+// Shared by both list overlays because the arithmetic is identical; only the
+// container, the geometry the last frame measured, and the inter-row gap
+// differ. Rows are laid out at a fixed height with a fixed gap, which is what
+// makes row N's offset exactly N*(rowH+gap) without querying the layout tree.
+// Zero rowH or listH means no frame has measured the list yet, and the reveal
+// no-ops.
+//
+// Offsets run from 0 (top) downward through negative values — the convention
+// every go-gui scrollable uses.
+func (ws *Workspace) revealListRow(scrollID string, idx int, rowH, listH, gap float32) {
+	if rowH <= 0 || listH <= 0 {
+		return
+	}
+	top := -ws.w.ScrollVerticalOffset(scrollID)
+	rowTop := float32(idx) * (rowH + gap)
+	switch rowBot := rowTop + rowH; {
+	case rowTop < top:
+		ws.w.ScrollVerticalTo(scrollID, -rowTop)
+	case rowBot > top+listH:
+		ws.w.ScrollVerticalTo(scrollID, -(rowBot - listH))
+	}
+}
+
+// overlayOwnsKeys reports whether a modal overlay — the command palette or the
+// theme browser — is up and has a text field the keyboard belongs to.
+//
+// It exists because a focused Term re-asserts go-gui focus from inside its own
+// View (see the SetFocus in term/widget.go), which happens on every layout
+// build. With a pane still focused, the rebuild that follows each keystroke
+// yanks focus off the overlay's filter box and back into the terminal — so the
+// box takes no input at all, and the characters go to the child shell instead.
+// The help overlay is not listed: it has no input, and the pane keeping focus
+// under it is what lets Escape and the pane's own keys keep working.
+func (ws *Workspace) overlayOwnsKeys() bool {
+	return ws.palette.visible || ws.browser.visible
+}
+
+// refresh updates the window title from the active tab's focused pane
+// and schedules a view rebuild. Call after any state change that affects
+// the title or layout. It also ensures the active pane has pane focus so
+// the invariant "active terminal always owns keyboard focus" holds regardless of
+// which code path triggered the refresh — except while an overlay owns the
+// keyboard, where the invariant is suspended for exactly as long as the
+// overlay is up.
+func (ws *Workspace) refresh() {
+	if tab := ws.activeTabPtr(); tab != nil {
+		ws.w.SetTitle(tab.windowTitle())
+		// Ensure the active pane owns keyboard focus. No-op when already
+		// correct — cheap atomic compare-and-swap.
+		if t, ok := tab.terms[tab.focused]; ok {
+			setTermFocused(t, !ws.overlayOwnsKeys())
+		}
+	}
+	// SetView wipes go-gui's whole state registry, including the per-input
+	// caret positions keyed by view ID. Doing that on every rebuild left every
+	// filter box inserting at position 0, since each keystroke rebuilt the view
+	// and threw the caret away — typing "dark" into the theme browser produced
+	// "krad". The generator only needs installing once; every rebuild after
+	// that is InvalidateLayout, which marks the layout dirty and leaves widget
+	// state alone.
+	if !ws.viewInstalled {
+		ws.viewInstalled = true
+		ws.w.SetView(ws.View)
+		return
+	}
+	ws.w.InvalidateLayout()
+}
+
+// View returns the workspace's go-gui view tree.
+func (ws *Workspace) View(w *gui.Window) gui.View {
+	ws.settlePendingExit(w)
+	ww, wh := w.WindowSize()
+	// Both bounds: activeTab is -1 for a beat while the last tab closes, and
+	// activeTabPtr already guards it on the same reasoning.
+	if ws.activeTab < 0 || ws.activeTab >= len(ws.tabs) {
+		return gui.Column(tight(gui.FillFill))
+	}
+	tab := ws.tabs[ws.activeTab]
+
+	// Thread the content-area pixel box into the split tree so each node
+	// can honor its flex Ratio. The tab bar (only present with 2+ tabs)
+	// consumes height above the panes.
+	contentW := float32(ww)
+	contentH := float32(wh)
+	if len(ws.tabs) > 1 {
+		contentH -= ws.tabBarHeight()
+	}
+	// The theme browser takes over the content area outright: a floating
+	// panel over a dimmed backdrop was the old picker, and the dimming is
+	// exactly what made a theme impossible to judge while choosing it. The
+	// panes are removed from the tree rather than covered, so no OnDraw runs
+	// for them and no PTY resize is published — reopening finds them
+	// unchanged.
+	var split gui.View
+	if ws.browser.visible {
+		split = ws.themeBrowserView(contentW, contentH)
+	} else {
+		split = ws.splitView(tab.root, tab, contentW, contentH)
+	}
+
+	outer := tight(gui.FixedFixed)
+	outer.Width = float32(ww)
+	outer.Height = float32(wh)
+	var content []gui.View
+	if len(ws.tabs) > 1 {
+		area := tight(gui.FillFill)
+		area.Content = []gui.View{split}
+		content = []gui.View{ws.tabBarView(), gui.Column(area)}
+	} else {
+		content = []gui.View{split}
+	}
+	// Appended before the overlays so a help panel draws over the pill
+	// rather than under it.
+	if tab.broadcast {
+		content = append(content, ws.broadcastPill())
+	}
+	if ws.helpVisible {
+		// Float children are excluded from normal flow, so the backdrop
+		// and panel overlay the panes without disturbing their layout.
+		content = append(content, ws.helpBackdrop(ww, wh), ws.helpPanel(ww, wh))
+	}
+	// The palette floats over everything else, help included: it is the thing
+	// with focus, and it is what the next keystroke belongs to.
+	if ws.palette.visible {
+		content = append(content, ws.paletteBackdrop(ww, wh), ws.palettePanel(ww, wh))
+	}
+	outer.Content = content
+	return gui.Column(outer)
+}
+
+// — theme picker overlay ————————————————————————————————————
+
+// activeThemeIdx returns the index of the currently-active theme within
+// cfg.Themes, or -1 when no theme is active or its name is not in the list.
+//
+// Keyed on the selected *name* rather than on the pane's Theme value: the
+// bundled corpus contains distinct themes with identical palettes, so a value
+// match can return an earlier entry that merely looks the same — which would
+// put the browser's checkmark on the wrong row and, through
+// persistableThemeName, save a theme the user never chose.
+func (ws *Workspace) activeThemeIdx() int {
+	if ws.cfg.opts.themeName == "" {
+		return -1
+	}
+	for i, nt := range ws.cfg.Themes {
+		if strings.EqualFold(nt.Name, ws.cfg.opts.themeName) {
+			return i
+		}
+	}
+	return -1
+}
+
+// applyThemeImpl sets the active theme pointer and calls SetTheme on every
+// pane across every tab. Does not refresh the window — callers that need a
+// refresh must call InvalidateLayout themselves.
+func (ws *Workspace) applyThemeImpl(nt term.NamedTheme) {
+	ws.cfg.opts.setTheme(nt)
+	for _, tab := range ws.tabs {
+		for _, tm := range tab.terms {
+			tm.SetTheme(nt.Theme)
+		}
+	}
+	// After the panes, before the caller's refresh: chrome and cells should
+	// change in the same frame, not one after the other.
+	ws.notifyColorScheme()
+}
+
+// applyThemeByName looks up name in the configured theme list
+// (case-insensitively) and applies the matched theme to all panes.
+// Returns false when no theme matches. It does not
+// call InvalidateLayout — callers that are already building the view
+// (restoreWorkspace, Restore zero-tab path) will trigger a refresh
+// themselves.
+func (ws *Workspace) applyThemeByName(name string) bool {
+	nt, ok := findTheme(ws.cfg.Themes, name)
+	if !ok {
+		return false
+	}
+	ws.applyThemeImpl(nt)
+	return true
+}
+
+// selectThemeByName makes the named theme effective without touching any pane,
+// for the restore path to call *before* it spawns them.
+//
+// The persisted theme is the user's last picker choice and usually names a
+// theme the config file does not. Panes are built from ws.cfg, so leaving it
+// until the trailing applyThemeByName means paneThemes never sees it and every
+// child is spawned with COLORFGBG for the config file's theme instead — cells
+// in one scheme, and a shell told the other, which is precisely the
+// disagreement COLORFGBG exists to settle and the one thing about a pane that
+// cannot be corrected after exec.
+//
+// Reports whether a theme matched, so the caller can tell "no such theme" from
+// "already right".
+func (ws *Workspace) selectThemeByName(name string) bool {
+	nt, ok := findTheme(ws.cfg.Themes, name)
+	if !ok {
+		return false
+	}
+	ws.cfg.opts.setTheme(nt)
+	// Chrome follows the theme the panes are about to be built with, not the
+	// config file's — otherwise a restore into a light theme paints dark
+	// chrome for one frame.
+	ws.notifyColorScheme()
+	return true
+}
+
+// —————————————————————————————————————————————————————————————
+
+// focusPaneInTab switches focus to the given leaf.
+func (ws *Workspace) focusPaneInTab(tab *tab, leafID string) {
+	if leafID == "" || leafID == tab.focused {
+		return
+	}
+	if prev, ok := tab.terms[tab.focused]; ok {
+		setTermFocused(prev, false)
+	}
+	tab.focused = leafID
+	if next, ok := tab.terms[leafID]; ok {
+		setTermFocused(next, true)
+	}
+	ws.refresh()
+}
+
+// onWindowEvent routes window-level focus events to the active pane.
+func (ws *Workspace) onWindowEvent(e *gui.Event, w *gui.Window) {
+	if e == nil {
+		return
+	}
+	if e.Type == gui.EventFocused || e.Type == gui.EventUnfocused {
+		if pane := ws.ActivePane(); pane != nil {
+			pane.HandleWindowEvent(e)
+		}
+	}
+	if ws.prevOnEvent != nil {
+		ws.prevOnEvent(e, w)
+	}
+}
+
+// tabBarPad is the horizontal inset, in logical pixels, between the window edges
+// and the first and last tab. The bar's panel color fills it. With a hidden
+// macOS titlebar the content view runs under the window outline and rounded
+// corners, so without this inset the first tab's background is drawn under
+// the frame. It matches the terminal's grid padding, so tab text and pane text
+// start at almost the same x. The inset is horizontal only: tabBarHeight
+// reports the bar height without it, and the pane area below uses that value.
+const tabBarPad float32 = 4
+
+// tabSeparatorGap is the space, in logical pixels, on each side of the 1px rule
+// between two tabs. The bar's panel color fills it, so the active tab's
+// background stops short of the rule and does not touch it.
+const tabSeparatorGap float32 = 2
+
+// tabBarView renders the tab bar. Only called when 2+ tabs exist.
+func (ws *Workspace) tabBarView() gui.View {
+	theme := gui.CurrentTheme()
+	buttons := make([]gui.View, 0, len(ws.tabs)*2)
+	for i, tab := range ws.tabs {
+		if i > 0 {
+			// Rectangle, not a thin Column: containers pick up the
+			// theme's padding and would inset the rule from the bar
+			// edges (see themeDivider).
+			buttons = append(buttons, gui.Rectangle(gui.RectangleCfg{
+				Sizing: gui.FixedFill,
+				Width:  1,
+				Color:  theme.ColorBorder,
+			}))
+		}
+		isActive := i == ws.activeTab
+		buttons = append(buttons, ws.tabButton(theme, tab, isActive, i))
+	}
+	bar := tight(gui.FillFit)
+	bar.Padding = gui.NewPadding(0, tabBarPad, 0, tabBarPad)
+	// Children alternate tab, rule, tab, so the child spacing is exactly the
+	// gap on each side of every rule.
+	bar.Spacing = gui.SpacingPx(tabSeparatorGap)
+	bar.Color = theme.ColorPanel
+	bar.Content = buttons
+	return gui.Row(bar)
+}
+
+// tabButton renders a single tab.
+func (ws *Workspace) tabButton(theme gui.Theme, tab *tab, isActive bool, idx int) gui.View {
+	bg := theme.ColorPanel
+	style := theme.TextStyleCodeSmall
+	if isActive {
+		bg = theme.ColorActive
+	} else {
+		style.Color = style.Color.WithOpacity(0.65)
+	}
+	title := tab.focusedTitle()
+	title = truncateTitle(title, 30)
+	inner := tight(gui.FillFit)
+	inner.Padding = gui.NewPadding(1, 6, 1, 6)
+	// The title, the activity marker and the close glyph have different line
+	// heights, so the row is as tall as the tallest of them. Without this the
+	// shorter ones sit on the row's top edge.
+	inner.VAlign = gui.VAlignMiddle
+
+	content := make([]gui.View, 0, 4)
+	// The activity marker leads the title. The active tab carries only its live
+	// OSC 7501 state; see tabGlyph.
+	if g := ws.tabGlyph(tab, isActive); g != "" {
+		markStyle := style
+		// Undimmed title color: an inactive tab's text is faded to 0.65, and
+		// the marker is the one thing on it that should catch the eye.
+		markStyle.Color = theme.TextStyleCodeSmall.Color
+		content = append(content, gui.Text(gui.TextCfg{
+			Text: g + " ", TextStyle: markStyle,
+		}))
+	}
+	content = append(content, gui.Text(gui.TextCfg{Text: title, TextStyle: style}))
+	// closeID names the "×" text shape so the hover handlers below can
+	// recolor it by ID without disturbing the title text.
+	closeID := tab.id + "-close"
+	if len(ws.tabs) > 1 {
+		// Fill spacer pushes × to the far right.
+		fill := tight(gui.FillFit)
+
+		// "×" is always laid out (reserving its slot avoids a reflow
+		// when it appears), but hidden on inactive tabs until the tab is
+		// hovered. The hover handlers mutate its color; the per-frame view
+		// rebuild restores these defaults when the pointer leaves, so no
+		// mouse-leave handling is needed.
+		closeColor := theme.ColorInterior // active tab: always visible
+		if !isActive {
+			closeColor = gui.Color{} // inactive: transparent until hovered
+		}
+
+		closeBtn := tight(gui.FitFit)
+		closeBtn.Padding = gui.NewPadding(0, 0, 0, 4)
+		closeBtn.OnClick = func(ctx gui.EventCtx) {
+			ws.closeTabAt(idx)
+		}
+		// Direct hover over × brightens it to the high-contrast title color.
+		closeBtn.OnHover = func(ctx gui.EventCtx) {
+			ctx.Window.SetMouseCursorPointingHand()
+			setTextColorByID(ctx.Layout, closeID, style.Color)
+		}
+		closeBtn.Content = []gui.View{
+			gui.Text(gui.TextCfg{
+				ID:        closeID,
+				Text:      "×",
+				TextStyle: gui.TextStyle{Color: closeColor, Size: style.Size},
+			}),
+		}
+		content = append(content, gui.Row(fill), gui.Column(closeBtn))
+	}
+	inner.Content = content
+
+	outer := tight(gui.FillFit)
+	outer.Color = bg
+	outer.VAlign = gui.VAlignMiddle
+	outer.OnClick = func(ctx gui.EventCtx) {
+		ws.activateTab(idx)
+	}
+	// Hovering anywhere on an inactive tab reveals a muted "×" — the title
+	// text color at reduced opacity, so it stays legible against the panel.
+	// The child closeBtn's own OnHover (above) takes over when the pointer
+	// is directly on the glyph, brightening it to full opacity.
+	if len(ws.tabs) > 1 && !isActive {
+		revealColor := theme.TextStyleCodeSmall.Color.WithOpacity(0.6)
+		outer.OnHover = func(ctx gui.EventCtx) {
+			setTextColorByID(ctx.Layout, closeID, revealColor)
+		}
+	}
+	outer.Content = []gui.View{gui.Row(inner)}
+	return gui.Column(outer)
+}
+
+// setTextColorByID recolors the text shape with the given ID found under
+// layout, depth-first. Returns true once recolored. Used by the tab hover
+// handlers to reveal/brighten the close "×" without touching the title.
+func setTextColorByID(layout *gui.Layout, id string, c gui.Color) bool {
+	if s := layout.Shape; s != nil && s.ID == id && s.TC != nil &&
+		s.TC.TextStyle != nil {
+		s.TC.TextStyle.Color = c
+		return true
+	}
+	for i := range layout.Children {
+		if setTextColorByID(&layout.Children[i], id, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// activateTab switches to the tab at idx.
+func (ws *Workspace) activateTab(idx int) {
+	if idx < 0 || idx >= len(ws.tabs) || idx == ws.activeTab {
+		return
+	}
+	if old := ws.activeTab; old >= 0 && old < len(ws.tabs) {
+		oldTab := ws.tabs[old]
+		if t, ok := oldTab.terms[oldTab.focused]; ok {
+			setTermFocused(t, false)
+		}
+	}
+	ws.activeTab = idx
+	tab := ws.tabs[idx]
+	// Whatever this tab was reporting, the user is now looking at it.
+	tab.clearActivity()
+	if t, ok := tab.terms[tab.focused]; ok {
+		setTermFocused(t, true)
+	}
+	ws.refresh()
+}
+
+// splitView renders a split tree into a box of boxW×boxH pixels, honoring
+// each node's flex Ratio. The first child of a split is sized Fixed along
+// the split axis (its ratio share, floored by ratioSplit); the second child
+// Fills the remainder so rounding never leaves a gap. Window resize re-runs
+// View with new dimensions, redistributing space proportionally.
+func (ws *Workspace) splitView(node *splitNode, tab *tab, boxW, boxH float32) gui.View {
+	if node.First != nil {
+		const borderPx = float32(1)
+		if node.Dir == splitVertical {
+			avail := boxW - borderPx
+			firstW := ratioSplit(avail, node.Ratio)
+			first := ws.splitView(node.First, tab, firstW, boxH)
+			second := ws.splitView(node.Second, tab, avail-firstW, boxH)
+
+			firstC := tight(gui.FixedFill)
+			firstC.Width = firstW
+			firstC.Content = []gui.View{first}
+			border := tight(gui.FixedFill)
+			border.Width = borderPx
+			border.Color = dividerColor(tab)
+			secondC := tight(gui.FillFill)
+			secondC.Content = []gui.View{second}
+
+			row := tight(gui.FillFill)
+			row.Content = []gui.View{gui.Column(firstC), gui.Column(border), gui.Column(secondC)}
+			return gui.Row(row)
+		}
+		avail := boxH - borderPx
+		firstH := ratioSplit(avail, node.Ratio)
+		first := ws.splitView(node.First, tab, boxW, firstH)
+		second := ws.splitView(node.Second, tab, boxW, avail-firstH)
+
+		firstC := tight(gui.FillFixed)
+		firstC.Height = firstH
+		firstC.Content = []gui.View{first}
+		border := tight(gui.FillFixed)
+		border.Height = borderPx
+		border.Color = dividerColor(tab)
+		secondC := tight(gui.FillFill)
+		secondC.Content = []gui.View{second}
+
+		col := tight(gui.FillFill)
+		col.Content = []gui.View{gui.Column(firstC), gui.Column(border), gui.Column(secondC)}
+		return gui.Column(col)
+	}
+	// Leaf: FillFill so the enclosing Fixed slot determines actual size.
+	// Focus ID ensures tab navigation reaches this pane.
+	tm, ok := tab.terms[node.LeafID]
+	if !ok {
+		return gui.Column(tight(gui.FillFill))
+	}
+	leaf := tight(gui.FillFill)
+	leaf.Content = []gui.View{tm.View(ws.w)}
+	return gui.Column(leaf)
+}
+
+// tabBarHeight estimates the pixel height the tab bar consumes: one line of
+// the tab text style plus the 1px top and bottom padding in tabButton. A
+// measurer that reports a non-finite or non-positive line height is ignored
+// so the content-area height can never be poisoned by a bad measurement.
+func (ws *Workspace) tabBarHeight() float32 {
+	style := gui.CurrentTheme().TextStyleCodeSmall
+	if tm := ws.w.TextMeasurer(); tm != nil {
+		if h := tm.FontHeight(style); h > 0 && !math.IsInf(float64(h), 1) {
+			return h + 2
+		}
+	}
+	if style.Size > 0 {
+		return style.Size + 2
+	}
+	return 18
+}
+
+// onPaneTitle is called from the Term's OnTitle callback (via
+// QueueCommand, so on the main thread). It refreshes the workspace
+// view so the tab bar and window title reflect the new title.
+func (ws *Workspace) onPaneTitle(leafID, title string) {
+	ws.refresh()
+}
+
+// truncateTitle returns title truncated to max runes, appending "..." if
+// truncation occurred. Walks the string once, counting runes and finding
+// the byte offset for truncation in a single pass.
+func truncateTitle(title string, max int) string {
+	keep := max - 3
+	if keep < 0 {
+		keep = 0
+	}
+	n := 0
+	cutAt := -1
+	for i := range title {
+		if n == keep {
+			cutAt = i
+		}
+		n++
+	}
+	if cutAt >= 0 && n > max {
+		return title[:cutAt] + "..."
+	}
+	return title
+}

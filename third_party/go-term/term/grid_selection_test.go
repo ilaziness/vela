@@ -1,0 +1,448 @@
+package term
+
+import "testing"
+
+func TestGrid_SelectedText_RowRange(t *testing.T) {
+	g := newGrid(3, 5)
+	for c, r := range "hello" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "world" {
+		g.At(1, c).Ch = r
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5} // boundary after col 4
+	g.SelActive = true
+	if got := g.SelectedText(); got != "hello\nworld" {
+		t.Errorf("got %q, want %q", got, "hello\nworld")
+	}
+}
+
+func TestGrid_SelectedText_TrailingBlankTrim(t *testing.T) {
+	g := newGrid(2, 8)
+	for c, r := range "abc" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "de" {
+		g.At(1, c).Ch = r
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 8} // boundary past end of row
+	g.SelActive = true
+
+	if got := g.SelectedText(); got != "abc\nde" {
+		t.Errorf("got %q, want %q", got, "abc\nde")
+	}
+}
+
+func TestGrid_SelectedText_ColumnRangeWithinRow(t *testing.T) {
+	g := newGrid(1, 10)
+	for c, r := range "abcdefghij" {
+		g.At(0, c).Ch = r
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 3}
+	g.SelHead = contentPos{Row: 0, Col: 7} // half-open: cols 3..6 → "defg"
+	g.SelActive = true
+	if got := g.SelectedText(); got != "defg" {
+		t.Errorf("got %q, want %q", got, "defg")
+	}
+}
+
+func TestGrid_SelectedText_BackwardDragNormalized(t *testing.T) {
+	g := newGrid(2, 4)
+	for c, r := range "ab" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "cd" {
+		g.At(1, c).Ch = r
+	}
+
+	g.SelAnchor = contentPos{Row: 1, Col: 2} // boundary past col 1
+	g.SelHead = contentPos{Row: 0, Col: 0}
+	g.SelActive = true
+	if got := g.SelectedText(); got != "ab\ncd" {
+		t.Errorf("got %q, want %q", got, "ab\ncd")
+	}
+}
+
+func TestGrid_SelectedText_InactiveOrEmpty(t *testing.T) {
+	g := newGrid(1, 3)
+	if got := g.SelectedText(); got != "" {
+		t.Errorf("inactive selection returned %q", got)
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 1}
+	g.SelHead = contentPos{Row: 0, Col: 1}
+	g.SelActive = true
+	if got := g.SelectedText(); got != "" {
+		t.Errorf("zero-width selection returned %q", got)
+	}
+}
+
+func TestGrid_SelectedText_AcrossScrollbackBoundary(t *testing.T) {
+	g := newGrid(2, 3)
+	g.ScrollbackCap = 5
+
+	for c, r := range "abc" {
+		g.At(0, c).Ch = r
+	}
+	g.scrollUpRegion(1)
+
+	for c, r := range "xyz" {
+		g.At(0, c).Ch = r
+	}
+
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 3} // boundary past end of row
+	g.SelActive = true
+	if got := g.SelectedText(); got != "abc\nxyz" {
+		t.Errorf("ViewOffset=0: got %q, want %q", got, "abc\nxyz")
+	}
+
+	g.ViewOffset = 1
+	if got := g.SelectedText(); got != "abc\nxyz" {
+		t.Errorf("ViewOffset=1: got %q, want %q", got, "abc\nxyz")
+	}
+}
+
+func TestGrid_SelectedText_ClampsOutOfRangeCoords(t *testing.T) {
+
+	g := newGrid(2, 3)
+	for c, r := range "abc" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "xyz" {
+		g.At(1, c).Ch = r
+	}
+	g.SelAnchor = contentPos{Row: -10, Col: -10}
+	g.SelHead = contentPos{Row: 99, Col: 99}
+	g.SelActive = true
+	got := g.SelectedText()
+	if got != "abc\nxyz" {
+		t.Errorf("got %q, want %q", got, "abc\nxyz")
+	}
+}
+
+func TestGrid_SelectedText_RowWithEmptySpan(t *testing.T) {
+
+	g := newGrid(1, 3)
+	g.At(0, 0).Ch = 'a'
+	g.At(0, 1).Ch = 'b'
+	g.At(0, 2).Ch = 'c'
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 0, Col: 3} // boundary past end of row
+	g.SelActive = true
+	if got := g.SelectedText(); got != "abc" {
+		t.Errorf("baseline: got %q want %q", got, "abc")
+	}
+}
+
+func TestGrid_SelectedText_ContentCoords_IndependentOfViewOffset(t *testing.T) {
+
+	g := newGrid(2, 3)
+	g.ScrollbackCap = 5
+	for c, ch := range "abc" {
+		g.At(0, c).Ch = ch
+	}
+	g.scrollUpRegion(1)
+	for c, ch := range "xyz" {
+		g.At(0, c).Ch = ch
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 3} // boundary past end of row
+	g.SelActive = true
+
+	for _, off := range []int{0, 1} {
+		g.ViewOffset = off
+		if got := g.SelectedText(); got != "abc\nxyz" {
+			t.Errorf("ViewOffset=%d: got %q, want %q", off, got, "abc\nxyz")
+		}
+	}
+}
+
+func TestSelectedTextWide(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	g.SelActive = true
+	g.SelAnchor = contentPos{0, 0}
+	g.SelHead = contentPos{0, 1}
+
+	text := g.SelectedText()
+	if text != "🍣" {
+		t.Errorf("expected SelectedText to be '🍣', but got %q (hex: %x)", text, text)
+	}
+}
+
+func TestSelectedText_ContinuationCellOnly(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // (0,0) and (0,1)
+
+	// Select only the continuation cell
+	g.SelActive = true
+	g.SelAnchor = contentPos{0, 1}
+	g.SelHead = contentPos{0, 1}
+
+	text := g.SelectedText()
+	if text != "" {
+		t.Errorf("expected empty text for continuation-only selection, got %q", text)
+	}
+}
+
+// blockGrid builds a grid from row strings, for the rectangular-selection
+// tests below.
+func blockGrid(cols int, rows ...string) *grid {
+	g := newGrid(len(rows), cols)
+	for r, s := range rows {
+		for c, ch := range s {
+			if c >= cols {
+				break
+			}
+			g.At(r, c).Ch = ch
+		}
+	}
+	return g
+}
+
+// A block selection takes the same column band from every row it spans —
+// the point of Alt+drag, and what makes copying one column out of `ls -l`
+// work.
+func TestGrid_SelectedText_Block(t *testing.T) {
+	g := blockGrid(10, "abcdefghij", "klmnopqrst", "uvwxyzABCD")
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 2, Col: 5} // boundary: cells 2..4
+	g.SelActive = true
+	if got, want := g.SelectedText(), "cde\nmno\nwxy"; got != want {
+		t.Errorf("block SelectedText() = %q, want %q", got, want)
+	}
+}
+
+// Dragging up-left must select the same rectangle as dragging down-right:
+// the band is derived from the two boundary columns, not from which one the
+// gesture happened to touch first.
+func TestGrid_SelectedText_BlockReversed(t *testing.T) {
+	g := blockGrid(10, "abcdefghij", "klmnopqrst", "uvwxyzABCD")
+	g.SelMode = selBlock
+	g.SelActive = true
+	const want = "cde\nmno\nwxy"
+
+	dirs := []struct {
+		name         string
+		anchor, head contentPos
+	}{
+		{"down-right", contentPos{0, 2}, contentPos{2, 5}},
+		{"up-left", contentPos{2, 5}, contentPos{0, 2}},
+		{"down-left", contentPos{0, 5}, contentPos{2, 2}},
+		{"up-right", contentPos{2, 2}, contentPos{0, 5}},
+	}
+	for _, d := range dirs {
+		g.SelAnchor, g.SelHead = d.anchor, d.head
+		if got := g.SelectedText(); got != want {
+			t.Errorf("%s drag: SelectedText() = %q, want %q", d.name, got, want)
+		}
+	}
+}
+
+// Trailing blanks are trimmed per row in a block just as in a linear
+// selection, so a ragged column does not come out padded with spaces.
+func TestGrid_SelectedText_BlockTrimsPerRow(t *testing.T) {
+	g := blockGrid(10, "abcdef", "gh", "ijklmn")
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 2}
+	g.SelHead = contentPos{Row: 2, Col: 6}
+	g.SelActive = true
+	// Row 1 has nothing at columns 2..5, so it contributes an empty line
+	// rather than four spaces.
+	if got, want := g.SelectedText(), "cdef\n\nklmn"; got != want {
+		t.Errorf("block SelectedText() = %q, want %q", got, want)
+	}
+}
+
+// A zero-width band selects nothing at all — not one empty line per row it
+// spans, which is what a naive per-row loop would emit.
+func TestGrid_SelectedText_BlockZeroWidth(t *testing.T) {
+	g := blockGrid(10, "abcdefghij", "klmnopqrst", "uvwxyzABCD")
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 4}
+	g.SelHead = contentPos{Row: 2, Col: 4}
+	g.SelActive = true
+	if got := g.SelectedText(); got != "" {
+		t.Errorf("zero-width block SelectedText() = %q, want empty", got)
+	}
+}
+
+// selRowSpan is shared by the copy path and the render path; this pins the
+// geometry both of them inherit.
+func TestSelRowSpan(t *testing.T) {
+	g := newGrid(3, 10)
+	s, e := contentPos{Row: 0, Col: 2}, contentPos{Row: 2, Col: 5}
+
+	t.Run("linear", func(t *testing.T) {
+		want := [][2]int{{2, 9}, {0, 9}, {0, 4}} // first row, middle, last row
+		for r := range 3 {
+			c0, c1, ok := g.selRowSpan(r, s, e)
+			if !ok || c0 != want[r][0] || c1 != want[r][1] {
+				t.Errorf("row %d: %d..%d ok=%v, want %d..%d",
+					r, c0, c1, ok, want[r][0], want[r][1])
+			}
+		}
+	})
+
+	t.Run("block", func(t *testing.T) {
+		g.SelMode = selBlock
+		for r := range 3 {
+			c0, c1, ok := g.selRowSpan(r, s, e)
+			if !ok || c0 != 2 || c1 != 4 {
+				t.Errorf("row %d: %d..%d ok=%v, want 2..4 on every row",
+					r, c0, c1, ok)
+			}
+		}
+	})
+}
+
+// ClearSelection must drop the mode too: a stale selBlock would make the next
+// ordinary drag paint a rectangle.
+func TestClearSelection_ResetsMode(t *testing.T) {
+	g := newGrid(3, 10)
+	g.SelMode = selBlock
+	g.SelActive = true
+	g.ClearSelection()
+	if g.SelMode != selChar {
+		t.Errorf("SelMode = %v after ClearSelection, want selChar", g.SelMode)
+	}
+}
+
+// Soft-wrapped rows are one logical line: a linear selection joins
+// them instead of splitting the copy with a newline.
+func TestGrid_SelectedText_SoftWrapJoins(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcde" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "fghij" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got := g.SelectedText(); got != "abcdefghij" {
+		t.Errorf("got %q, want %q", got, "abcdefghij")
+	}
+}
+
+// A blank that lands on the last cell before a soft wrap is real text:
+// the join keeps it rather than fusing the two words.
+func TestGrid_SelectedText_SoftWrapKeepsBlankAtMargin(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcd " {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "efg" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcd efg"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// Block selections keep every row broken across a soft wrap: the
+// rectangle is the unit, not the logical line.
+func TestGrid_SelectedText_BlockKeepsRowBreaksAcrossWrap(t *testing.T) {
+	g := newGrid(2, 5)
+	for c, r := range "abcde" {
+		g.At(0, c).Ch = r
+	}
+	for c, r := range "fghij" {
+		g.At(1, c).Ch = r
+	}
+	g.RowWrapped[0] = true
+	g.SelMode = selBlock
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 5}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcde\nfghij"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// On the alt screen, Shift+PageUp shows main-screen history, and a selection
+// dragged over it must copy what it highlights. The copy used to clamp every
+// row to the alt screen, so the highlighted history text was dropped.
+func TestGrid_SelectedText_AltCopiesVisibleHistory(t *testing.T) {
+	g := newGrid(2, 3)
+	g.ScrollbackCap = 10
+	for c, r := range "OLD" {
+		g.At(0, c).Ch = r
+	}
+	g.scrollUpRegion(1)
+	g.EnterAlt()
+	if g.Scrollback.Len() != 1 {
+		t.Fatalf("setup: scrollback len=%d, want 1", g.Scrollback.Len())
+	}
+	for c, r := range "XY" {
+		g.At(0, c).Ch = r
+	}
+	g.ScrollView(1) // Shift+PageUp: history row 0 is now on screen.
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 3}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "OLD\nXY"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A main-screen selection must not survive into the alt screen: with no
+// alt-screen clamp in SelectedText, EnterAlt clearing it is what keeps stale
+// history out of an alt-screen copy.
+func TestGrid_EnterAltClearsSelection(t *testing.T) {
+	g := newGrid(2, 3)
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 3}
+	g.SelActive = true
+	g.EnterAlt()
+	if g.SelActive {
+		t.Error("selection still active after EnterAlt")
+	}
+}
+
+// A wide glyph that does not fit in the last column wraps early and leaves a
+// blank there. Copying across that soft wrap must not keep the blank, or a
+// CJK word is split by a space that was never typed.
+func TestGrid_SelectedText_WideWrapPadSkipped(t *testing.T) {
+	g := newGrid(2, 5)
+	for _, r := range "你好世界" {
+		g.Put(r)
+	}
+	// 你好 fills cols 0..3, 世 does not fit in col 4 and wraps.
+	if !g.RowWrapped[0] {
+		t.Fatal("setup: row 0 should be soft-wrapped")
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 4}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "你好世界"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A real space that ends a full row stays in the copy: only the wrap pad is
+// skipped, not every blank before a wrap.
+func TestGrid_SelectedText_RealSpaceBeforeWideWrapKept(t *testing.T) {
+	g := newGrid(2, 5)
+	for _, r := range "abcd 世" {
+		g.Put(r)
+	}
+	g.SelAnchor = contentPos{Row: 0, Col: 0}
+	g.SelHead = contentPos{Row: 1, Col: 2}
+	g.SelActive = true
+	if got, want := g.SelectedText(), "abcd 世"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

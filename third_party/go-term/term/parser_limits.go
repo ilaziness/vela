@@ -1,0 +1,173 @@
+package term
+
+// maxOSCBytes caps the OSC payload size so a malicious or runaway
+// stream can't grow p.osc without bound. Real titles are tiny;
+// anything beyond this is truncated and the rest of the OSC is
+// silently swallowed up to its terminator.
+const maxOSCBytes = 4096
+
+// maxOSC1337Bytes is the enlarged cap for OSC 1337 (iTerm2 inline images
+// and File= transfers). Payloads are base64-encoded so a 50 KB PNG becomes
+// ~67 KB on the wire; 32 MiB leaves room for real file downloads (~24 MiB
+// of file data) while keeping a runaway stream bounded. Exceeding it sets
+// p.oscTrunc, which drops the sequence outright rather than handing a
+// truncated payload to the decoder.
+const maxOSC1337Bytes = 32 << 20
+
+// maxOSC52Bytes is the enlarged cap for OSC 52 clipboard writes. The payload is
+// base64, so the generic 4 KB OSC cap stopped a copy at about 3 KB of text —
+// one screen of code yanked in nvim or tmux over ssh. 8 MiB of base64 is 6 MiB
+// of text, beyond any selection a person copies, while still bounding a runaway
+// stream. Like OSC 1337, a payload over the cap sets p.oscTrunc and is dropped:
+// half a copy on the clipboard is worse than none, because it gets pasted
+// without anyone noticing.
+const maxOSC52Bytes = 8 << 20
+
+// maxDCSBytes caps DCS payloads, which in practice means Sixel frames.
+// Sixel costs roughly 1.7 bytes per pixel at photographic densities
+// (measured: chafa 1.18 emits 1.6 MB for a 1200×800 image), so the old
+// 1 MiB cap truncated any full-window picture — `chafa shot.png` in a
+// 160×45 pane rendered as the top half of the image. The decoder rejects
+// frames beyond maxSixelWidth×maxSixelHeight, and 4096×4096 at that
+// density is ~28 MB, so 32 MiB clears the largest frame the decoder will
+// accept from a real encoder. (Sixel has no upper bound on bytes per
+// pixel — a stream that re-selects a color register between every pixel
+// can still be cut short — but that is a synthetic shape, not one an
+// encoder produces.) Matches the OSC 1337 limit.
+const maxDCSBytes = 32 << 20
+
+// maxDCSRetain bounds the DCS buffer kept between sequences. A sixel frame
+// can grow p.dcs to maxDCSBytes; keeping that array alive would pin tens of
+// MB per pane for the session, while dropping it after every frame would
+// re-allocate on each frame of a sixel animation. Retaining up to 4 MiB
+// covers ordinary frames (a full-window chafa image is ~1.6 MB) and releases
+// only the outliers.
+const maxDCSRetain = 4 << 20
+
+// maxAPCBytes caps a single APC escape payload. Kitty Graphics Protocol
+// recommends ≤4096 base64 chars per chunk (~3 KB decoded); 8 KB is plenty.
+const maxAPCBytes = 8192
+
+// maxKittyImageBytes caps the assembled (pre-decode) base64 text for a single
+// KGP image across all chunks. Raw RGBA costs 4 bytes per pixel and base64
+// inflates that by 4/3, so the old 4 MiB cap stopped at ~786k pixels — an
+// image only ~1000×786, which `chafa -f kitty` exceeds at around 100 columns.
+// Past the cap the tail chunks were dropped and the truncated buffer failed to
+// decode, so the picture simply never appeared. 32 MiB covers ~6.3M pixels
+// (about 2900×2200 RGBA), beyond any full-window image at realistic cell
+// sizes, and matches the sixel (maxDCSBytes) and iTerm2 (maxOSC1337Bytes)
+// limits. Raw transmissions that declare dimensions past the decoder's
+// maxSixelWidth×maxSixelHeight ceiling are rejected on the opening chunk, so
+// this cap is only ever reached by a stream sending more than it declared.
+const maxKittyImageBytes = 32 << 20
+
+// maxKittyPendingBytes caps the base64 buffered across *all* in-flight KGP
+// transmissions. Without it maxKittyPendingChunks abandoned transfers could
+// each hold maxKittyImageBytes — 2 GiB of live buffers per pane. 64 MiB lets
+// one full-size image through with room for the ordinary case of a few small
+// concurrent transfers, which is the only shape real clients produce.
+const maxKittyPendingBytes = 64 << 20
+
+// maxKittyPendingChunks caps concurrent in-flight KGP chunked transmissions
+// (m=1 sequences that have not yet received a finalising m=0). Bounds
+// kittyChunks growth from a stream that opens many IDs and never closes them.
+const maxKittyPendingChunks = 64
+
+// maxKittyStoreEntries caps the off-screen image store. When full, all
+// stored images are evicted and their temp files removed before adding the
+// new entry, bounding both memory and disk usage.
+const maxKittyStoreEntries = 256
+
+// da1Reply is the Primary Device Attribute response: VT100 with advanced
+// video (1;2) plus Sixel graphics (extension 4). Apps like fish probe with
+// CSI c at startup and stall briefly waiting for it; sixel-aware apps and
+// ucs-detect read extension 4 to confirm Sixel support (term has a decoder).
+var da1Reply = []byte("\x1b[?1;2;4c")
+
+// da2Reply is the Secondary Device Attribute response: no terminal
+// version, firmware version, or hardware options.
+var da2Reply = []byte("\x1b[>0;0;0c")
+
+// xtversionReply answers XTVERSION (CSI > q): DCS > | name version ST.
+// blessed/ucs-detect split the text at its first space into name + version
+// (tmux's form), so a name must not contain one. parser.SetIdentity swaps
+// in the embedder's name (spaces turned to '-') and version.
+var xtversionReply = []byte(xtversionPrefix + "go-term " + termVersion + xtversionSuffix)
+
+// maxXTVersionField caps the embedder name and version in the XTVERSION reply,
+// each. A child can repeat the query freely, so the reply must stay short
+// whatever string the embedder passed; real names and versions fit easily.
+const maxXTVersionField = 64
+
+// xtversionPrefix and xtversionSuffix frame the XTVERSION reply text.
+const (
+	xtversionPrefix = "\x1bP>|"
+	xtversionSuffix = "\x1b\\"
+)
+
+// termVersion is the advertised software version (XTVERSION). Bump on release.
+const termVersion = "0.1"
+
+// maxCSIParams caps the SGR/CSI parameter list to bound memory use against
+// pathological streams like "\x1b[1;1;1;...m".
+const maxCSIParams = 32
+
+// maxCSIParamValue caps a single accumulated parameter so a digit-only
+// run "\x1b[99999...9m" can't overflow int. Real terminals never need
+// values above this.
+const maxCSIParamValue = 1 << 20
+
+// maxTitleStack caps the XTWINOPS title stack, matching xterm's limit. Pushes
+// past the cap are dropped rather than evicting the oldest entry: an app that
+// pushes without popping is misbehaving, and dropping keeps the *first* title
+// (the shell's) recoverable.
+const maxTitleStack = 10
+
+// maxTitleBytes caps one OSC 0/1/2 window title. maxOSCBytes already bounds
+// the payload the parser will buffer, but 4 KB of title still reaches the
+// platform title bar and an embedder's tab strip, neither of which is a
+// terminal and neither of which is sized for it. A real title is a path and
+// a command name; 512 bytes is several of those. Truncation is on a rune
+// boundary (truncatePaste), so the tail is never a split UTF-8 sequence.
+const maxTitleBytes = 512
+
+// maxXTGETTCAPParts caps the number of capability names in one XTGETTCAP
+// query so a pathological DCS (4096 semicolons) can't force a large
+// allocation or iteration. Real apps query 1–3 caps at a time.
+const maxXTGETTCAPParts = 32
+
+// maxXTGETTCAPNameLen caps one hex-encoded capability name in an XTGETTCAP
+// query. Real names are a few bytes ("TN", "setaf"); anything longer is
+// hostile, and echoing it back in the 0+r failure reply would turn the
+// query into a reflection amplifier.
+const maxXTGETTCAPNameLen = 64
+
+// OSC 7501 (program status) limits, taken from the protocol's own table. Each
+// is a hard cap on one report: a report that breaks any of them is discarded
+// whole, so a hostile program cannot grow the record store or make the parser
+// decode megabytes of base64.
+const (
+	// maxStatusSeqBytes caps the whole sequence, OSC through ST. The largest
+	// legal report is under 3300 bytes.
+	maxStatusSeqBytes = 4096
+	// maxStatusKeyBytes caps one key name.
+	maxStatusKeyBytes = 16
+	// maxStatusMsgEncoded / maxStatusMsgDecoded cap msg. The encoded size is
+	// checked before decoding, so the decode itself is bounded.
+	maxStatusMsgEncoded = 2732
+	maxStatusMsgDecoded = 2048
+	// maxStatusTitleEncoded / maxStatusTitleDecoded cap title.
+	maxStatusTitleEncoded = 256
+	maxStatusTitleDecoded = 192
+	// maxStatusAppBytes caps app.
+	maxStatusAppBytes = 32
+	// maxStatusIDBytes, maxStatusIDSegment and maxStatusIDDepth cap id: total
+	// length, one "/"-separated segment, and the number of segments.
+	maxStatusIDBytes   = 128
+	maxStatusIDSegment = 32
+	maxStatusIDDepth   = 8
+	// maxStatusRecords caps the records one terminal holds (the protocol's
+	// ceiling; it requires at least 64). Past it the least recently updated
+	// record is evicted.
+	maxStatusRecords = 256
+)

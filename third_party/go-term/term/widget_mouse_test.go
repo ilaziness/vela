@@ -1,0 +1,2018 @@
+package term
+
+import (
+	"math"
+	"strings"
+	"testing"
+
+	"github.com/go-gui-org/go-gui/gui"
+)
+
+// ---------------------------------------------------------------------------
+// posToCell
+// ---------------------------------------------------------------------------
+
+func TestPosToCell_Basic(t *testing.T) {
+	tm, _ := newMouseTerm(24, 80)
+	r, c := tm.posToCell(15, 25)
+	if r != 1 || c != 1 {
+		t.Fatalf("got (%d,%d), want (1,1)", r, c)
+	}
+}
+
+func TestPosToCell_ClampedToBounds(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	r, c := tm.posToCell(-5, -5)
+	if r != 0 || c != 0 {
+		t.Fatalf("negative input: got (%d,%d), want (0,0)", r, c)
+	}
+	r, c = tm.posToCell(9999, 9999)
+	if r != 3 || c != 7 {
+		t.Fatalf("overflow input: got (%d,%d), want (3,7)", r, c)
+	}
+}
+
+// TestPosToCell_SubPixelScroll verifies the pixel→row inversion accounts for
+// ViewSubPx. When smooth-scrolled the renderer shifts each visible row down by
+// ViewSubPx, so row r spans [r*cellH+ViewSubPx, (r+1)*cellH+ViewSubPx). A click
+// in the bottom sliver of a row (past the next cell boundary but before the
+// shifted next row starts) must still map to that row, not the one below.
+func TestPosToCell_SubPixelScroll(t *testing.T) {
+	tm, _ := newMouseTerm(24, 80) // cellH = 20
+	tm.grid.ViewSubPx = 8
+	// Row 0 band is [8, 28). y=25 is past the cellH=20 boundary but still in
+	// row 0's shifted band. Pre-fix int(25/20)=1 selected the wrong row.
+	if r, _ := tm.posToCell(5, 25); r != 0 {
+		t.Fatalf("y=25 with ViewSubPx=8: got row %d, want 0", r)
+	}
+	// Row 1 band is [28, 48). y=30 must map to row 1.
+	if r, _ := tm.posToCell(5, 30); r != 1 {
+		t.Fatalf("y=30 with ViewSubPx=8: got row %d, want 1", r)
+	}
+}
+
+func TestPosToCell_ZeroCellMetrics(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8), cellW: 0, cellH: 0}
+	r, c := tm.posToCell(50, 100)
+	if r != 0 || c != 0 {
+		t.Fatalf("zero metrics: got (%d,%d), want (0,0)", r, c)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// posToSelCol
+// ---------------------------------------------------------------------------
+
+func TestPosToSelCol_Basic(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellW=10
+	// x=5  → 5/10=0.5 → floor(1.0)=1 (boundary after cell 0)
+	if got := tm.posToSelCol(5); got != 1 {
+		t.Errorf("x=5: got %d, want 1", got)
+	}
+	// x=14 → 14/10=1.4 → floor(1.9)=1 (still in cell 1)
+	if got := tm.posToSelCol(14); got != 1 {
+		t.Errorf("x=14: got %d, want 1", got)
+	}
+	// x=15 → 15/10=1.5 → floor(2.0)=2 (tie rounds up)
+	if got := tm.posToSelCol(15); got != 2 {
+		t.Errorf("x=15: got %d, want 2", got)
+	}
+}
+
+func TestPosToSelCol_ZeroCellW(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8), cellW: 0, cellH: 20}
+	if got := tm.posToSelCol(50); got != 0 {
+		t.Errorf("zero cellW: got %d, want 0", got)
+	}
+}
+
+func TestPosToSelCol_NegativeCellW(t *testing.T) {
+	tm := &Term{grid: newGrid(4, 8), cellW: -1, cellH: 20}
+	if got := tm.posToSelCol(50); got != 0 {
+		t.Errorf("negative cellW: got %d, want 0", got)
+	}
+}
+
+func TestPosToSelCol_ClampedToBounds(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellW=10, Cols=8
+	if got := tm.posToSelCol(-50); got != 0 {
+		t.Errorf("negative x: got %d, want 0", got)
+	}
+	if got := tm.posToSelCol(999); got != 8 {
+		t.Errorf("overflow x: got %d, want 8", got)
+	}
+}
+
+func TestPosToSelCol_NaNInf(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.posToSelCol(float32(math.NaN())); got != 0 {
+		t.Errorf("NaN: got %d, want 0", got)
+	}
+	if got := tm.posToSelCol(float32(math.Inf(1))); got != 0 {
+		t.Errorf("+Inf: got %d, want 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// onClick
+// ---------------------------------------------------------------------------
+
+func TestOnClick_LeftButtonSelectionAnchor(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	// MouseX=15 is the center of cell 1 (cellW=10); nearest boundary is 2.
+	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if !tm.mouse.dragging || tm.mouse.dragReport {
+		t.Error("expected local drag, not report drag")
+	}
+	if !e.IsHandled {
+		t.Error("event should be handled")
+	}
+	if len(*buf) != 0 {
+		t.Errorf("expected no pty output, got %q", *buf)
+	}
+	func() {
+		tm.grid.Mu.Lock()
+		defer tm.grid.Mu.Unlock()
+		if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 2}) {
+			t.Errorf("SelAnchor = %v, want {Row:1 Col:2}", tm.grid.SelAnchor)
+		}
+	}()
+}
+
+func TestOnClick_RightButtonNoSelection(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseRight}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if e.IsHandled {
+		t.Error("right button without reporting should not be handled")
+	}
+	if len(*buf) != 0 {
+		t.Errorf("expected no output, got %q", *buf)
+	}
+}
+
+func TestOnClick_SGRLeftPress(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{
+		MouseX: 15, MouseY: 25,
+		MouseButton: gui.MouseLeft,
+	}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	if !strings.HasPrefix(got, "\x1b[<0;2;2M") {
+		t.Errorf("got %q, want \\x1b[<0;2;2M", got)
+	}
+	if !tm.mouse.dragging || !tm.mouse.dragReport {
+		t.Error("expected SGR drag tracking")
+	}
+	if !e.IsHandled {
+		t.Error("event should be handled")
+	}
+}
+
+func TestOnClick_SGRWithModifiers(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{
+		MouseX: 15, MouseY: 25,
+		MouseButton: gui.MouseLeft,
+		Modifiers:   gui.ModShift | gui.ModCtrl,
+	}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// shift=4, ctrl=16, base=0 → cb=20
+	if !strings.HasPrefix(got, "\x1b[<20;2;2M") {
+		t.Errorf("got %q, want \\x1b[<20;2;2M", got)
+	}
+}
+
+func TestOnClick_UnsupportedButton(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{
+		MouseX: 15, MouseY: 25,
+		MouseButton: gui.MouseInvalid,
+	}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if len(*buf) != 0 {
+		t.Errorf("expected no output for unsupported button, got %q", *buf)
+	}
+	if tm.mouse.dragging {
+		t.Error("should not enter drag for unsupported button")
+	}
+}
+
+func TestOnClick_OnClickFocusCallbackFires(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	called := false
+	tm.cfg.OnClickFocus = func() { called = true }
+	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if !called {
+		t.Error("OnClickFocus callback was not called")
+	}
+}
+
+func TestOnClick_NilOnClickFocusNoPanic(t *testing.T) {
+	// Every existing onClick test already exercises this path;
+	// this test makes the nil-safety explicit.
+	tm, _ := newMouseTerm(4, 8)
+	e := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	// Should not panic.
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+}
+
+// ---------------------------------------------------------------------------
+// onMouseMove
+// ---------------------------------------------------------------------------
+
+func TestOnMouseMove_SelectionExtend(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	// Set up anchor at (0,0), start dragging.
+	tm.grid.Mu.Lock()
+	tm.grid.SelAnchor = contentPos{Row: 0, Col: 0}
+	tm.grid.SelHead = contentPos{Row: 0, Col: 0}
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = false
+	// Move to row 3 (65/20=3); MouseX=55 is the center of cell 5, nearest
+	// boundary 6.
+	e := &gui.Event{MouseX: 55, MouseY: 65}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if len(*buf) != 0 {
+		t.Errorf("local drag should not write to pty, got %q", *buf)
+	}
+	func() {
+		tm.grid.Mu.Lock()
+		defer tm.grid.Mu.Unlock()
+		if tm.grid.SelHead != (contentPos{Row: 3, Col: 6}) {
+			t.Errorf("SelHead = %v, want col=6", tm.grid.SelHead)
+		}
+		if !tm.grid.SelActive {
+			t.Error("selection should be active after extend")
+		}
+	}()
+}
+
+// TestOnMouseMove_SingleCharSelect is the regression guard for the boundary
+// selection model: pressing on a character and dragging one cell to the right
+// must select exactly that one character, not two. With cell-index inclusive
+// selection this returned "ab".
+func TestOnMouseMove_SingleCharSelect(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellW=10, cellH=20
+	tm.grid.Mu.Lock()
+	tm.grid.Cells[0].Ch = 'a'
+	tm.grid.Cells[1].Ch = 'b'
+	tm.grid.Mu.Unlock()
+
+	// Press near the left edge of cell 0 → boundary 0.
+	down := &gui.Event{MouseX: 2, MouseY: 5, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: down, Window: &gui.Window{}})
+	// Drag to the left part of cell 1 → boundary 1. Half-open [0,1) = cell 0.
+	move := &gui.Event{MouseX: 12, MouseY: 5}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: move, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	got := tm.grid.SelectedText()
+	tm.grid.Mu.Unlock()
+	if got != "a" {
+		t.Errorf("one-cell drag selected %q, want %q", got, "a")
+	}
+}
+
+func TestOnMouseMove_AutoScrollUp(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.SelAnchor = contentPos{Row: 0, Col: 0}
+	tm.grid.SelHead = contentPos{Row: 0, Col: 0}
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	// Mouse above widget → negative Y triggers auto-scroll up.
+	e := &gui.Event{MouseX: 10, MouseY: -10}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if tm.autoScrollDir.Load() != 1 {
+		t.Errorf("autoScrollDir = %d, want 1", tm.autoScrollDir.Load())
+	}
+}
+
+func TestOnMouseMove_CancelMomentum(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.momentum.mu.Lock()
+	tm.momentum.coasting = true
+	tm.momentum.vel = 100
+	tm.momentum.mu.Unlock()
+	e := &gui.Event{MouseX: 10, MouseY: 10}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	tm.momentum.mu.Lock()
+	if tm.momentum.coasting || tm.momentum.vel != 0 {
+		t.Error("momentum should be cancelled on mouse move")
+	}
+	tm.momentum.mu.Unlock()
+}
+
+func TestOnMouseMove_SGRAnyMotionReport(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// cb=35 (motion, no button), col=3+1=4, row=2+1=3
+	if !strings.HasPrefix(got, "\x1b[<35;4;3M") {
+		t.Errorf("got %q, want \\x1b[<35;4;3M", got)
+	}
+}
+
+func TestOnMouseMove_SGRDragReport(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackBtn = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR = 0
+	tm.mouse.lastC = 0
+	e := &gui.Event{MouseX: 35, MouseY: 45}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// base=0, +32 = 32, col=3+1=4, row=2+1=3
+	if !strings.HasPrefix(got, "\x1b[<32;4;3M") {
+		t.Errorf("got %q, want \\x1b[<32;4;3M", got)
+	}
+}
+
+func TestOnMouseMove_SGRDragReport_AnyMotionOnly(t *testing.T) {
+	// Limoni enables ?1003 (any-motion) without ?1002 (button-motion).
+	// Per xterm ?1003 is a superset of ?1002: motion with a button held
+	// must still report as a drag (cb = base+32). Without it slider
+	// drags never reach the child.
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR = 0
+	tm.mouse.lastC = 0
+	e := &gui.Event{MouseX: 35, MouseY: 45}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// base=0, +32 = 32, col=3+1=4, row=2+1=3
+	if !strings.HasPrefix(got, "\x1b[<32;4;3M") {
+		t.Errorf("got %q, want \\x1b[<32;4;3M", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// onMouseUp
+// ---------------------------------------------------------------------------
+
+func TestOnMouseUp_SGRReleaseReport(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR = 2
+	tm.mouse.lastC = 3
+	e := &gui.Event{MouseX: 35, MouseY: 45}
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	if !strings.Contains(got, "m") {
+		t.Errorf("release should end with 'm', got %q", got)
+	}
+	if tm.mouse.dragging || tm.mouse.dragReport {
+		t.Error("drag should be cleared on release")
+	}
+	if !e.IsHandled {
+		t.Error("event should be handled")
+	}
+}
+
+func TestOnMouseUp_NotDraggingNoOp(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	e := &gui.Event{MouseX: 15, MouseY: 25}
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if len(*buf) != 0 {
+		t.Errorf("expected no output, got %q", *buf)
+	}
+	if e.IsHandled {
+		t.Error("should not be handled when not dragging")
+	}
+}
+
+func TestOnMouseUp_LocalReleaseClearsSelection(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.SelAnchor = contentPos{Row: 0, Col: 0}
+	tm.grid.SelHead = contentPos{Row: 0, Col: 3}
+	tm.grid.SelActive = true
+	tm.grid.Cells[0].Ch = 'a'
+	tm.grid.Cells[1].Ch = 'b'
+	tm.grid.Cells[2].Ch = 'c'
+	tm.grid.Cells[3].Ch = 'd'
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = false
+	e := &gui.Event{MouseX: 35, MouseY: 5, MouseButton: gui.MouseLeft}
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if !e.IsHandled {
+		t.Error("event should be handled")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// shift-click extend
+// ---------------------------------------------------------------------------
+
+// A plain click must leave the anchor behind (inactive) so a following
+// Shift+click can extend from it. A full ClearSelection here would wipe the
+// anchor and break click-then-Shift+click.
+func TestOnMouseUp_PlainClickPreservesAnchor(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	// MouseX=15 → cell boundary 2; MouseY=25 → row 1.
+	down := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: down, Window: &gui.Window{}})
+	up := &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: up, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelActive {
+		t.Error("plain click should leave the selection inactive")
+	}
+	if !tm.grid.hasSelAnchor {
+		t.Error("anchor must survive a plain-click release for later shift-extend")
+	}
+	if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 2}) {
+		t.Errorf("SelAnchor = %v, want {Row:1 Col:2} preserved", tm.grid.SelAnchor)
+	}
+}
+
+// Click, release, then Shift+click a different cell: the anchor stays put and
+// only the head moves, activating the selection — xterm/iTerm2 behavior.
+func TestOnClick_ShiftExtendFromAnchor(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, Window: &gui.Window{}})
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, Window: &gui.Window{}})
+
+	// MouseX=55 → boundary 6; MouseY=65 → row 3.
+	shift := &gui.Event{
+		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
+	}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: shift, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 1, Col: 2}) {
+		t.Errorf("SelAnchor = %v, want {Row:1 Col:2} (anchor preserved)", tm.grid.SelAnchor)
+	}
+	if tm.grid.SelHead != (contentPos{Row: 3, Col: 6}) {
+		t.Errorf("SelHead = %v, want {Row:3 Col:6}", tm.grid.SelHead)
+	}
+	if !tm.grid.SelActive {
+		t.Error("shift-extend to a different cell should activate the selection")
+	}
+}
+
+// Shift+click as the very first action has no prior anchor, so it anchors
+// normally instead of extending from the zero-value contentPos{}.
+func TestOnClick_ShiftClickNoPriorAnchorReanchors(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	e := &gui.Event{
+		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
+	}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 3, Col: 6}) {
+		t.Errorf("SelAnchor = %v, want {Row:3 Col:6} (fresh anchor)", tm.grid.SelAnchor)
+	}
+	if tm.grid.SelActive {
+		t.Error("fresh shift-click (head == anchor) should be inactive")
+	}
+	if !tm.grid.hasSelAnchor {
+		t.Error("hasSelAnchor should be set after any click")
+	}
+}
+
+// A selection-invalidating event (here ClearSelection, as scroll/reset emit)
+// resets hasSelAnchor, so the next Shift+click starts a fresh anchor rather
+// than extending from a now-meaningless content position.
+func TestOnClick_ShiftExtendAfterClearReanchors(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 25, MouseButton: gui.MouseLeft}, Window: &gui.Window{}})
+	tm.grid.Mu.Lock()
+	tm.grid.ClearSelection()
+	tm.grid.Mu.Unlock()
+
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{
+		MouseX: 55, MouseY: 65, MouseButton: gui.MouseLeft, Modifiers: gui.ModShift,
+	}, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 3, Col: 6}) {
+		t.Errorf("SelAnchor = %v, want {Row:3 Col:6}; ClearSelection must reset hasSelAnchor",
+			tm.grid.SelAnchor)
+	}
+	if tm.grid.SelActive {
+		t.Error("fresh anchor after clear should be inactive")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// canvas offset — mouse-lock callbacks use absolute coords
+// ---------------------------------------------------------------------------
+
+func TestOnMouseMove_CanvasOffset(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8) // cellH=20
+	tm.ime.layoutY = 20         // simulate tab-bar offset
+
+	tm.grid.Mu.Lock()
+	tm.grid.SelAnchor = contentPos{Row: 0, Col: 0}
+	tm.grid.SelHead = contentPos{Row: 0, Col: 0}
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = false
+	tm.mouse.locked = true // selection drag holds a mouse lock
+
+	// Absolute Y=25 → canvas Y=5 → row 0. Without fix: r=1 (one row off).
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelHead.Row != 0 {
+		t.Errorf("offset canvas: SelHead.Row = %d, want 0", tm.grid.SelHead.Row)
+	}
+}
+
+// A drag reported to the pty (?1000/?1002/?1003 — what full-screen apps such
+// as Claude Code / opencode use) never takes a mouse lock, so its motion
+// events arrive through the canvas config already relative. Translating them
+// again would shift every report down by the tab-bar height.
+func TestOnMouseMove_CanvasOffset_ReportingDragIsRelative(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8) // cellH=20, cellW=10
+	tm.ime.layoutY = 20           // simulate tab-bar offset
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.MouseTrackBtn = true // ?1002 — report motion while a button is held
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.lastR, tm.mouse.lastC = -1, -1
+
+	// Relative Y=25 → r=1 → SGR row=2. Pre-fix: absolute-coord translation
+	// dropped it to r=0 → row=1, one line off.
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+
+	got := string(*buf)
+	if !strings.Contains(got, ";2M") {
+		t.Errorf("unlocked reporting drag: got %q, want row 2", got)
+	}
+}
+
+func TestOnMouseUp_CanvasOffset(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8) // cellH=20, cellW=10
+	tm.ime.layoutY = 20
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+	tm.mouse.locked = true
+
+	// Absolute Y=25 → canvas Y=5 → r=0 → SGR row=1. Without fix: r=1 → row=2.
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+
+	got := string(*buf)
+	if !strings.Contains(got, ";1m") {
+		t.Errorf("offset canvas SGR: got %q, want row 1", got)
+	}
+}
+
+// Release of an unlocked (reported) drag: coords are already relative.
+func TestOnMouseUp_CanvasOffset_ReportingDragIsRelative(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8) // cellH=20, cellW=10
+	tm.ime.layoutY = 20
+
+	tm.grid.Mu.Lock()
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	tm.mouse.dragging = true
+	tm.mouse.dragReport = true
+	tm.mouse.dragButton = gui.MouseLeft
+
+	// Relative Y=25 → r=1 → SGR row=2. Pre-fix: row=1.
+	e := &gui.Event{MouseX: 10, MouseY: 25}
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+
+	got := string(*buf)
+	if !strings.Contains(got, ";2m") {
+		t.Errorf("unlocked reporting release: got %q, want row 2", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// lockMouse / unlockMouse / toCanvasRel helpers
+// ---------------------------------------------------------------------------
+
+func TestLockMouse_SetsLockedFlag(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.lockMouse(&gui.Window{})
+	if !tm.mouse.locked {
+		t.Error("lockMouse should set locked = true")
+	}
+}
+
+func TestUnlockMouse_ClearsLockedFlag(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.mouse.locked = true
+	tm.unlockMouse(&gui.Window{})
+	if tm.mouse.locked {
+		t.Error("unlockMouse should set locked = false")
+	}
+}
+
+func TestLockMouse_NilWindowNoPanic(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.lockMouse(nil) // must not panic
+	if tm.mouse.locked {
+		t.Error("lockMouse with nil Window should not set locked flag")
+	}
+}
+
+func TestUnlockMouse_NilWindowNoPanic(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.mouse.locked = true
+	tm.unlockMouse(nil) // must not panic
+	if tm.mouse.locked {
+		t.Error("unlockMouse with nil Window should still clear locked flag")
+	}
+}
+
+func TestToCanvasRel_LockedOffsetsCoords(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.ime.layoutX = 10
+	tm.ime.layoutY = 20
+	tm.mouse.locked = true
+
+	e := &gui.Event{MouseX: 100, MouseY: 80}
+	tm.toCanvasRel(e)
+
+	if e.MouseX != 90 || e.MouseY != 60 {
+		t.Errorf("toCanvasRel (locked): got (%0.f, %0.f), want (90, 60)",
+			e.MouseX, e.MouseY)
+	}
+}
+
+func TestToCanvasRel_NotLockedNoOp(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.ime.layoutX = 10
+	tm.ime.layoutY = 20
+	tm.mouse.locked = false
+
+	e := &gui.Event{MouseX: 100, MouseY: 80}
+	tm.toCanvasRel(e)
+
+	if e.MouseX != 100 || e.MouseY != 80 {
+		t.Errorf("toCanvasRel (not locked): got (%0.f, %0.f), want (100, 80)",
+			e.MouseX, e.MouseY)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// onMouseScroll
+// ---------------------------------------------------------------------------
+
+func TestOnMouseScroll_ZeroDeltaCancelsMomentum(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.momentum.mu.Lock()
+	tm.momentum.coasting = true
+	tm.momentum.vel = 50
+	tm.momentum.mu.Unlock()
+	e := &gui.Event{ScrollY: 0}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	tm.momentum.mu.Lock()
+	if tm.momentum.coasting || tm.momentum.vel != 0 {
+		t.Error("momentum should be cancelled on zero delta")
+	}
+	tm.momentum.mu.Unlock()
+}
+
+func TestOnMouseScroll_SGRWheelUp(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// wheel up → base=64, col=3+1=4, row=2+1=3
+	if !strings.HasPrefix(got, "\x1b[<64;4;3M") {
+		t.Errorf("got %q, want \\x1b[<64;4;3M", got)
+	}
+	if !e.IsHandled {
+		t.Error("event should be handled")
+	}
+}
+
+func TestOnMouseScroll_SGRWheelDown(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -1}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	got := string(*buf)
+	// wheel down → base=65, col=3+1=4, row=2+1=3
+	if !strings.HasPrefix(got, "\x1b[<65;4;3M") {
+		t.Errorf("got %q, want \\x1b[<65;4;3M", got)
+	}
+}
+
+func TestOnMouseScroll_LocalScrollBack(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(10, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 5 {
+		tm.grid.Scrollback.Push(row, false) // 5 rows of scrollback
+	}
+	tm.grid.ViewOffset = 0
+	tm.grid.ViewSubPx = 0
+	tm.grid.Mu.Unlock()
+	prevVer := tm.drawVersion.Load()
+	e := &gui.Event{ScrollY: 1} // integer = mouse wheel
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	func() {
+		tm.grid.Mu.Lock()
+		defer tm.grid.Mu.Unlock()
+		// Wheel deltas are lines: 1 line × cellH=20 → exactly one row.
+		if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
+			t.Error("expected viewport movement after scroll")
+		}
+	}()
+	if tm.drawVersion.Load() <= prevVer {
+		t.Error("version should be bumped after scroll")
+	}
+}
+
+func TestOnMouseScroll_FractionalDeltaStartsMomentum(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	e := &gui.Event{ScrollY: 2.5, ScrollPrecise: true} // trackpad
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	tm.momentum.mu.Lock()
+	defer tm.momentum.mu.Unlock()
+	if tm.momentum.vel <= 0 {
+		t.Error("velocity should be set by precise (trackpad) scroll")
+	}
+	if tm.momentum.coasting {
+		t.Error("coasting should not start during active scroll")
+	}
+}
+
+// TestOnMouseScroll_NonPreciseIsMouseWheel verifies that a scroll delta
+// without ScrollPrecise is classified as a mouse wheel and cancels
+// momentum, regardless of the delta's fractional value.
+func TestOnMouseScroll_NonPreciseIsMouseWheel(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(10, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 5 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.Mu.Unlock()
+	// Pre-seed momentum state so we can observe cancellation.
+	tm.momentum.mu.Lock()
+	tm.momentum.coasting = true
+	tm.momentum.vel = 50
+	tm.momentum.mu.Unlock()
+	e := &gui.Event{ScrollY: 2.5} // fractional but non-precise = wheel
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	// Wheel deltas are lines: 2.5 × cellH=20 → 50px → 2 rows + 10px.
+	if tm.grid.ViewSubPx == 0 && tm.grid.ViewOffset == 0 {
+		t.Error("expected viewport movement from wheel scroll")
+	}
+	tm.momentum.mu.Lock()
+	defer tm.momentum.mu.Unlock()
+	if tm.momentum.coasting || tm.momentum.vel != 0 {
+		t.Error("momentum should be cancelled for non-precise (mouse wheel) delta")
+	}
+}
+
+// TestOnMouseScroll_NonPreciseReverse confirms that a small non-precise
+// negative delta also cancels momentum.
+func TestOnMouseScroll_NonPreciseReverse(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.momentum.mu.Lock()
+	tm.momentum.coasting = true
+	tm.momentum.vel = -50
+	tm.momentum.mu.Unlock()
+	e := &gui.Event{ScrollY: -1.0001}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	tm.momentum.mu.Lock()
+	defer tm.momentum.mu.Unlock()
+	if tm.momentum.coasting || tm.momentum.vel != 0 {
+		t.Error("momentum should be cancelled for non-precise negative delta")
+	}
+}
+
+// TestOnMouseScroll_TrackpadSensitivity verifies that precise deltas use
+// the trackpad factor: ScrollY=0.5 precise → 0.5*trackpadSensitivity ≈
+// 13.3px at cellH=20 → ViewSubPx≈13.3 (a wheel delta of 0.5 would only
+// move 10px).
+func TestOnMouseScroll_TrackpadSensitivity(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(10, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 5 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{ScrollY: 0.5, ScrollPrecise: true}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.ViewSubPx, 0.5*trackpadSensitivity; got != want {
+		t.Errorf("ViewSubPx = %v, want %v", got, want)
+	}
+}
+
+// countReports returns the number of SGR reports in buf with the given
+// prefix, e.g. "\x1b[<64;" for unmodified wheel-up.
+func countReports(buf []byte, prefix string) int {
+	return strings.Count(string(buf), prefix)
+}
+
+// TestOnMouseScroll_SGRWheelDeltaMultiplier verifies that a large wheel
+// delta emits multiple SGR wheel reports — one per cellH of scaled scroll
+// distance — instead of a single tick per event. cellH=20 and a wheel
+// delta is lines: ScrollY=2.5 → 50px → 2 ticks.
+func TestOnMouseScroll_SGRWheelDeltaMultiplier(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 2 {
+		t.Errorf("ticks = %d, want 2 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelResidualAccumulates verifies that the
+// fractional remainder carries across events: two ScrollY=2.5 events are
+// 100px total → 5 ticks at cellH=20 (2 then 3).
+func TestOnMouseScroll_SGRWheelResidualAccumulates(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 5 {
+		t.Errorf("ticks = %d, want 5 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_WheelNotchTravelsThreeRows pins the fix for the
+// too-slow wheel: a notch reports three lines on every backend, and each
+// line must move exactly one grid row. Before this, the factor was a flat
+// 5px and a Win32/X11 notch moved a quarter of a row.
+func TestOnMouseScroll_WheelNotchTravelsThreeRows(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.Scrollback.SetGeom(20, 8)
+	row := make([]cell, 8)
+	for i := range row {
+		row[i] = defaultCell()
+	}
+	for range 10 {
+		tm.grid.Scrollback.Push(row, false)
+	}
+	tm.grid.ViewOffset = 0
+	tm.grid.ViewSubPx = 0
+	tm.grid.Mu.Unlock()
+
+	// One notch, as every backend now reports it.
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: 3}, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.ViewOffset != 3 || tm.grid.ViewSubPx != 0 {
+		t.Errorf("one notch moved offset=%d subpx=%v, want 3 rows exactly",
+			tm.grid.ViewOffset, tm.grid.ViewSubPx)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelMinOneTick verifies that a small delta still
+// emits exactly one report so a slow notch never feels dead.
+func TestOnMouseScroll_SGRWheelMinOneTick(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 1 {
+		t.Errorf("ticks = %d, want 1 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelDirectionResetsResidual verifies that
+// reversing scroll direction discards the accumulated residual: up
+// ScrollY=2.5 leaves 10px residual, then down ScrollY=-2.5 must emit
+// floor(50/20)=2 down ticks, not 3.
+func TestOnMouseScroll_SGRWheelDirectionResetsResidual(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 2.5}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	e = &gui.Event{MouseX: 35, MouseY: 45, ScrollY: -2.5}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<65;4;3M"); got != 2 {
+		t.Errorf("down ticks = %d, want 2 (buf %q)", got, *buf)
+	}
+}
+
+// TestOnMouseScroll_SGRWheelTickCap verifies a huge delta is capped so a
+// single event cannot flood the pty.
+func TestOnMouseScroll_SGRWheelTickCap(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 1e6}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != maxWheelTicks {
+		t.Errorf("ticks = %d, want cap %d", got, maxWheelTicks)
+	}
+}
+
+// TestOnMouseScroll_SGRTrackpadTicks verifies that precise deltas use the
+// trackpad factor in the report path: ScrollY=4 precise → 4*26.7≈107px at
+// cellH=20 → 5 ticks (a wheel delta of 4 would emit only 4).
+func TestOnMouseScroll_SGRTrackpadTicks(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 4, ScrollPrecise: true}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;4;3M"); got != 5 {
+		t.Errorf("ticks = %d, want 5 (buf %q)", got, *buf)
+	}
+}
+
+// TestWheelReportTicks_NaNReturnsOne verifies that NaN scrollY returns 1
+// tick rather than propagating NaN or panicking.
+func TestWheelReportTicks_NaNReturnsOne(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	got := tm.wheelReportTicks(float32(math.NaN()), false)
+	if got != 1 {
+		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestWheelReportTicks_InfReturnsOne verifies that Inf scrollY returns 1
+// tick (capped, not infinite).
+func TestWheelReportTicks_InfReturnsOne(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	got := tm.wheelReportTicks(float32(math.Inf(1)), false)
+	if got != 1 {
+		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestWheelReportTicks_ZeroCellHReturnsOne verifies that a zero cell
+// height (before first measure) returns 1 tick instead of dividing.
+func TestWheelReportTicks_ZeroCellHReturnsOne(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.cellH = 0
+	got := tm.wheelReportTicks(10, false)
+	if got != 1 {
+		t.Errorf("ticks = %d, want 1", got)
+	}
+}
+
+// TestWheelReportTicks_PreciseBelowCellAccumulates verifies that precise
+// (trackpad) deltas below one row emit 0 ticks and carry the remainder
+// forward: two ScrollY=0.5 events are ~13.3px then ~26.7px total at
+// cellH=20 → 0 ticks then 1 tick. The old min-1 rule emitted one tick
+// per event.
+func TestWheelReportTicks_PreciseBelowCellAccumulates(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(0.5, true); got != 0 {
+		t.Fatalf("first tick = %d, want 0 (accumulating)", got)
+	}
+	if got := tm.wheelReportTicks(0.5, true); got != 1 {
+		t.Errorf("second tick = %d, want 1 after residual crosses a row", got)
+	}
+}
+
+// TestWheelReportTicks_SubRowWheelStillEmits verifies that a discrete
+// (non-precise) delta below one row keeps the guaranteed single tick, so
+// a slow mouse notch never feels dead.
+func TestWheelReportTicks_SubRowWheelStillEmits(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(0.25, false); got != 1 {
+		t.Errorf("ticks = %d, want 1 for a sub-row wheel notch", got)
+	}
+}
+
+// TestOnMouseScroll_SGRTrackpadSlightTouchNoReport verifies that a
+// precise delta below one row emits no SGR report at all: ScrollY=0.5
+// precise → ~13.3px at cellH=20 < one row, so a leaf-style app sees no
+// scroll from a light touch. Only once accumulated travel crosses a
+// full row does a report appear.
+func TestOnMouseScroll_SGRTrackpadSlightTouchNoReport(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+	e := &gui.Event{MouseX: 35, MouseY: 45, ScrollY: 0.5, ScrollPrecise: true}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;"); got != 0 {
+		t.Fatalf("reports = %d, want 0 for a sub-row touch (buf %q)", got, *buf)
+	}
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: e, Window: &gui.Window{}})
+	if got := countReports(*buf, "\x1b[<64;"); got != 1 {
+		t.Errorf("reports = %d, want 1 after residual crosses a row (buf %q)", got, *buf)
+	}
+}
+
+// TestWheelReportTicks_PreciseThresholdScalesWithBacking verifies that
+// precise accumulation uses a cellH x backingScale threshold, matching
+// Ghostty's physical-pixel math: on a 2x display a sub-cell precise
+// delta needs double the travel to emit. ScrollY=1 precise is ~26.7px
+// of travel: below one logical cell at 2x (40px) → 0 ticks, then the
+// second event crosses it → 1.
+func TestWheelReportTicks_PreciseThresholdScalesWithBacking(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.win = &gui.Window{BackingScale: 2}
+	if got := tm.wheelReportTicks(1, true); got != 0 {
+		t.Fatalf("first tick = %d, want 0 at 2x threshold", got)
+	}
+	if got := tm.wheelReportTicks(1, true); got != 1 {
+		t.Errorf("second tick = %d, want 1 after crossing the 2x threshold", got)
+	}
+}
+
+// TestWheelReportTicks_RetinaSwallowsInertiaStream is the captured
+// symptom: an ~1pt precise inertia stream (0.075 per event, the
+// wheel-coast tail from the GOTERM_WHEEL_DEBUG log) accumulates to
+// ~22px. At 1x that crosses the 20px logical cell → 1 report; at 2x
+// Retina the threshold is 40px → the stream never emits (Ghostty
+// parity, where the physical-pixel threshold swallows it).
+func TestWheelReportTicks_RetinaSwallowsInertiaStream(t *testing.T) {
+	stream := func(scale float32) int {
+		tm, _ := newMouseTerm(4, 8)
+		tm.win = &gui.Window{BackingScale: scale}
+		ticks := 0
+		for range 11 {
+			ticks += tm.wheelReportTicks(0.075, true)
+		}
+		return ticks
+	}
+	if got := stream(1); got != 1 {
+		t.Errorf("1x ticks = %d, want 1 (stream crosses the logical cell)", got)
+	}
+	if got := stream(2); got != 0 {
+		t.Errorf("2x ticks = %d, want 0 (stream stays under the physical threshold)", got)
+	}
+}
+
+// TestWheelReportTicks_PreciseDirectionChangeResetsResidual verifies
+// that a direction change zeroes the accumulated residual before the new
+// travel is added: +0.5 (13.3px, no tick), then -0.5 must NOT cross the
+// cell by combining with the old residual (it would emit 1 tick if the
+// residual were carried), then a second -0.5 crosses → 1.
+func TestWheelReportTicks_PreciseDirectionChangeResetsResidual(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(0.5, true); got != 0 {
+		t.Fatalf("first tick = %d, want 0", got)
+	}
+	if got := tm.wheelReportTicks(-0.5, true); got != 0 {
+		t.Fatalf("tick after direction change = %d, want 0 (residual reset)", got)
+	}
+	if got := tm.wheelReportTicks(-0.5, true); got != 1 {
+		t.Errorf("third tick = %d, want 1 after reset travel crosses a row", got)
+	}
+}
+
+// TestWheelReportTicks_PreciseHugeDeltaCapped verifies the pre-cap:
+// a pathological precise delta returns maxWheelTicks without converting
+// an overflowing quotient to int, leaving no residual behind.
+func TestWheelReportTicks_PreciseHugeDeltaCapped(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.wheelReportTicks(1e6, true); got != maxWheelTicks {
+		t.Errorf("ticks = %d, want cap %d", got, maxWheelTicks)
+	}
+	if got := tm.wheelReportTicks(0.5, true); got != 0 {
+		t.Errorf("tick after cap = %d, want 0 (no stale residual)", got)
+	}
+}
+
+// TestBackingScale_Guards verifies backingScale defaults to 1 for a nil
+// window, non-finite, zero, and negative scales, and passes through
+// valid values.
+func TestBackingScale_Guards(t *testing.T) {
+	cases := []struct {
+		name string
+		win  *gui.Window
+		want float64
+	}{
+		{"nil window", nil, 1},
+		{"unset", &gui.Window{}, 1},
+		{"zero", &gui.Window{BackingScale: 0}, 1},
+		{"negative", &gui.Window{BackingScale: -2}, 1},
+		{"nan", &gui.Window{BackingScale: float32(math.NaN())}, 1},
+		{"inf", &gui.Window{BackingScale: float32(math.Inf(1))}, 1},
+		{"retina", &gui.Window{BackingScale: 2}, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tm, _ := newMouseTerm(4, 8)
+			tm.win = c.win
+			if got := tm.backingScale(); got != c.want {
+				t.Errorf("backingScale() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestScrollSensitivity_PreciseVsWheel verifies that the precise flag
+// selects the fixed trackpad pixel factor, while a non-precise (wheel)
+// delta — which arrives in lines — is scaled by the cell height so one
+// line is one row.
+func TestScrollSensitivity_PreciseVsWheel(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	if got := tm.scrollSensitivity(true); got != trackpadSensitivity {
+		t.Errorf("precise factor = %v, want %v", got, trackpadSensitivity)
+	}
+	if got := tm.scrollSensitivity(false); got != tm.cellH {
+		t.Errorf("wheel factor = %v, want cellH %v", got, tm.cellH)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// updateHover
+// ---------------------------------------------------------------------------
+
+func TestUpdateHover_SameCellNoOp(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.mouse.hoverR.Store(5)
+	tm.mouse.hoverC.Store(5)
+	prevVer := tm.drawVersion.Load()
+	tm.updateHover(5, 5, &gui.Window{})
+	if tm.drawVersion.Load() != prevVer {
+		t.Error("version should not change for same cell")
+	}
+}
+
+func TestUpdateHover_NewCellUpdatesCoords(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
+	prevVer := tm.drawVersion.Load()
+	tm.updateHover(2, 3, &gui.Window{})
+	// Moving to a new cell should update hover state.
+	if tm.mouse.hoverR.Load() != 2 || tm.mouse.hoverC.Load() != 3 {
+		t.Error("hover state should be updated")
+	}
+	// Version only bumps when entering/leaving a hyperlinked cell run.
+	// For a plain cell, no version bump is expected.
+	_ = prevVer
+}
+
+func TestUpdateHover_CmdHeldDetectsImplicitURL(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	putRow(tm.grid, "see https://go.dev now")
+	// Simulate Cmd being held.
+	tm.mouse.cmdHeld.Store(true)
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
+	prevVer := tm.drawVersion.Load()
+	// Hover over the URL text (col 4).
+	tm.updateHover(0, 4, &gui.Window{})
+	if tm.mouse.hoverURL == "" {
+		t.Error("Cmd+hover over URL: expected detected URL, got empty")
+	}
+	if len(tm.mouse.hoverSpans) == 0 {
+		t.Error("Cmd+hover over URL: expected hoverSpans, got none")
+	}
+	if tm.drawVersion.Load() <= prevVer {
+		t.Error("Cmd+hover over URL: version should bump for highlight")
+	}
+}
+
+func TestUpdateHover_CmdHeldPlainTextNoURL(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	putRow(tm.grid, "just plain text, no urls here")
+	tm.mouse.cmdHeld.Store(true)
+	tm.mouse.hoverR.Store(-1)
+	tm.mouse.hoverC.Store(-1)
+	prevVer := tm.drawVersion.Load()
+	tm.updateHover(0, 3, &gui.Window{})
+	if tm.mouse.hoverURL != "" {
+		t.Errorf("Cmd+hover over plain text: expected no URL, got %q", tm.mouse.hoverURL)
+	}
+	if len(tm.mouse.hoverSpans) != 0 {
+		t.Error("Cmd+hover over plain text: expected empty spans")
+	}
+	// Moving from (-1,-1) to (0,3) always bumps (new cell).
+	_ = prevVer
+}
+
+func TestUpdateHover_CmdReleasedClearsURLHighlight(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	putRow(tm.grid, "see https://go.dev now")
+	// First, hover with Cmd to detect a URL.
+	tm.mouse.cmdHeld.Store(true)
+	tm.mouse.hoverR.Store(0)
+	tm.mouse.hoverC.Store(4)
+	tm.updateHover(0, 4, &gui.Window{})
+	if tm.mouse.hoverURL == "" {
+		t.Fatal("setup failed: URL not detected with Cmd held")
+	}
+	prevURL := tm.mouse.hoverURL
+
+	// Release Cmd: hovering the same cell should clear the URL.
+	tm.mouse.cmdHeld.Store(false)
+	prevVer := tm.drawVersion.Load()
+	tm.updateHover(0, 4, &gui.Window{})
+	if tm.mouse.hoverURL != "" {
+		t.Errorf("Cmd released: expected hoverURL to clear, got %q", tm.mouse.hoverURL)
+	}
+	if len(tm.mouse.hoverSpans) != 0 {
+		t.Error("Cmd released: expected hoverSpans to clear")
+	}
+	if prevURL != "" && tm.drawVersion.Load() <= prevVer {
+		t.Error("Cmd released: version should bump to clear the highlight")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BiDi hit-testing: pointer geometry is visual, grid coordinates logical
+// ---------------------------------------------------------------------------
+
+// rtlRowTerm builds a 4x8 term whose row 0 holds "שלום    " (4 Hebrew +
+// 4 spaces). The row reorders to "    םולש" with v2l [7 6 5 4 3 2 1 0].
+// Runes are stored per cell: writeRowText is byte-indexed and splits
+// multi-byte runes across cells.
+func rtlRowTerm(t *testing.T) *Term {
+	t.Helper()
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	for c, ch := range []rune("שלום    ") {
+		tm.grid.At(0, c).Ch = ch
+		tm.grid.At(0, c).Width = 1
+	}
+	return tm
+}
+
+func TestOnClick_RTLRowAnchorMapsVisualToLogical(t *testing.T) {
+	tm := rtlRowTerm(t)
+	// x=12 → visual boundary 1, between visual cells 0 (logical 7) and 1
+	// (logical 6). In a reversed run that is logical boundary 7.
+	clickAt(tm, 12, 10, 0)
+	func() {
+		tm.grid.Mu.Lock()
+		defer tm.grid.Mu.Unlock()
+		if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 7}) {
+			t.Errorf("SelAnchor = %v, want {Row:0 Col:7}", tm.grid.SelAnchor)
+		}
+	}()
+}
+
+func TestOnMouseMove_RTLRowDragSelectsVisualGlyphs(t *testing.T) {
+	tm := rtlRowTerm(t)
+	// Down at visual boundary 4 (x=36): between the leading spaces and
+	// the reversed Hebrew.
+	down := &gui.Event{MouseX: 36, MouseY: 10, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Layout: nil, Event: down, Window: &gui.Window{}})
+	// Drag to visual boundary 8: visual glyphs 4..7 are logical {3,2,1,0}.
+	move := &gui.Event{MouseX: 78, MouseY: 10}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: move, Window: &gui.Window{}})
+
+	// Press boundary 4 is logical 4 (the end of the Hebrew word), so the
+	// anchor stays there and the head takes the other span end.
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelAnchor != (contentPos{Row: 0, Col: 4}) {
+		t.Errorf("SelAnchor = %v, want {Row:0 Col:4}", tm.grid.SelAnchor)
+	}
+	if tm.grid.SelHead != (contentPos{Row: 0, Col: 0}) {
+		t.Errorf("SelHead = %v, want {Row:0 Col:0}", tm.grid.SelHead)
+	}
+	if got := tm.grid.SelectedText(); got != "שלום" {
+		t.Errorf("RTL drag selected %q, want %q", got, "שלום")
+	}
+}
+
+// A press on the visual left edge of a glyph in a right-to-left run is that
+// glyph's logical end. Before the fix it mapped to the glyph's logical start, so
+// a drag onto the next row also selected the glyph left of the pointer.
+func TestOnMouseMove_RTLCrossRowDragAnchor(t *testing.T) {
+	tm := rtlRowTerm(t)
+	// x=60 → visual boundary 6: the left edge of visual cell 6 (logical 1,
+	// 'ל'). Logical boundary 2, so 'ל' and 'ש' are not selected.
+	down := &gui.Event{MouseX: 60, MouseY: 10, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Event: down, Window: &gui.Window{}})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 0, MouseY: 30}, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if want := (contentPos{Row: 0, Col: 2}); tm.grid.SelAnchor != want {
+		t.Errorf("SelAnchor = %v, want %v", tm.grid.SelAnchor, want)
+	}
+	if got := tm.grid.SelectedText(); strings.Contains(got, "ל") {
+		t.Errorf("cross-row RTL drag copied %q; 'ל' is right of the press point", got)
+	}
+}
+
+func TestOnClick_RTLRowReportMapsToLogical(t *testing.T) {
+	tm, buf := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	for c, ch := range []rune("שלום    ") {
+		tm.grid.At(0, c).Ch = ch
+		tm.grid.At(0, c).Width = 1
+	}
+	tm.grid.MouseTrack = true // ?1000 press reports
+	tm.grid.MouseSGR = true   // ?1006
+	tm.grid.Mu.Unlock()
+	// Visual cell 1 → logical 6 → SGR col 7, row 1.
+	clickAt(tm, 12, 10, 0)
+	if got := string(*buf); got != "\x1b[<0;7;1M" {
+		t.Errorf("press report = %q, want %q", got, "\x1b[<0;7;1M")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Multi-click gestures (Phase 48)
+// ---------------------------------------------------------------------------
+
+// writeRowText writes s into row r of an existing grid, one rune per cell.
+// Distinct from fillRow (floods a row with one marker rune) and putRow
+// (writes at the cursor), both in grid_test.go.
+func writeRowText(g *grid, r int, s string) {
+	for c, ch := range s {
+		if c >= g.Cols {
+			break
+		}
+		g.At(r, c).Ch = ch
+	}
+}
+
+// clickAt presses the left button at the given pixel position. Cells are
+// 10x20 in newMouseTerm, so column n spans x = [10n, 10n+10).
+func clickAt(tm *Term, x, y float32, mods gui.Modifier) {
+	tm.onClick(gui.EventCtx{Layout: nil, Event: &gui.Event{
+		MouseX: x, MouseY: y,
+		MouseButton: gui.MouseLeft,
+		Modifiers:   mods,
+	}, Window: &gui.Window{}})
+}
+
+func TestNextClickCount_Cycles(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	want := []int{1, 2, 3, 1, 2}
+	for i, w := range want {
+		if got := tm.nextClickCount(15, 25); got != w {
+			t.Errorf("click %d: count = %d, want %d", i+1, got, w)
+		}
+	}
+}
+
+// A click that arrives after the interval starts a fresh gesture. Driven by
+// back-dating lastClickAt rather than sleeping.
+func TestNextClickCount_TimeoutResets(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	if got := tm.nextClickCount(15, 25); got != 1 {
+		t.Fatalf("first click = %d, want 1", got)
+	}
+	tm.mouse.lastClickAt = tm.mouse.lastClickAt.Add(-2 * multiClickInterval)
+	if got := tm.nextClickCount(15, 25); got != 1 {
+		t.Errorf("click after the interval = %d, want 1", got)
+	}
+}
+
+// Two fast clicks on different words are two separate clicks, not a double.
+func TestNextClickCount_MovementResets(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	tm.nextClickCount(15, 25)
+	if got := tm.nextClickCount(95, 25); got != 1 {
+		t.Errorf("click a cell away = %d, want 1", got)
+	}
+	// Within half a cell still counts as the same spot.
+	tm.resetClickCount()
+	tm.nextClickCount(15, 25)
+	if got := tm.nextClickCount(18, 27); got != 2 {
+		t.Errorf("click within the slop = %d, want 2", got)
+	}
+}
+
+func TestOnClick_DoubleClickSelectsWord(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "ls /usr/local/bin --all")
+
+	// Two clicks inside the path (column 8 → x = 85).
+	clickAt(tm, 85, 10, 0)
+	clickAt(tm, 85, 10, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode != selWord {
+		t.Errorf("SelMode = %v, want selWord", tm.grid.SelMode)
+	}
+	if got, want := tm.grid.SelectedText(), "/usr/local/bin"; got != want {
+		t.Errorf("double-click selected %q, want %q", got, want)
+	}
+}
+
+// A double-click on a URL in parentheses selects the URL alone: the smart
+// unit wins over the plain word, which would take the brackets and the period.
+func TestOnClick_DoubleClickSelectsSmartUnit(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "see (https://go.dev/doc).")
+
+	// Two clicks inside the URL (column 10 → x = 105).
+	clickAt(tm, 105, 10, 0)
+	clickAt(tm, 105, 10, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "https://go.dev/doc"; got != want {
+		t.Errorf("double-click selected %q, want %q", got, want)
+	}
+}
+
+func TestOnClick_TripleClickSelectsLine(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "first")
+	writeRowText(tm.grid, 1, "second")
+
+	clickAt(tm, 15, 30, 0) // row 1
+	clickAt(tm, 15, 30, 0)
+	clickAt(tm, 15, 30, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode != selLine {
+		t.Errorf("SelMode = %v, want selLine", tm.grid.SelMode)
+	}
+	if got, want := tm.grid.SelectedText(), "second"; got != want {
+		t.Errorf("triple-click selected %q, want %q", got, want)
+	}
+}
+
+// A triple-click on a soft-wrapped logical line selects all of it, not just
+// the screen row under the pointer — joined as one line, since the wrap is
+// layout, not content.
+func TestOnClick_TripleClickSpansWrappedRows(t *testing.T) {
+	tm, _ := newMouseTerm(4, 5)
+	writeRowText(tm.grid, 0, "abcde")
+	writeRowText(tm.grid, 1, "fghij")
+	tm.grid.RowWrapped[0] = true
+
+	clickAt(tm, 15, 30, 0) // row 1, the continuation
+	clickAt(tm, 15, 30, 0)
+	clickAt(tm, 15, 30, 0)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "abcdefghij"; got != want {
+		t.Errorf("triple-click on a wrapped line selected %q, want %q", got, want)
+	}
+}
+
+// Dragging after a double click extends by whole words in both directions.
+func TestOnMouseMove_WordDragExtends(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "alpha beta gamma delta")
+
+	clickAt(tm, 15, 10, 0) // inside "alpha"
+	clickAt(tm, 15, 10, 0)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 125, MouseY: 10}, Window: &gui.Window{}}) // "gamma"
+
+	tm.grid.Mu.Lock()
+	if got, want := tm.grid.SelectedText(), "alpha beta gamma"; got != want {
+		t.Errorf("forward word drag selected %q, want %q", got, want)
+	}
+	tm.grid.Mu.Unlock()
+
+	// Drag back onto the origin word: the selection collapses to it rather
+	// than inverting.
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 10}, Window: &gui.Window{}})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "alpha"; got != want {
+		t.Errorf("drag back to the origin selected %q, want %q", got, want)
+	}
+}
+
+// A drag begun on a smart unit extends to smart units: both ends drop the
+// brackets around the paths, as a double-click on either path would.
+func TestOnMouseMove_SmartUnitDragExtends(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "x (/a/b) and (/c/d)")
+
+	clickAt(tm, 45, 10, 0) // inside "/a/b"
+	clickAt(tm, 45, 10, 0)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 155, MouseY: 10}, Window: &gui.Window{}}) // "/c/d"
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "/a/b) and (/c/d"; got != want {
+		t.Errorf("smart unit drag selected %q, want %q", got, want)
+	}
+}
+
+// Dragging left of the origin word pivots the anchor to the origin's far
+// edge, so the selection still covers whole words.
+func TestOnMouseMove_WordDragBackwards(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	writeRowText(tm.grid, 0, "alpha beta gamma")
+
+	clickAt(tm, 125, 10, 0) // inside "gamma"
+	clickAt(tm, 125, 10, 0)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 10}, Window: &gui.Window{}}) // "alpha"
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "alpha beta gamma"; got != want {
+		t.Errorf("backward word drag selected %q, want %q", got, want)
+	}
+}
+
+// Dragging after a triple click extends by whole lines in both directions,
+// mirroring the word-pivot logic with lineBoundsAt instead of wordBoundsAt.
+func TestOnMouseMove_LineDragExtends(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "line one")
+	writeRowText(tm.grid, 1, "line two")
+	writeRowText(tm.grid, 2, "line three")
+	writeRowText(tm.grid, 3, "line four")
+
+	// Triple-click on row 1 ("line two"), then drag down to row 3.
+	clickAt(tm, 15, 30, 0) // row 1, inside "line two"
+	clickAt(tm, 15, 30, 0)
+	clickAt(tm, 15, 30, 0)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 70}, Window: &gui.Window{}}) // row 3
+
+	tm.grid.Mu.Lock()
+	if got, want := tm.grid.SelectedText(), "line two\nline three\nline four"; got != want {
+		t.Errorf("forward line drag selected %q, want %q", got, want)
+	}
+	tm.grid.Mu.Unlock()
+
+	// Drag back to the origin line: collapses to the origin line alone.
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 30}, Window: &gui.Window{}})
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "line two"; got != want {
+		t.Errorf("drag back to the origin line selected %q, want %q", got, want)
+	}
+}
+
+// Dragging left of the origin line pivots the anchor to the origin's far
+// edge, so the selection still covers whole lines.
+func TestOnMouseMove_LineDragBackwards(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "line one")
+	writeRowText(tm.grid, 1, "line two")
+	writeRowText(tm.grid, 2, "line three")
+	writeRowText(tm.grid, 3, "line four")
+
+	clickAt(tm, 15, 70, 0) // inside "line four" (row 3)
+	clickAt(tm, 15, 70, 0)
+	clickAt(tm, 15, 70, 0)
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 15, MouseY: 30}, Window: &gui.Window{}}) // row 1
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if got, want := tm.grid.SelectedText(), "line two\nline three\nline four"; got != want {
+		t.Errorf("backward line drag selected %q, want %q", got, want)
+	}
+}
+
+func TestOnClick_AltDragSelectsBlock(t *testing.T) {
+	tm, _ := newMouseTerm(4, 10)
+	writeRowText(tm.grid, 0, "abcdefghij")
+	writeRowText(tm.grid, 1, "klmnopqrst")
+	writeRowText(tm.grid, 2, "uvwxyzABCD")
+
+	clickAt(tm, 20, 10, gui.ModAlt) // boundary col 2, row 0
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 50, MouseY: 50}, Window: &gui.Window{}})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode != selBlock {
+		t.Fatalf("SelMode = %v, want selBlock", tm.grid.SelMode)
+	}
+	if got, want := tm.grid.SelectedText(), "cde\nmno\nwxy"; got != want {
+		t.Errorf("Alt+drag selected %q, want %q", got, want)
+	}
+}
+
+// Shift+click extends the previous selection; it must not be read as the
+// second click of a double.
+func TestOnClick_ShiftClickIsNotADouble(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	writeRowText(tm.grid, 0, "alpha beta")
+
+	clickAt(tm, 15, 10, 0)
+	clickAt(tm, 15, 10, gui.ModShift)
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelMode == selWord {
+		t.Error("Shift+click was treated as a double click")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Alt-screen wheel (Phase 48)
+// ---------------------------------------------------------------------------
+
+// On the alt screen with no mouse reporting the wheel is otherwise dead, so
+// it synthesizes cursor keys — the pager behavior kitty/iTerm2/Ghostty have.
+func TestOnMouseScroll_AltScreenSynthesizesArrows(t *testing.T) {
+	cases := []struct {
+		name    string
+		scrollY float32
+		want    string
+	}{
+		{"wheel up sends Up", 4, "\x1b[A"},
+		{"wheel down sends Down", -4, "\x1b[B"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tm, buf := newMouseTerm(24, 80)
+			tm.grid.AltActive = true
+			tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: tc.scrollY}, Window: &gui.Window{}})
+			if got := string(*buf); !strings.HasPrefix(got, tc.want) {
+				t.Errorf("wrote %q, want a prefix of %q", got, tc.want)
+			}
+			if n := countReports(*buf, tc.want); n < 1 {
+				t.Errorf("emitted %d arrows, want at least 1", n)
+			}
+		})
+	}
+}
+
+// Under DECCKM the synthesized keys must use the SS3 form the application
+// asked for, exactly as a real arrow keypress would.
+func TestOnMouseScroll_AltScreenAppCursorKeys(t *testing.T) {
+	tm, buf := newMouseTerm(24, 80)
+	tm.grid.AltActive = true
+	tm.grid.AppCursorKeys = true
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: -4}, Window: &gui.Window{}})
+	if got := string(*buf); !strings.HasPrefix(got, "\x1bOB") {
+		t.Errorf("wrote %q, want the SS3 form \\x1bOB", got)
+	}
+}
+
+// An app that enabled mouse reporting gets real wheel reports, not arrows.
+func TestOnMouseScroll_AltScreenReportingWins(t *testing.T) {
+	tm, buf := newMouseTerm(24, 80)
+	tm.grid.AltActive = true
+	tm.grid.MouseTrack = true
+	tm.grid.MouseSGR = true
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: -4}, Window: &gui.Window{}})
+	got := string(*buf)
+	if strings.Contains(got, "\x1b[B") || strings.Contains(got, "\x1bOB") {
+		t.Errorf("wrote arrows %q while mouse reporting is on", got)
+	}
+	if !strings.Contains(got, "\x1b[<65") {
+		t.Errorf("wrote %q, want an SGR wheel-down report", got)
+	}
+}
+
+// The main screen keeps local scrollback scrolling; arrows there would be
+// sent to a shell that never asked for them.
+func TestOnMouseScroll_MainScreenDoesNotSynthesize(t *testing.T) {
+	tm, buf := newMouseTerm(24, 80)
+	tm.onMouseScroll(gui.EventCtx{Layout: nil, Event: &gui.Event{ScrollY: -4}, Window: &gui.Window{}})
+	if got := string(*buf); got != "" {
+		t.Errorf("main screen wrote %q, want nothing", got)
+	}
+}
+
+// TestOSC22AppliesCursor covers the widget half of OSC 22: the shape the
+// application asked for is applied on every hover update, and a hovered
+// hyperlink still outranks it.
+// An application in a mouse-reporting mode is the main consumer of OSC 22,
+// and onMouseMove returns from the reporting branches without ever reaching
+// updateHover. Since go-gui resets the cursor to Arrow at the top of every
+// move, the shape has to be applied before those returns or it never shows.
+func TestOSC22AppliesCursorInMouseReportingMode(t *testing.T) {
+	tm, _ := newMouseTerm(4, 8)
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.PointerShape = pointerCrosshair
+	tm.grid.Mu.Unlock()
+
+	w := &gui.Window{}
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 35, MouseY: 45}, Window: w})
+	if got := w.MouseCursorState(); got != gui.CursorCrosshair {
+		t.Fatalf("cursor = %v, want CursorCrosshair", got)
+	}
+
+	// Second move onto the same cell takes the dedupe early return; the
+	// shape must survive go-gui's per-event reset there too.
+	w.SetMouseCursorArrow()
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{MouseX: 35, MouseY: 45}, Window: w})
+	if got := w.MouseCursorState(); got != gui.CursorCrosshair {
+		t.Fatalf("cursor after same-cell move = %v, want CursorCrosshair", got)
+	}
+}
+
+func TestOSC22AppliesCursor(t *testing.T) {
+	tm, _ := newDrawTerm(4, 8, 10, 20)
+	w := &gui.Window{}
+
+	tm.grid.PointerShape = pointerIBeam
+	tm.updateHover(1, 1, w)
+	if got := w.MouseCursorState(); got != gui.CursorIBeam {
+		t.Fatalf("cursor = %v, want CursorIBeam", got)
+	}
+
+	// go-gui resets the cursor to Arrow at the top of every mouse-move event,
+	// so a shape held across a motion that changes no cell must be re-applied
+	// rather than assumed sticky.
+	w.SetMouseCursorArrow()
+	tm.updateHover(1, 1, w)
+	if got := w.MouseCursorState(); got != gui.CursorIBeam {
+		t.Fatalf("shape not re-applied on a same-cell move: %v", got)
+	}
+
+	// A hyperlink under the pointer wins: it describes the cell the user is
+	// actually on, while OSC 22 is a pane-wide default set at some earlier time.
+	tm.grid.CurLinkID = tm.grid.internLink("https://example.com")
+	tm.grid.At(2, 2).LinkID = tm.grid.CurLinkID
+	tm.mouse.cmdHeld.Store(true)
+	tm.updateHover(2, 2, w)
+	if got := w.MouseCursorState(); got != gui.CursorPointingHand {
+		t.Fatalf("link hover cursor = %v, want CursorPointingHand", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cmd links inside a mouse-reporting app (?1002 / ?1003)
+//
+// A full-screen TUI that reads the mouse (Claude Code, mdr, anything using
+// bubbletea's EnableMouseAllMotion) used to swallow both link gestures: the
+// motion report returned before updateHover, and the press report returned
+// before the Cmd link-open path in onMouseUp. Super carries no SGR modifier
+// bit, so taking these two cases costs the child nothing it could act on.
+// ---------------------------------------------------------------------------
+
+// reportingLinkTerm returns a Term with ?1003 + ?1006 active and a URL on
+// row 0 starting at column 4 ("see https://go.dev now").
+func reportingLinkTerm(t *testing.T) (*Term, *[]byte) {
+	t.Helper()
+	tm, buf := newMouseTerm(4, 30)
+	putRow(tm.grid, "see https://go.dev now")
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true // ?1003
+	tm.grid.MouseSGR = true      // ?1006
+	tm.grid.Mu.Unlock()
+	return tm, buf
+}
+
+// moveTo emits a pointer motion at the given pixel position. Cells are 10x20
+// in newMouseTerm, so column n spans x = [10n, 10n+10).
+func moveTo(tm *Term, x, y float32, mods gui.Modifier) {
+	tm.onMouseMove(gui.EventCtx{Layout: nil, Event: &gui.Event{
+		MouseX: x, MouseY: y, Modifiers: mods,
+	}, Window: &gui.Window{}})
+}
+
+func TestOnMouseMove_CmdHoverResolvesLinkUnderAnyMotion(t *testing.T) {
+	tm, _ := reportingLinkTerm(t)
+
+	moveTo(tm, 65, 10, gui.ModSuper) // row 0, col 6 — inside the URL
+
+	if tm.mouse.hoverURL != "https://go.dev" {
+		t.Errorf("Cmd+hover under ?1003: hoverURL = %q, want %q",
+			tm.mouse.hoverURL, "https://go.dev")
+	}
+	if len(tm.mouse.hoverSpans) == 0 {
+		t.Error("Cmd+hover under ?1003: expected highlight spans for the draw pass")
+	}
+}
+
+// The hover fix must not steal the child's motion events.
+func TestOnMouseMove_CmdHoverStillReportsMotion(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	moveTo(tm, 65, 10, gui.ModSuper)
+
+	if got := string(*buf); !strings.Contains(got, "\x1b[<35;7;1M") {
+		t.Errorf("Cmd+hover under ?1003: report = %q, want any-motion at col 7 row 1", got)
+	}
+}
+
+// Without Cmd the pointer is the child's alone — no hover resolution runs.
+func TestOnMouseMove_NoCmdSkipsHoverUnderAnyMotion(t *testing.T) {
+	tm, _ := reportingLinkTerm(t)
+
+	moveTo(tm, 65, 10, 0)
+
+	if tm.mouse.hoverURL != "" {
+		t.Errorf("no Cmd under ?1003: hoverURL = %q, want empty", tm.mouse.hoverURL)
+	}
+}
+
+func TestOnClick_CmdOnLinkSuppressesPressReport(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	clickAt(tm, 65, 10, gui.ModSuper) // on the URL
+
+	if got := string(*buf); got != "" {
+		t.Errorf("Cmd+click on a link: reported %q, want nothing", got)
+	}
+	if tm.mouse.dragReport {
+		t.Error("Cmd+click on a link: dragReport set, so onMouseUp would skip the open path")
+	}
+}
+
+func TestOnClick_CmdOffLinkStillReports(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	clickAt(tm, 5, 10, gui.ModSuper) // col 0 — "s" of "see", not a link
+
+	if got := string(*buf); !strings.Contains(got, "\x1b[<0;1;1M") {
+		t.Errorf("Cmd+click off a link: report = %q, want a left press at col 1 row 1", got)
+	}
+	if !tm.mouse.dragReport {
+		t.Error("Cmd+click off a link: expected the drag to stay the child's")
+	}
+}
+
+func TestOnMouseUp_CmdClickOnLinkUnderReportingOpensURL(t *testing.T) {
+	tm, buf := reportingLinkTerm(t)
+
+	var opened string
+	orig := openURLFn
+	openURLFn = func(u string) { opened = u }
+	defer func() { openURLFn = orig }()
+
+	clickAt(tm, 65, 10, gui.ModSuper)
+	tm.onMouseUp(gui.EventCtx{Layout: nil, Event: &gui.Event{
+		MouseX: 65, MouseY: 10,
+		MouseButton: gui.MouseLeft,
+		Modifiers:   gui.ModSuper,
+	}, Window: &gui.Window{}})
+
+	if opened != "https://go.dev" {
+		t.Errorf("Cmd+click under ?1003: opened %q, want %q", opened, "https://go.dev")
+	}
+	if got := string(*buf); got != "" {
+		t.Errorf("Cmd+click under ?1003: reported %q, want nothing", got)
+	}
+}
+
+// An OSC 8 destination outranks the text under the pointer, the same
+// precedence linkURLAt gives the non-reporting path.
+func TestLinkURLAt_ExplicitLinkWinsOverDetectedText(t *testing.T) {
+	tm, _ := newMouseTerm(4, 30)
+	putRow(tm.grid, "see https://go.dev now")
+	tm.grid.Mu.Lock()
+	id := tm.grid.internLink("https://example.com")
+	tm.grid.At(0, 6).LinkID = id
+	tm.grid.Mu.Unlock()
+
+	if got := tm.linkURLAt(0, 6); got != "https://example.com" {
+		t.Errorf("linkURLAt on an OSC 8 cell = %q, want the explicit destination", got)
+	}
+	if got := tm.linkURLAt(0, 7); got != "https://go.dev" {
+		t.Errorf("linkURLAt on a plain URL cell = %q, want the detected URL", got)
+	}
+}
+
+// A move without Cmd resolves no link, but must still track where the pointer
+// is: syncHoverForModifiers resolves at the stored cell, so a stale one made a
+// later Cmd press light up the previously Cmd+clicked link instead of the one
+// under the cursor.
+func TestOnMouseMove_ReportingWithoutCmdStillTracksHoverCell(t *testing.T) {
+	tm, _ := newMouseTerm(4, 40)
+	putRow(tm.grid, "https://a.dev and https://b.dev")
+	tm.grid.Mu.Lock()
+	tm.grid.MouseTrackAny = true
+	tm.grid.MouseSGR = true
+	tm.grid.Mu.Unlock()
+
+	// Cmd over the first link — the state a Cmd+click leaves behind.
+	moveTo(tm, 35, 10, gui.ModSuper) // col 3
+	if tm.mouse.hoverURL != "https://a.dev" {
+		t.Fatalf("setup: hoverURL = %q, want the first link", tm.mouse.hoverURL)
+	}
+
+	// Release Cmd, move onto the second link, then press Cmd without moving.
+	moveTo(tm, 245, 10, 0) // col 24
+	tm.syncHoverForModifiers(gui.ModSuper, &gui.Window{})
+
+	if tm.mouse.hoverURL != "https://b.dev" {
+		t.Errorf("Cmd pressed over the second link: hoverURL = %q, want %q",
+			tm.mouse.hoverURL, "https://b.dev")
+	}
+}
+
+// A same-row drag to the left, then a move to the next row, must keep the anchor
+// at the press point. The same-row path used to write min(press, pointer) into
+// SelAnchor, so the cross-row selection started at the leftmost point the drag
+// had reached and copied cells the user never selected.
+func TestOnMouseMove_AnchorSurvivesLeftwardSameRowDrag(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20) // cellW=10, cellH=20
+	win := &gui.Window{}
+	down := &gui.Event{MouseX: 100, MouseY: 5, MouseButton: gui.MouseLeft} // boundary 10
+	tm.onClick(gui.EventCtx{Event: down, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 50, MouseY: 5}, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 50, MouseY: 25}, Window: win})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if want := (contentPos{Row: 0, Col: 10}); tm.grid.SelAnchor != want {
+		t.Errorf("SelAnchor = %v, want press point %v", tm.grid.SelAnchor, want)
+	}
+	if want := (contentPos{Row: 1, Col: 5}); tm.grid.SelHead != want {
+		t.Errorf("SelHead = %v, want %v", tm.grid.SelHead, want)
+	}
+}
+
+// Dragging back to exactly the press point collapses the selection. It used to
+// keep the span of the previous move, because logicalSpan reports ok=false for
+// an empty range and the old code then left SelAnchor/SelHead alone.
+func TestOnMouseMove_DragBackToPressCollapses(t *testing.T) {
+	tm, _ := newMouseTerm(4, 20)
+	win := &gui.Window{}
+	down := &gui.Event{MouseX: 100, MouseY: 5, MouseButton: gui.MouseLeft}
+	tm.onClick(gui.EventCtx{Event: down, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 50, MouseY: 5}, Window: win})
+	tm.onMouseMove(gui.EventCtx{Event: &gui.Event{MouseX: 100, MouseY: 5}, Window: win})
+
+	tm.grid.Mu.Lock()
+	defer tm.grid.Mu.Unlock()
+	if tm.grid.SelActive {
+		t.Errorf("selection active after drag back to press point: %v..%v",
+			tm.grid.SelAnchor, tm.grid.SelHead)
+	}
+}
