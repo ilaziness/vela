@@ -18,7 +18,7 @@ import { newConnectionTabName, t, useLanguage } from "../../i18n";
 export default function Header() {
   const lang = useLanguage();
   const { sessionTabs, pushTab } = useSessionTabsStore();
-  const frameless = useFrameless();
+  const frameless = useFrameless() === true;
   const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);

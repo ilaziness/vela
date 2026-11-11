@@ -59,7 +59,7 @@ export default function Header() {
   const bookmarkConnectOpen = useUIStore((s) => s.bookmarkConnectOpen);
   const setBookmarkConnectOpen = useUIStore((s) => s.setBookmarkConnectOpen);
   const toggleBookmarkConnect = useUIStore((s) => s.toggleBookmarkConnect);
-  const frameless = useFrameless();
+  const frameless = useFrameless() === true;
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [newVersion, setNewVersion] = useState<NewVersion | null>(null);
   const lang = useLanguage();
