@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/protocol"
@@ -35,10 +36,10 @@ func Form(bus protocol.Bus, draft *protocol.Draft, mgr *serial.Manager) gui.View
 		Content: []gui.View{
 			gui.Combobox(gui.ComboboxCfg{
 				ID:          "serial-device",
-				Label:       "串口设备*",
+				Label:       i18n.T("serial.device") + "*",
 				Value:       p.Device,
 				Items:       ports,
-				Placeholder: "选择串口",
+				Placeholder: i18n.T("serial.device_placeholder"),
 				Sizing:      gui.FillFit,
 				Disabled:    busy,
 				OnSelect: func(v string, ctx gui.EventCtx) {
@@ -48,7 +49,7 @@ func Form(bus protocol.Bus, draft *protocol.Draft, mgr *serial.Manager) gui.View
 			}),
 			gui.Select(gui.SelectCfg{
 				ID:       "serial-baud",
-				Label:    "波特率*",
+				Label:    i18n.T("serial.baud_rate") + "*",
 				Items:    baudRates,
 				Selected: []string{strconv.Itoa(p.BaudRate)},
 				Sizing:   gui.FillFit,
@@ -69,12 +70,14 @@ func Form(bus protocol.Bus, draft *protocol.Draft, mgr *serial.Manager) gui.View
 				Spacing: gui.SpacingMedium,
 				HAlign:  gui.HAlignCenter,
 				Content: []gui.View{
-					protocol.FormActionBtn(th, "serial-test", "测试连接", "测试中…", "test",
+					protocol.FormActionBtn(th, "serial-test",
+						i18n.T("bookmark.test_connect"), i18n.T("shell.action.testing"), "test",
 						gui.ButtonSecondary, busy, busyOp, func(ctx gui.EventCtx) {
 							ctx.Consume()
 							bus.Test(*draft)
 						}),
-					protocol.FormActionBtn(th, "serial-connect", "连接", "连接中…", "connect",
+					protocol.FormActionBtn(th, "serial-connect",
+						i18n.T("common.connect"), i18n.T("shell.action.connecting"), "connect",
 						gui.ButtonPrimary, busy, busyOp, func(ctx gui.EventCtx) {
 							ctx.Consume()
 							bus.Connect(*draft)
@@ -82,11 +85,14 @@ func Form(bus protocol.Bus, draft *protocol.Draft, mgr *serial.Manager) gui.View
 					gui.Button(gui.ButtonCfg{
 						ID:       "serial-save",
 						Variant:  gui.ButtonGhost,
-						Label:    "保存",
+						Label:    i18n.T("common.save"),
 						Disabled: busy,
 						OnClick: func(ctx gui.EventCtx) {
 							ctx.Consume()
-							ctx.Window.Toast(gui.ToastCfg{Body: "保存书签（占位）", Severity: gui.ToastInfo})
+							ctx.Window.Toast(gui.ToastCfg{
+								Body:     i18n.T("shell.placeholder.save_bookmark"),
+								Severity: gui.ToastInfo,
+							})
 						},
 					}),
 				},

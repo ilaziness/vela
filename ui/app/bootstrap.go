@@ -39,6 +39,7 @@ func Bootstrap() (*Runtime, error) {
 		return nil, err
 	}
 	config.BootstrapLanguage(store, logger)
+	applyGUILocale()
 
 	hub := termio.NewHub()
 	hostKey := sshui.NewHostKeyPrompter(nil, nil)

@@ -3,6 +3,7 @@ package shell
 import (
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/session"
 )
@@ -36,7 +37,7 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 			body = session.FormHost(w, ctrl, tab)
 		}
 	} else {
-		body = gui.Label("打开一个标签页开始", gui.CurrentTheme().TextStyleSecondary)
+		body = gui.Label(i18n.T("shell.tab.open_hint"), gui.CurrentTheme().TextStyleSecondary)
 	}
 	th := gui.CurrentTheme()
 	return gui.Column(flush(gui.ContainerCfg{

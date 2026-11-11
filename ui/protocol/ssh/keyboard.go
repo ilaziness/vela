@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
 )
 
@@ -58,7 +59,7 @@ func (p *KeyboardPrompter) Prompt(c ssh.KeyboardChallenge) error {
 			return
 		}
 		q := c.Questions[i]
-		title := "SSH authentication"
+		title := i18n.T("shell.ssh.authentication")
 		if c.Name != "" {
 			title = c.Name
 		}

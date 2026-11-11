@@ -2,12 +2,14 @@ package sshui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/protocol"
@@ -80,7 +82,7 @@ func endpointFromDraft(draft protocol.Draft) (ssh.Endpoint, error) {
 	host := strings.TrimSpace(p.Host)
 	user := strings.TrimSpace(p.User)
 	if host == "" || user == "" {
-		return ssh.Endpoint{}, fmt.Errorf("host and username are required")
+		return ssh.Endpoint{}, errors.New(i18n.T("bookmark.connect_fields_required"))
 	}
 	port := p.Port
 	if port <= 0 {
@@ -129,7 +131,7 @@ func payloadFrom(v any) (Payload, bool) {
 func Entry(mgr *ssh.Manager, hub *termio.Hub, logger *zap.Logger, globalProxy func() ssh.GlobalProxy) protocol.Entry {
 	return protocol.Entry{
 		Protocol: termio.ProtocolSSH,
-		Label:    "SSH",
+		Label:    i18n.T("session.protocol.ssh"),
 		Enabled:  true,
 		Connect:  NewConnector(mgr, hub, logger, globalProxy),
 		Form:     Form,

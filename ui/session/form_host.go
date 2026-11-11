@@ -3,6 +3,7 @@ package session
 import (
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/layout"
@@ -31,7 +32,7 @@ func FormHost(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 		proto = string(termio.ProtocolSSH)
 	}
 
-	body := gui.Label("该协议暂未实现", th.TextStyleSecondary)
+	body := gui.Label(i18n.T("shell.protocol.unimplemented"), th.TextStyleSecondary)
 	if e, ok := reg.Get(tab.Protocol); ok && e.Enabled && e.Form != nil {
 		body = e.Form(ctrl, &tab.Draft)
 	}

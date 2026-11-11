@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
 )
 
@@ -28,8 +29,8 @@ const (
 	navSettings     = "settings"
 )
 
-// IconRail is the far-left nav strip. One top group only:
-// 快速连接 | 书签 | 备份恢复 | 工具箱 | 设置.
+// IconRail is the far-left nav strip:
+// quick-connect | bookmarks | backup | tools | settings.
 func IconRail(w *gui.Window) gui.View {
 	th := gui.CurrentTheme()
 	st := gui.State[app.State](w)
@@ -39,15 +40,15 @@ func IconRail(w *gui.Window) gui.View {
 		return railBtn(id, glyph, tip, th, false, func(ctx gui.EventCtx) {
 			ctx.Consume()
 			ctx.Window.Toast(gui.ToastCfg{
-				Body:     tip + "（占位）",
+				Body:     i18n.Tf("shell.placeholder.feature", tip),
 				Severity: gui.ToastInfo,
 				Duration: 2 * time.Second,
 			})
 		})
 	}
 
-	// 快速连接：弹出书签列（替代原书签轨按钮）。
-	quickBtn := railBtn(navQuickConnect, gui.IconBolt, "快速连接", th, quickOpen, func(ctx gui.EventCtx) {
+	// Quick connect: toggle the bookmark side panel.
+	quickBtn := railBtn(navQuickConnect, gui.IconBolt, i18n.T("shell.nav.quick_connect"), th, quickOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
 		s := gui.State[app.State](ctx.Window)
 		if s.ActiveNav == navQuickConnect && s.SideVisible {
@@ -73,10 +74,10 @@ func IconRail(w *gui.Window) gui.View {
 				HAlign:  gui.HAlignCenter,
 				Content: []gui.View{
 					quickBtn,
-					placeholder(navBookmarks, gui.IconBookmark, "书签"),
-					placeholder(navBackup, gui.IconSync, "备份恢复"),
-					placeholder(navTools, gui.IconWrench, "工具箱"),
-					placeholder(navSettings, gui.IconGear, "设置"),
+					placeholder(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks")),
+					placeholder(navBackup, gui.IconSync, i18n.T("header.backup_restore")),
+					placeholder(navTools, gui.IconWrench, i18n.T("header.tools")),
+					placeholder(navSettings, gui.IconGear, i18n.T("header.settings")),
 				},
 			})),
 		},

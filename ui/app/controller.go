@@ -10,8 +10,10 @@ import (
 	"github.com/go-gui-org/go-term/term"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/termstream"
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/ui/protocol"
 )
 
@@ -89,6 +91,28 @@ func (c *Controller) toast(sev gui.ToastSeverity, title, body string) {
 	})
 }
 
+// errText formats errors for toast. usererr.Error() is JSON (Wails RPC
+// contract); native UI shows the coded message in the current language.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	if ue, ok := usererr.As(err); ok {
+		if ue.Code != "" {
+			if len(ue.Params) == 0 {
+				return i18n.T(ue.Code)
+			}
+			args := make([]any, len(ue.Params))
+			for i, p := range ue.Params {
+				args[i] = p
+			}
+			return i18n.Tf(ue.Code, args...)
+		}
+		return ue.Message
+	}
+	return err.Error()
+}
+
 // Connect implements protocol.Bus.
 func (c *Controller) Connect(draft protocol.Draft) {
 	c.runConnect(draft, false)
@@ -116,7 +140,7 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	}
 	entry, ok := c.registry.Get(draft.Protocol)
 	if !ok || !entry.Enabled || entry.Connect == nil {
-		c.toast(gui.ToastError, "", "协议不可用")
+		c.toast(gui.ToastError, "", i18n.T("shell.connect.protocol_unavailable"))
 		return
 	}
 	op := "connect"
@@ -141,10 +165,14 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 				st.Busy = false
 				st.BusyOp = ""
 				if err != nil {
-					w.Toast(gui.ToastCfg{Body: err.Error(), Severity: gui.ToastError, Duration: 4 * time.Second})
+					w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 					return
 				}
-				w.Toast(gui.ToastCfg{Body: "测试连接成功", Severity: gui.ToastSuccess, Duration: 3 * time.Second})
+				w.Toast(gui.ToastCfg{
+					Body:     i18n.T("shell.connect.test_ok"),
+					Severity: gui.ToastSuccess,
+					Duration: 3 * time.Second,
+				})
 			})
 			return
 		}
@@ -154,7 +182,7 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 				st := gui.State[State](w)
 				st.Busy = false
 				st.BusyOp = ""
-				w.Toast(gui.ToastCfg{Body: err.Error(), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 			})
 			return
 		}
@@ -163,13 +191,13 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 			st.Busy = false
 			st.BusyOp = ""
 			if err := c.attachSession(w, st, sess); err != nil {
-				w.Toast(gui.ToastCfg{Body: err.Error(), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				_ = sess.Close()
 				c.hub.Unregister(sess.ID())
 				return
 			}
 			w.Toast(gui.ToastCfg{
-				Body:     "已连接: " + sess.Label(),
+				Body:     i18n.Tf("shell.connect.connected", sess.Label()),
 				Severity: gui.ToastSuccess,
 				Duration: 3 * time.Second,
 			})

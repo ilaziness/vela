@@ -58,7 +58,6 @@ func (s *State) OpenConnectTab(newDraft func() protocol.Draft) string {
 	}
 	s.Tabs = append(s.Tabs, Tab{
 		ID:       id,
-		Title:    "新建连接…",
 		Kind:     TabConnect,
 		Protocol: draft.Protocol,
 		Draft:    draft,

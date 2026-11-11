@@ -2,9 +2,11 @@ package serialui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/protocol"
@@ -59,7 +61,7 @@ func openConfigFromDraft(draft protocol.Draft) (serial.OpenConfig, error) {
 	}
 	device := strings.TrimSpace(p.Device)
 	if device == "" {
-		return serial.OpenConfig{}, fmt.Errorf("请选择串口设备")
+		return serial.OpenConfig{}, errors.New(i18n.T("serial.device_required"))
 	}
 	baud := p.BaudRate
 	if baud <= 0 {
@@ -90,7 +92,7 @@ func payloadFrom(v any) (Payload, bool) {
 func Entry(mgr *serial.Manager, hub *termio.Hub) protocol.Entry {
 	return protocol.Entry{
 		Protocol: termio.ProtocolSerial,
-		Label:    "串口",
+		Label:    i18n.T("session.protocol.serial"),
 		Enabled:  true,
 		Connect:  NewConnector(mgr, hub),
 		Form:     bindForm(mgr),

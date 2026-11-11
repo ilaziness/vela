@@ -3,6 +3,7 @@ package session
 import (
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/layout"
 )
@@ -34,8 +35,8 @@ func TabBar(w *gui.Window, ctrl *app.Controller) gui.View {
 // one tab, not two adjacent ghost buttons.
 func tabChip(th gui.Theme, tab app.Tab, active bool, ctrl *app.Controller) gui.View {
 	fullTitle := tab.Title
-	if fullTitle == "" {
-		fullTitle = "新建连接…"
+	if tab.Kind == app.TabConnect {
+		fullTitle = i18n.T("shell.tab.new_ellipsis")
 	}
 	label := fullTitle
 	if active {
@@ -129,7 +130,7 @@ func tabAddBtn(th gui.Theme, ctrl *app.Controller) gui.View {
 			}),
 		}
 		if is.Hovered {
-			views = append(views, tabTip("tab-add-tip", "新建标签"))
+			views = append(views, tabTip("tab-add-tip", i18n.T("shell.tab.new")))
 		}
 		return gui.Column(layout.Flush(gui.ContainerCfg{
 			ID:      addID,

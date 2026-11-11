@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/protocol"
 )
@@ -37,26 +38,28 @@ func Form(bus protocol.Bus, draft *protocol.Draft) gui.View {
 		Spacing: gui.SpacingMedium,
 		HAlign:  gui.HAlignStart,
 		Content: []gui.View{
-			field("ssh-host", "主机地址*", p.Host, false, func(v string) { p.Host = v }),
-			field("ssh-port", "端口*", strconv.Itoa(p.Port), false, func(v string) {
+			field("ssh-host", i18n.T("bookmark.field.host")+"*", p.Host, false, func(v string) { p.Host = v }),
+			field("ssh-port", i18n.T("bookmark.field.port")+"*", strconv.Itoa(p.Port), false, func(v string) {
 				n, err := strconv.Atoi(v)
 				if err == nil {
 					p.Port = n
 				}
 			}),
-			field("ssh-user", "用户名*", p.User, false, func(v string) { p.User = v }),
-			field("ssh-pass", "密码", p.Password, true, func(v string) { p.Password = v }),
+			field("ssh-user", i18n.T("bookmark.field.username")+"*", p.User, false, func(v string) { p.User = v }),
+			field("ssh-pass", i18n.T("bookmark.field.password"), p.Password, true, func(v string) { p.Password = v }),
 			gui.Row(layout.Flush(gui.ContainerCfg{
 				Sizing:  gui.FillFit,
 				Spacing: gui.SpacingMedium,
 				HAlign:  gui.HAlignCenter,
 				Content: []gui.View{
-					protocol.FormActionBtn(th, "ssh-test", "测试连接", "测试中…", "test",
+					protocol.FormActionBtn(th, "ssh-test",
+						i18n.T("bookmark.test_connect"), i18n.T("shell.action.testing"), "test",
 						gui.ButtonSecondary, busy, busyOp, func(ctx gui.EventCtx) {
 							ctx.Consume()
 							bus.Test(*draft)
 						}),
-					protocol.FormActionBtn(th, "ssh-connect", "连接", "连接中…", "connect",
+					protocol.FormActionBtn(th, "ssh-connect",
+						i18n.T("common.connect"), i18n.T("shell.action.connecting"), "connect",
 						gui.ButtonPrimary, busy, busyOp, func(ctx gui.EventCtx) {
 							ctx.Consume()
 							bus.Connect(*draft)
@@ -64,11 +67,14 @@ func Form(bus protocol.Bus, draft *protocol.Draft) gui.View {
 					gui.Button(gui.ButtonCfg{
 						ID:       "ssh-save",
 						Variant:  gui.ButtonGhost,
-						Label:    "保存",
+						Label:    i18n.T("common.save"),
 						Disabled: busy,
 						OnClick: func(ctx gui.EventCtx) {
 							ctx.Consume()
-							ctx.Window.Toast(gui.ToastCfg{Body: "保存书签（占位）", Severity: gui.ToastInfo})
+							ctx.Window.Toast(gui.ToastCfg{
+								Body:     i18n.T("shell.placeholder.save_bookmark"),
+								Severity: gui.ToastInfo,
+							})
 						},
 					}),
 				},

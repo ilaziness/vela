@@ -3,6 +3,7 @@ package shell
 import (
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/bookmarks"
 )
@@ -25,7 +26,7 @@ func SidePanel(_ *app.Controller) gui.View {
 				Content: []gui.View{
 					gui.Input(gui.InputCfg{
 						ID:          "bookmark-search",
-						Placeholder: "搜索书签",
+						Placeholder: i18n.T("bookmark.search_connect_placeholder"),
 						Sizing:      gui.FillFit,
 						OnTextChanged: func(v string, ctx gui.EventCtx) {
 							gui.State[app.State](ctx.Window).SearchQuery = v

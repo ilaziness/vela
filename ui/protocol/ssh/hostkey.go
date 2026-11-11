@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
 )
 
@@ -47,14 +48,14 @@ func (p *HostKeyPrompter) Prompt(hp ssh.HostKeyPrompt) error {
 		return fmt.Errorf("host key prompter not ready")
 	}
 
-	body := fmt.Sprintf("Host: %s\nAddress: %s\nType: %s\nFingerprint:\n%s",
+	body := i18n.Tf("shell.ssh.host_key_body",
 		hp.Host, hp.Address, hp.KeyType, hp.Fingerprint)
-	title := "Trust host key?"
+	title := i18n.T("shell.ssh.trust_host_key")
 	level := gui.AlertWarning
 	if hp.Mismatch {
-		title = "Host key changed!"
+		title = i18n.T("shell.ssh.host_key_changed")
 		level = gui.AlertCritical
-		body = fmt.Sprintf("%s\n\nPrevious fingerprint:\n%s", body, hp.OldFingerprint)
+		body = body + "\n\n" + i18n.Tf("shell.ssh.host_key_previous", hp.OldFingerprint)
 	}
 
 	win.QueueCommand(func(w *gui.Window) {
