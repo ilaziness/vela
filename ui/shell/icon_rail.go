@@ -59,6 +59,13 @@ func IconRail(w *gui.Window, chrome Chrome) gui.View {
 		s.SideVisible = true
 	})
 
+	backupBtn := railBtn(navBackup, gui.IconSync, i18n.T("header.backup_restore"), th, false, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		if chrome.OnBackup != nil {
+			chrome.OnBackup()
+		}
+	})
+
 	toolsBtn := railBtn(navTools, gui.IconWrench, i18n.T("header.tools"), th, false, func(ctx gui.EventCtx) {
 		ctx.Consume()
 		if chrome.OnTools != nil {
@@ -89,7 +96,7 @@ func IconRail(w *gui.Window, chrome Chrome) gui.View {
 				Content: []gui.View{
 					quickBtn,
 					placeholder(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks")),
-					placeholder(navBackup, gui.IconSync, i18n.T("header.backup_restore")),
+					backupBtn,
 					toolsBtn,
 					settingsBtn,
 				},

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/tools"
 	"github.com/ilaziness/vela/ui/app"
+	"github.com/ilaziness/vela/ui/backup"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/settings"
 	"github.com/ilaziness/vela/ui/shell"
@@ -45,6 +46,12 @@ func main() {
 		Core:    tools.New(),
 		IconPNG: appIconPNG,
 	}
+	backupDeps := &backup.Deps{
+		Store:  rt.Store,
+		Vault:  rt.Vault,
+		DB:     rt.DB,
+		Logger: rt.Logger,
+	}
 
 	mainWin := gui.NewWindow(gui.WindowCfg{
 		Title:   "Vela",
@@ -58,6 +65,7 @@ func main() {
 				return shell.Root(w, rt.Ctrl, shell.Chrome{
 					OnSettings: func() { settings.Open(settingsDeps) },
 					OnTools:    func() { toolsui.Open(toolsDeps) },
+					OnBackup:   func() { backup.Start(w, backupDeps) },
 				})
 			})
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {

@@ -588,6 +588,7 @@
   "settings.sync.history": "Backup history",
   "settings.sync.load_backups_failed": "Failed to load backups: %s",
   "settings.sync.load_history_failed": "Failed to load history: %s",
+  "settings.sync.load_more": "Load more",
   "settings.sync.no_backups": "No backups yet",
   "settings.sync.pick_backup": "Select a backup",
   "settings.sync.provider": "Storage",

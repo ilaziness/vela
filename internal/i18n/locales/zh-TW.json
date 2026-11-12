@@ -588,6 +588,7 @@
   "settings.sync.history": "備份歷史",
   "settings.sync.load_backups_failed": "載入備份失敗：%s",
   "settings.sync.load_history_failed": "載入歷史失敗：%s",
+  "settings.sync.load_more": "載入更多",
   "settings.sync.no_backups": "還沒有備份",
   "settings.sync.pick_backup": "請選擇備份",
   "settings.sync.provider": "儲存方式",

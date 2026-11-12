@@ -10,6 +10,7 @@ import (
 type Chrome struct {
 	OnSettings func()
 	OnTools    func()
+	OnBackup   func()
 }
 
 func flush(cfg gui.ContainerCfg) gui.ContainerCfg { return layout.Flush(cfg) }
