@@ -10,13 +10,13 @@ import (
 )
 
 // Apply configures ThemeDark text sizes and font families:
-//   - UI (TextStyleDef): system default sans (generic "sans-serif")
-//   - Mono (theme code roles): system default monospace ("monospace")
+//   - UI Family (TextStyleDef): opt-in — only set when general.font is a
+//     real family; otherwise leave ThemeDark's platform default
+//   - UI Size: from general.font_size
+//   - Mono (theme code roles): from terminal.font (platform mono defaults)
 //
-// go-glyph maps those generics to the platform face (Segoe UI / Consolas on
-// Windows, etc.) and falls missing glyphs (CJK) back to system script fonts
-// such as Microsoft YaHei. Locale is seeded so that CJK tier prefers the
-// right regional face when LANG is unset.
+// Locale is seeded so that CJK glyph fallback prefers the right regional
+// face when LANG is unset. Missing glyphs still fall back through go-glyph.
 func Apply(cfg *config.Config) {
 	if cfg == nil {
 		cfg = config.Default()
@@ -29,7 +29,9 @@ func Apply(cfg *config.Config) {
 	}
 
 	tcfg := gui.ThemeDark.Cfg
-	tcfg.TextStyleDef.Family = uiFamily(cfg.General.Font)
+	if fam := configuredUIFamily(cfg.General.Font); fam != "" {
+		tcfg.TextStyleDef.Family = fam
+	}
 	tcfg.TextStyleDef.Size = uiSize
 	tcfg.MonoFontFamily = monoFamily(cfg.Terminal.Font)
 	// Keep the bundled Feather icon face for TextStyleIcon* roles.
@@ -50,10 +52,16 @@ func TermStyle(cfg config.TerminalConfig) gui.TextStyle {
 	}
 }
 
-// uiFamily: empty config → system sans; otherwise first name in the stack,
-// falling back to "sans-serif".
-func uiFamily(configured string) string {
-	return pickFamily(configured, []string{"sans-serif"})
+// configuredUIFamily returns the first usable family from a CSS-like stack,
+// or "" when none is configured (Apply must not override ThemeDark Family).
+func configuredUIFamily(configured string) string {
+	for _, name := range splitFamilies(configured) {
+		if name == "" || isPseudoFamily(name) {
+			continue
+		}
+		return name
+	}
+	return ""
 }
 
 // monoFamily: empty config → system mono; otherwise first name in the stack,
@@ -81,10 +89,7 @@ func ensureCJKLocale(lang string) {
 // pickFamily returns the first usable family from a CSS-like stack, else the
 // first default. go-gui takes a single Family; commas are config-only.
 func pickFamily(configured string, defaults []string) string {
-	for _, name := range splitFamilies(configured) {
-		if name == "" || isPseudoFamily(name) {
-			continue
-		}
+	if name := configuredUIFamily(configured); name != "" {
 		return name
 	}
 	for _, name := range defaults {
