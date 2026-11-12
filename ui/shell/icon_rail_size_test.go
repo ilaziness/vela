@@ -16,7 +16,7 @@ func TestIconRailButtonGeometry(t *testing.T) {
 		State:  &app.State{},
 	})
 	root := w.TestRender(func(win *gui.Window) gui.View {
-		return shell.Root(win, &app.Controller{}, nil)
+		return shell.Root(win, &app.Controller{}, shell.Chrome{})
 	})
 
 	rail, ok := findID(root, "icon-rail")
@@ -27,7 +27,7 @@ func TestIconRailButtonGeometry(t *testing.T) {
 		t.Fatalf("rail width = %v, want 30", rail.Shape.Width)
 	}
 
-	for _, id := range []string{"rail-quick-connect", "rail-bookmarks", "rail-settings"} {
+	for _, id := range []string{"rail-quick-connect", "rail-bookmarks", "rail-tools", "rail-settings"} {
 		cell, ok := findID(root, id)
 		if !ok || cell.Shape == nil {
 			t.Fatalf("missing %s", id)

@@ -31,7 +31,7 @@ const (
 
 // IconRail is the far-left nav strip:
 // quick-connect | bookmarks | backup | tools | settings.
-func IconRail(w *gui.Window, onSettings func()) gui.View {
+func IconRail(w *gui.Window, chrome Chrome) gui.View {
 	th := gui.CurrentTheme()
 	st := gui.State[app.State](w)
 	quickOpen := st.ActiveNav == navQuickConnect && st.SideVisible
@@ -59,10 +59,17 @@ func IconRail(w *gui.Window, onSettings func()) gui.View {
 		s.SideVisible = true
 	})
 
+	toolsBtn := railBtn(navTools, gui.IconWrench, i18n.T("header.tools"), th, false, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		if chrome.OnTools != nil {
+			chrome.OnTools()
+		}
+	})
+
 	settingsBtn := railBtn(navSettings, gui.IconGear, i18n.T("header.settings"), th, false, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		if onSettings != nil {
-			onSettings()
+		if chrome.OnSettings != nil {
+			chrome.OnSettings()
 		}
 	})
 
@@ -83,7 +90,7 @@ func IconRail(w *gui.Window, onSettings func()) gui.View {
 					quickBtn,
 					placeholder(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks")),
 					placeholder(navBackup, gui.IconSync, i18n.T("header.backup_restore")),
-					placeholder(navTools, gui.IconWrench, i18n.T("header.tools")),
+					toolsBtn,
 					settingsBtn,
 				},
 			})),

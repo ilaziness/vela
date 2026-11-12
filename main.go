@@ -7,10 +7,12 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-gui/gui/backend"
 
+	"github.com/ilaziness/vela/internal/tools"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/settings"
 	"github.com/ilaziness/vela/ui/shell"
+	toolsui "github.com/ilaziness/vela/ui/tools"
 )
 
 //go:embed assets/appicon.png
@@ -38,6 +40,11 @@ func main() {
 		Keybind: rt.Keybind,
 		IconPNG: appIconPNG,
 	}
+	toolsDeps := &toolsui.Deps{
+		App:     guiApp,
+		Core:    tools.New(),
+		IconPNG: appIconPNG,
+	}
 
 	mainWin := gui.NewWindow(gui.WindowCfg{
 		Title:   "Vela",
@@ -48,8 +55,9 @@ func main() {
 		OnInit: func(w *gui.Window) {
 			rt.BindWindow(w)
 			w.SetView(func(w *gui.Window) gui.View {
-				return shell.Root(w, rt.Ctrl, func() {
-					settings.Open(settingsDeps)
+				return shell.Root(w, rt.Ctrl, shell.Chrome{
+					OnSettings: func() { settings.Open(settingsDeps) },
+					OnTools:    func() { toolsui.Open(toolsDeps) },
 				})
 			})
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
