@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/sync"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/internal/vaultcheck"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/vaultprompt"
 )
@@ -48,7 +49,7 @@ func errText(err error) string {
 }
 
 func withVault(w *gui.Window, d *Deps, reason string, fn func()) {
-	vaultprompt.Unlock(w, vaultprompt.UnlockCfg{
+	cfg := vaultprompt.UnlockCfg{
 		Vault:       d.Vault,
 		UserDataDir: d.Store.UserDataDir(),
 		Reason:      reason,
@@ -58,7 +59,13 @@ func withVault(w *gui.Window, d *Deps, reason string, fn func()) {
 		OnFail: func(win *gui.Window, err error) {
 			toastErr(win, err)
 		},
-	})
+	}
+	if vaultcheck.HasEncryptedSecrets(d.Store, d.DB) {
+		cfg.Probe = func(pw string) bool {
+			return vaultcheck.ProbePassword(d.Store, d.DB, pw)
+		}
+	}
+	vaultprompt.Unlock(w, cfg)
 }
 
 func resolveSyncPlain(d *Deps, cfg sync.SyncConfig) (sync.SyncConfig, error) {

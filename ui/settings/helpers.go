@@ -10,6 +10,7 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/internal/vaultcheck"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/vaultprompt"
 )
@@ -164,7 +165,7 @@ func panelColumn(title string, body []gui.View) gui.View {
 // withVault runs fn once the process vault has a password.
 // If locked, shows the shared masked unlock dialog.
 func withVault(w *gui.Window, d *Deps, reason string, fn func()) {
-	vaultprompt.Unlock(w, vaultprompt.UnlockCfg{
+	cfg := vaultprompt.UnlockCfg{
 		Vault:       d.Vault,
 		UserDataDir: d.Store.UserDataDir(),
 		Reason:      reason,
@@ -174,7 +175,13 @@ func withVault(w *gui.Window, d *Deps, reason string, fn func()) {
 		OnFail: func(win *gui.Window, err error) {
 			toastErr(win, err)
 		},
-	})
+	}
+	if vaultcheck.HasEncryptedSecrets(d.Store, d.DB) {
+		cfg.Probe = func(pw string) bool {
+			return vaultcheck.ProbePassword(d.Store, d.DB, pw)
+		}
+	}
+	vaultprompt.Unlock(w, cfg)
 }
 
 func encryptOrKeep(d *Deps, plain, incomingEnc, previousEnc string) (string, error) {

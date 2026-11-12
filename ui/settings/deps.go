@@ -4,6 +4,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/keybind"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/ssh"
@@ -20,5 +21,6 @@ type Deps struct {
 	Vault   *secret.Vault
 	Keys    *sshkey.Service
 	Keybind *keybind.Manager
+	DB      *database.Database
 	IconPNG []byte
 }
