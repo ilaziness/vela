@@ -16,7 +16,7 @@ func TestIconRailButtonGeometry(t *testing.T) {
 		State:  &app.State{},
 	})
 	root := w.TestRender(func(win *gui.Window) gui.View {
-		return shell.Root(win, &app.Controller{})
+		return shell.Root(win, &app.Controller{}, nil)
 	})
 
 	rail, ok := findID(root, "icon-rail")

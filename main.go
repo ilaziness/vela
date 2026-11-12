@@ -9,6 +9,7 @@ import (
 
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/fonts"
+	"github.com/ilaziness/vela/ui/settings"
 	"github.com/ilaziness/vela/ui/shell"
 )
 
@@ -21,10 +22,24 @@ func main() {
 		log.Fatal(err)
 	}
 
+	guiApp := gui.NewApp()
+	rt.App = guiApp
+
 	// UI: system sans; terminal/mono: system monospace; missing glyphs → system CJK.
 	fonts.Apply(rt.Store.Config)
 
-	win := gui.NewWindow(gui.WindowCfg{
+	settingsDeps := &settings.Deps{
+		App:     guiApp,
+		Store:   rt.Store,
+		Ctrl:    rt.Ctrl,
+		SSH:     rt.SSH,
+		Vault:   rt.Vault,
+		Keys:    rt.Keys,
+		Keybind: rt.Keybind,
+		IconPNG: appIconPNG,
+	}
+
+	mainWin := gui.NewWindow(gui.WindowCfg{
 		Title:   "Vela",
 		Width:   1280,
 		Height:  800,
@@ -33,7 +48,9 @@ func main() {
 		OnInit: func(w *gui.Window) {
 			rt.BindWindow(w)
 			w.SetView(func(w *gui.Window) gui.View {
-				return shell.Root(w, rt.Ctrl)
+				return shell.Root(w, rt.Ctrl, func() {
+					settings.Open(settingsDeps)
+				})
 			})
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
 				st := gui.State[app.State](w)
@@ -46,5 +63,5 @@ func main() {
 			w.Close()
 		},
 	})
-	backend.Run(win)
+	backend.RunApp(guiApp, mainWin)
 }

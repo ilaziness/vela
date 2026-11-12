@@ -97,7 +97,7 @@ func TestSettingsNavKeysPresent(t *testing.T) {
 			}
 		}
 	}
-	if got := TFor(LangZhCN, "settings.nav.general"); got != "通用" {
+	if got := TFor(LangZhCN, "settings.nav.general"); got != "一般" {
 		t.Fatalf("zh-CN settings.nav.general = %q", got)
 	}
 }

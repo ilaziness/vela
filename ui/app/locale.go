@@ -6,9 +6,9 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 )
 
-// applyGUILocale maps internal/i18n onto go-gui's active Locale so
-// Dialog Str* follow BootstrapLanguage. Call once after it.
-func applyGUILocale() {
+// ApplyGUILocale maps internal/i18n onto go-gui's active Locale so
+// Dialog Str* follow BootstrapLanguage / settings language saves.
+func ApplyGUILocale() {
 	switch i18n.Language() {
 	case i18n.LangZhCN:
 		gui.SetLocale(gui.LocaleZhCN)

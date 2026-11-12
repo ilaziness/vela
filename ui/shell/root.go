@@ -9,12 +9,12 @@ import (
 )
 
 // Root builds the edge-to-edge shell: icon rail | [bookmarks] | main.
-func Root(w *gui.Window, ctrl *app.Controller) gui.View {
+func Root(w *gui.Window, ctrl *app.Controller, onSettings func()) gui.View {
 	st := gui.State[app.State](w)
 	st.EnsureDefaults(ctrl.NewSSHDraft)
 	th := gui.CurrentTheme()
 
-	cols := []gui.View{IconRail(w), vRule()}
+	cols := []gui.View{IconRail(w, onSettings), vRule()}
 	if st.SideVisible && st.ActiveNav == navQuickConnect {
 		cols = append(cols, SidePanel(ctrl), vRule())
 	}

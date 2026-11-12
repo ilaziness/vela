@@ -9,8 +9,12 @@ import (
 
 	"github.com/ilaziness/vela/internal/applog"
 	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/keybind"
+	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
@@ -20,6 +24,7 @@ import (
 
 // Runtime holds process-wide dependencies for the native UI.
 type Runtime struct {
+	App      *gui.App
 	Logger   *zap.Logger
 	Store    *config.Store
 	Hub      *termio.Hub
@@ -29,6 +34,10 @@ type Runtime struct {
 	Ctrl     *Controller
 	HostKey  *sshui.HostKeyPrompter
 	Keyboard *sshui.KeyboardPrompter
+	DB       *database.Database
+	Vault    *secret.Vault
+	Keys     *sshkey.Service
+	Keybind  *keybind.Manager
 }
 
 // Bootstrap constructs engines and the protocol registry.
@@ -39,7 +48,19 @@ func Bootstrap() (*Runtime, error) {
 		return nil, err
 	}
 	config.BootstrapLanguage(store, logger)
-	applyGUILocale()
+	ApplyGUILocale()
+
+	db := database.NewDatabase(store.UserDataDir(), logger)
+	if err := db.Initialize(); err != nil {
+		return nil, err
+	}
+	vault := secret.NewVault()
+	keys := sshkey.New(logger, db, func(reason string) (string, error) {
+		return vault.Get()
+	}, func() {
+		vault.Clear()
+	}, nil)
+	kb := keybind.New(store)
 
 	hub := termio.NewHub()
 	hostKey := sshui.NewHostKeyPrompter(nil, nil)
@@ -76,6 +97,7 @@ func Bootstrap() (*Runtime, error) {
 		sshMgr.CloseAll()
 		serialMgr.CloseAll()
 		hub.Clear()
+		_ = db.Close()
 	})
 
 	return &Runtime{
@@ -88,6 +110,10 @@ func Bootstrap() (*Runtime, error) {
 		Ctrl:     ctrl,
 		HostKey:  hostKey,
 		Keyboard: keyboard,
+		DB:       db,
+		Vault:    vault,
+		Keys:     keys,
+		Keybind:  kb,
 	}, nil
 }
 

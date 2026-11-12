@@ -6,12 +6,12 @@
 
 ## 1. 技术栈概览
 
-| 类别     | 技术/库                         | 版本要求   |
-| -------- | ------------------------------- | ---------- |
-| 后端语言 | Go                              | ≥ 1.27.3   |
-| 桌面 UI  | go-gui                          | v0.92.x    |
-| 终端控件 | go-term（replace 本地补丁）     | v0.17.x    |
-| AI 框架  | Genkit                          | ≥ v1.14.0  |
+| 类别     | 技术/库                     | 版本要求  |
+| -------- | --------------------------- | --------- |
+| 后端语言 | Go                          | ≥ 1.27.3  |
+| 桌面 UI  | go-gui                      | v0.92.x   |
+| 终端控件 | go-term（replace 本地补丁） | v0.17.x   |
+| AI 框架  | Genkit                      | ≥ v1.14.0 |
 
 ---
 
@@ -24,8 +24,13 @@
 │   ├── app/                # 组合根、State、Controller
 │   ├── shell/              # 三栏布局：图标轨 / 侧栏 / 主区
 │   ├── session/            # Tab、表单宿主、终端面板、状态栏
+│   ├── settings/           # 设置窗口（各 panel + State/Deps）
+│   ├── vaultprompt/        # 可复用 Vault 解锁对话框（遮罩密码）
+│   ├── layout/             # 即时模式布局辅助（Flush 等）
+│   ├── fonts/              # 字体枚举
 │   ├── protocol/           # 协议插件接口 + Registry
-│   │   └── ssh/            # SSH 表单 / Connector / HostKey / Keyboard
+│   │   ├── ssh/            # SSH 表单 / Connector / HostKey / Keyboard
+│   │   └── serial/         # 串口表单 / Connector
 │   └── bookmarks/          # 书签树占位
 ├── internal/               # 引擎与基础设施（禁止 import ui）
 │   ├── termio/             # Protocol + Session + Hub
@@ -107,14 +112,14 @@
 
 ```bash
 # 编译（-s -w 去掉符号表/调试信息，减小体积）
-go build -trimpath -ldflags "-s -w" -o Vela.exe .
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe .
 # 或
 make build
 
 # 修改后验证
 go fmt ./...
 golangci-lint run
-go build -trimpath -ldflags "-s -w" .
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe .
 ```
 
 ---

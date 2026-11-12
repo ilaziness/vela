@@ -22,7 +22,7 @@ func FormHost(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 	opts := make([]gui.SegmentOption, 0, len(entries))
 	for _, e := range entries {
 		opts = append(opts, gui.SegmentOption{
-			Label:    e.Label,
+			Label:    protocolLabel(e.Protocol),
 			Value:    string(e.Protocol),
 			Disabled: !e.Enabled,
 		})
@@ -81,4 +81,15 @@ func FormHost(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 		Color:   th.ColorBackground,
 		Content: []gui.View{form},
 	}))
+}
+
+func protocolLabel(p termio.Protocol) string {
+	switch p {
+	case termio.ProtocolSSH:
+		return i18n.T("session.protocol.ssh")
+	case termio.ProtocolSerial:
+		return i18n.T("session.protocol.serial")
+	default:
+		return string(p)
+	}
 }

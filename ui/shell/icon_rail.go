@@ -31,7 +31,7 @@ const (
 
 // IconRail is the far-left nav strip:
 // quick-connect | bookmarks | backup | tools | settings.
-func IconRail(w *gui.Window) gui.View {
+func IconRail(w *gui.Window, onSettings func()) gui.View {
 	th := gui.CurrentTheme()
 	st := gui.State[app.State](w)
 	quickOpen := st.ActiveNav == navQuickConnect && st.SideVisible
@@ -59,6 +59,13 @@ func IconRail(w *gui.Window) gui.View {
 		s.SideVisible = true
 	})
 
+	settingsBtn := railBtn(navSettings, gui.IconGear, i18n.T("header.settings"), th, false, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		if onSettings != nil {
+			onSettings()
+		}
+	})
+
 	return gui.Column(flush(gui.ContainerCfg{
 		ID:      "icon-rail",
 		Sizing:  gui.FixedFill,
@@ -77,7 +84,7 @@ func IconRail(w *gui.Window) gui.View {
 					placeholder(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks")),
 					placeholder(navBackup, gui.IconSync, i18n.T("header.backup_restore")),
 					placeholder(navTools, gui.IconWrench, i18n.T("header.tools")),
-					placeholder(navSettings, gui.IconGear, i18n.T("header.settings")),
+					settingsBtn,
 				},
 			})),
 		},
