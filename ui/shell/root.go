@@ -28,18 +28,33 @@ func Root(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 }
 
 func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
-	var body gui.View
-	if tab := st.Active(); tab != nil {
-		switch tab.Kind {
-		case app.TabSession:
-			body = session.TerminalPane(w, ctrl, tab)
-		default:
-			body = session.FormHost(w, ctrl, tab)
-		}
-	} else {
-		body = gui.Label(i18n.T("shell.tab.open_hint"), gui.CurrentTheme().TextStyleSecondary)
-	}
 	th := gui.CurrentTheme()
+	tab := st.Active()
+	var body gui.View
+	switch {
+	case tab == nil:
+		body = gui.Label(i18n.T("shell.tab.open_hint"), th.TextStyleSecondary)
+	case tab.Kind == app.TabSession:
+		body = session.TerminalPane(w, ctrl, tab)
+	default:
+		body = session.FormHost(w, ctrl, tab)
+	}
+
+	// [terminal] [perf panel?] | [tool rail?] — the rail belongs to a
+	// live session tab and appears only once it has connected.
+	if tab != nil && tab.Kind == app.TabSession && tab.SessID != "" {
+		if tab.PerfOpen {
+			body = gui.Row(flush(gui.ContainerCfg{
+				Sizing:  gui.FillFill,
+				Content: []gui.View{body, session.PerfPanel(ctrl, tab)},
+			}))
+		}
+		body = gui.Row(flush(gui.ContainerCfg{
+			Sizing:  gui.FillFill,
+			Content: []gui.View{body, vRule(), session.TabRail(ctrl, tab)},
+		}))
+	}
+
 	return gui.Column(flush(gui.ContainerCfg{
 		Sizing: gui.FillFill,
 		Color:  th.ColorBackground,

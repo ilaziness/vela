@@ -36,6 +36,9 @@ type Tab struct {
 	Protocol termio.Protocol
 	Draft    protocol.Draft
 	SessID   string
+	// PerfOpen remembers whether this tab's performance panel is shown
+	// on the right-side tool rail.
+	PerfOpen bool
 }
 
 // State is the per-window gui.State root (immediate-mode data only).

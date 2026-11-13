@@ -51,6 +51,10 @@ type Controller struct {
 	vault       *secret.Vault
 	store       *config.Store
 	db          *database.Database
+
+	// perf holds per-session performance polling state, keyed by
+	// sessID. Owned by perf.go; started/stopped from the tool rail.
+	perf map[string]*perfMon
 }
 
 // reconnectReq is how a session tab reached its session: either a
@@ -368,7 +372,11 @@ func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 	tab.SessID = ""
 	tab.Status = TabStatusDisconnected
 	tab.ConnErr = ""
+	// A dead session has nothing to monitor; the user reopens the
+	// panel after reconnecting.
+	tab.PerfOpen = false
 	c.tearDownSession(sessID)
+	c.DropPerf(sessID)
 	c.focusActiveTerm(st)
 }
 
@@ -399,6 +407,7 @@ func (c *Controller) CloseTab(w *gui.Window, tabID string) {
 	c.mu.Unlock()
 	if sessID != "" {
 		c.tearDownSession(sessID)
+		c.DropPerf(sessID)
 	}
 	if len(st.Tabs) == 0 {
 		var newDraft func() protocol.Draft
@@ -531,6 +540,7 @@ func (c *Controller) Shutdown() {
 	for _, id := range ids {
 		c.tearDownSession(id)
 	}
+	c.DropAllPerf()
 	if c.onClose != nil {
 		c.onClose()
 	}

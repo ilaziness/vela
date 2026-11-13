@@ -5,7 +5,8 @@ go 1.27.3
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/firebase/genkit/go v1.14.0
-	github.com/go-gui-org/go-gui v0.92.0
+	github.com/go-gui-org/go-charts v0.30.0
+	github.com/go-gui-org/go-gui v0.95.0
 	github.com/go-gui-org/go-term v0.17.1
 	github.com/google/dotprompt/go v0.0.0-20260918022926-df612903a877
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible

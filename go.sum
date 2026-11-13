@@ -36,10 +36,12 @@ github.com/firebase/genkit/go v1.14.0 h1:9aYdGMf9AM3wtdZQgkiycxiEYIs7Y2lAtJQqrnc
 github.com/firebase/genkit/go v1.14.0/go.mod h1:zmz0UXwzaVw25Ytni+j7zXJmzAXw+URIjG6xqKwVXzQ=
 github.com/frankban/quicktest v1.14.6 h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=
 github.com/frankban/quicktest v1.14.6/go.mod h1:4ptaffx2x8+WTWXmUCuVU6aPUX1/Mz7zb5vbUoiM6w0=
+github.com/go-gui-org/go-charts v0.30.0 h1:aqwY+4+DPCjQAKTyf6RvwuoeJQFh0KiUVJcim63xwgU=
+github.com/go-gui-org/go-charts v0.30.0/go.mod h1:GdlIewMQvJLVwG87DCqmqCzf9TDC6Y9Gsj4BYgO16LE=
 github.com/go-gui-org/go-glyph v1.26.4 h1:7FlbBV7S+g1HwdU/ypTBkbyoumQZfd/4Tdg3NbM9Ve4=
 github.com/go-gui-org/go-glyph v1.26.4/go.mod h1:aP4jOhDJbaHwrIGjlBk9uV4OvWxr09JI7Z93Ad9lO2w=
-github.com/go-gui-org/go-gui v0.92.0 h1:1gWyOUWUVMtVFeYmExfVIECifWMNO2V9GKuzPfPTFs0=
-github.com/go-gui-org/go-gui v0.92.0/go.mod h1:gBYp7hon3TtDquD1IG2xVwpmPjOoeqjFBbf4eytkNdE=
+github.com/go-gui-org/go-gui v0.95.0 h1:HIcG4Mo+VfoiJwDlGQEru04dK+lOcCdBeis1BYeHOV0=
+github.com/go-gui-org/go-gui v0.95.0/go.mod h1:gBYp7hon3TtDquD1IG2xVwpmPjOoeqjFBbf4eytkNdE=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
