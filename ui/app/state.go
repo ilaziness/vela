@@ -14,11 +14,25 @@ const (
 	TabSession
 )
 
+// TabStatus is the connection state shown as the tab's status dot.
+type TabStatus int
+
+const (
+	// TabStatusIdle is the zero value: a connect form, or a tab that has
+	// never started dialing. Rendered grey.
+	TabStatusIdle TabStatus = iota
+	TabStatusConnecting
+	TabStatusConnected
+	TabStatusDisconnected
+)
+
 // Tab is one main-area tab.
 type Tab struct {
 	ID       string
 	Title    string
 	Kind     TabKind
+	Status   TabStatus
+	ConnErr  string // last connect/reconnect error, already localized
 	Protocol termio.Protocol
 	Draft    protocol.Draft
 	SessID   string
@@ -70,8 +84,26 @@ func (s *State) OpenConnectTab(newDraft func() protocol.Draft) string {
 
 // Active returns the active tab or nil.
 func (s *State) Active() *Tab {
+	return s.TabByID(s.ActiveTab)
+}
+
+// TabByID returns the tab with the given id, or nil.
+func (s *State) TabByID(id string) *Tab {
 	for i := range s.Tabs {
-		if s.Tabs[i].ID == s.ActiveTab {
+		if s.Tabs[i].ID == id {
+			return &s.Tabs[i]
+		}
+	}
+	return nil
+}
+
+// TabBySessID returns the session tab bound to sessID, or nil.
+func (s *State) TabBySessID(sessID string) *Tab {
+	if sessID == "" {
+		return nil
+	}
+	for i := range s.Tabs {
+		if s.Tabs[i].SessID == sessID {
 			return &s.Tabs[i]
 		}
 	}

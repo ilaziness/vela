@@ -35,6 +35,14 @@ type Controller struct {
 	scrollback int
 	onClose    func()
 
+	// reconnect remembers how each session tab was dialed so the tab can
+	// dial again after a drop. Keyed by tab id; secrets stay in memory
+	// only and are dropped when the tab closes.
+	reconnect map[string]reconnectReq
+	// closing suppresses disconnect handling while the app tears down:
+	// Term.Close fires OnExit like any other exit.
+	closing bool
+
 	// Bookmark dial / quick-connect.
 	bookmarks   *bookmark.Service
 	sshMgr      *ssh.Manager
@@ -43,6 +51,20 @@ type Controller struct {
 	vault       *secret.Vault
 	store       *config.Store
 	db          *database.Database
+}
+
+// reconnectReq is how a session tab reached its session: either a
+// protocol draft from the connect form, or a saved bookmark id. The
+// draft is kept in memory only so a dropped tab can dial again; it may
+// hold a typed password, so it must never be logged or persisted.
+//
+// label is the tab title to show; empty falls back to the session label
+// (user@host:port). Bookmark sessions set it to name@user so the tab
+// reads as the saved entry, not as the resolved endpoint.
+type reconnectReq struct {
+	draft      protocol.Draft
+	bookmarkID string
+	label      string
 }
 
 // NewController constructs the app controller.
@@ -56,6 +78,7 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		logger:     logger,
 		terms:      make(map[string]*term.Term),
 		scrollback: 10000,
+		reconnect:  make(map[string]reconnectReq),
 	}
 }
 
@@ -148,6 +171,26 @@ func (c *Controller) Busy() (bool, string) {
 	return st.Busy, st.BusyOp
 }
 
+// dialFailed restores a tab's dot after a failed dial or attach, and logs
+// the cause. A session tab goes back to red so its reconnect button works
+// again; a connect form goes back to grey.
+func (c *Controller) dialFailed(w *gui.Window, tabID string, err error) {
+	if err != nil {
+		c.logger.Warn("dial failed", zap.String("tab", tabID), zap.Error(err))
+	}
+	tab := gui.State[State](w).TabByID(tabID)
+	if tab == nil {
+		return
+	}
+	if tab.Kind == TabSession {
+		tab.Status = TabStatusDisconnected
+		tab.ConnErr = errText(err)
+		return
+	}
+	tab.Status = TabStatusIdle
+	tab.ConnErr = ""
+}
+
 func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	w := c.Window()
 	if w == nil {
@@ -170,6 +213,18 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	}
 	st.Busy = true
 	st.BusyOp = op
+
+	// Capture the target tab now: by the time the dial returns the user
+	// may have switched tabs, and the session must land where it was
+	// started from.
+	targetID := ""
+	if !testOnly {
+		if tab := st.Active(); tab != nil && tab.Kind == TabConnect {
+			targetID = tab.ID
+			tab.Status = TabStatusConnecting
+			tab.ConnErr = ""
+		}
+	}
 
 	go func() {
 		ctx := context.Background()
@@ -197,15 +252,18 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 				st := gui.State[State](w)
 				st.Busy = false
 				st.BusyOp = ""
+				c.dialFailed(w, targetID, err)
 				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 			})
 			return
 		}
+		req := reconnectReq{draft: draft}
 		w.QueueCommand(func(w *gui.Window) {
 			st := gui.State[State](w)
 			st.Busy = false
 			st.BusyOp = ""
-			if err := c.attachSession(w, st, sess); err != nil {
+			if err := c.attachSession(w, st, sess, targetID, req); err != nil {
+				c.dialFailed(w, targetID, err)
 				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				_ = sess.Close()
 				c.hub.Unregister(sess.ID())
@@ -220,7 +278,10 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	}()
 }
 
-func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session) error {
+// attachSession wires sess into a go-term pane and binds it to a tab.
+// targetTabID is the tab captured when the dial started ("" to append a
+// new one); req is how the tab can dial again after a drop.
+func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session, targetTabID string, req reconnectReq) error {
 	c.mu.Lock()
 	termStyle := c.termStyle
 	scrollback := c.scrollback
@@ -240,7 +301,10 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 		OnExit: func() {
 			id := sess.ID()
 			w.QueueCommand(func(w *gui.Window) {
-				c.CloseSessionTab(w, id)
+				if w.CloseRequested() {
+					return
+				}
+				c.markDisconnected(w, id)
 			})
 		},
 	}, stream)
@@ -251,28 +315,61 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	c.terms[sess.ID()] = tm
 	c.mu.Unlock()
 
-	// Reuse the active connect form tab so the terminal replaces the
-	// form in place (no extra tab).
-	if tab := st.Active(); tab != nil && tab.Kind == TabConnect {
-		tab.Kind = TabSession
-		tab.Title = sess.Label()
-		tab.Protocol = sess.Protocol()
-		tab.SessID = sess.ID()
-		tab.Draft = protocol.Draft{}
-	} else {
+	tab := st.TabByID(targetTabID)
+	if tab == nil {
 		st.tabSeq++
-		tabID := "tab-sess-" + itoa(st.tabSeq)
-		st.Tabs = append(st.Tabs, Tab{
-			ID:       tabID,
-			Title:    sess.Label(),
-			Kind:     TabSession,
-			Protocol: sess.Protocol(),
-			SessID:   sess.ID(),
-		})
-		st.ActiveTab = tabID
+		st.Tabs = append(st.Tabs, Tab{ID: "tab-sess-" + itoa(st.tabSeq)})
+		tab = &st.Tabs[len(st.Tabs)-1]
 	}
+	// Replace the connect form in place, or revive a dropped session tab
+	// that is dialing again.
+	tab.Kind = TabSession
+	tab.Title = req.label
+	if tab.Title == "" {
+		tab.Title = sess.Label()
+	}
+	tab.Protocol = sess.Protocol()
+	tab.SessID = sess.ID()
+	tab.Draft = protocol.Draft{}
+	tab.Status = TabStatusConnected
+	tab.ConnErr = ""
+	st.ActiveTab = tab.ID
+
+	c.mu.Lock()
+	c.reconnect[tab.ID] = req
+	c.mu.Unlock()
+
 	c.focusActiveTerm(st)
 	return nil
+}
+
+// markDisconnected detaches a dead session but keeps its tab, so the
+// pane can offer a reconnect. Called on the UI thread via QueueCommand.
+func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
+	c.mu.Lock()
+	closing := c.closing
+	c.mu.Unlock()
+	if closing {
+		return
+	}
+	st := gui.State[State](w)
+	tab := st.TabBySessID(sessID)
+	if tab == nil {
+		// The tab was closed by the user before the exit landed.
+		return
+	}
+	// Only the active tab owns the focus; a background drop must not
+	// steal it from the terminal the user is typing in.
+	if st.ActiveTab == tab.ID {
+		// The focused Term is leaving the tree; clear focus first so
+		// go-gui does not reassign it to the first remaining focusable.
+		w.ClearFocus()
+	}
+	tab.SessID = ""
+	tab.Status = TabStatusDisconnected
+	tab.ConnErr = ""
+	c.tearDownSession(sessID)
+	c.focusActiveTerm(st)
 }
 
 // TermFor returns the terminal for a session.
@@ -296,6 +393,10 @@ func (c *Controller) CloseTab(w *gui.Window, tabID string) {
 	// reassigns to the first remaining focusable (icon rail → blue ring).
 	w.ClearFocus()
 	st.RemoveTab(tabID)
+	// Forget how the tab dialed: the saved draft may hold a password.
+	c.mu.Lock()
+	delete(c.reconnect, tabID)
+	c.mu.Unlock()
 	if sessID != "" {
 		c.tearDownSession(sessID)
 	}
@@ -309,16 +410,70 @@ func (c *Controller) CloseTab(w *gui.Window, tabID string) {
 	c.focusActiveTerm(st)
 }
 
-// CloseSessionTab finds a session tab by session id and closes it.
-func (c *Controller) CloseSessionTab(w *gui.Window, sessID string) {
-	st := gui.State[State](w)
-	for _, t := range st.Tabs {
-		if t.SessID == sessID {
-			c.CloseTab(w, t.ID)
-			return
-		}
+// ReconnectTab dials a dropped session tab again. Runs on the UI thread;
+// the dial itself happens on a goroutine.
+func (c *Controller) ReconnectTab(w *gui.Window, tabID string) {
+	if w == nil {
+		return
 	}
-	c.tearDownSession(sessID)
+	st := gui.State[State](w)
+	tab := st.TabByID(tabID)
+	if tab == nil || tab.Status == TabStatusConnecting || st.Busy {
+		return
+	}
+	c.mu.Lock()
+	req, ok := c.reconnect[tabID]
+	c.mu.Unlock()
+	if !ok {
+		return
+	}
+	if req.bookmarkID != "" {
+		// The bookmark path re-checks the vault and owns Busy itself.
+		c.beginBookmarkConnect(w, tabID, req.bookmarkID)
+		return
+	}
+	entry, ok := c.registry.Get(req.draft.Protocol)
+	if !ok || !entry.Enabled || entry.Connect == nil {
+		tab.Status = TabStatusDisconnected
+		tab.ConnErr = i18n.T("shell.connect.protocol_unavailable")
+		return
+	}
+	st.Busy = true
+	st.BusyOp = "connect"
+	tab.Status = TabStatusConnecting
+	tab.ConnErr = ""
+
+	go func() {
+		sess, err := entry.Connect.Connect(context.Background(), req.draft)
+		w.QueueCommand(func(w *gui.Window) {
+			s := gui.State[State](w)
+			s.Busy = false
+			s.BusyOp = ""
+			if err != nil {
+				c.dialFailed(w, tabID, err)
+				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				return
+			}
+			if s.TabByID(tabID) == nil {
+				// The tab was closed mid-dial; drop the fresh session.
+				_ = sess.Close()
+				c.hub.Unregister(sess.ID())
+				return
+			}
+			if err := c.attachSession(w, s, sess, tabID, req); err != nil {
+				_ = sess.Close()
+				c.hub.Unregister(sess.ID())
+				c.dialFailed(w, tabID, err)
+				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				return
+			}
+			w.Toast(gui.ToastCfg{
+				Body:     i18n.Tf("shell.connect.connected", sess.Label()),
+				Severity: gui.ToastSuccess,
+				Duration: 3 * time.Second,
+			})
+		})
+	}()
 }
 
 func (c *Controller) tearDownSession(sessID string) {
@@ -369,6 +524,9 @@ func (c *Controller) Shutdown() {
 	for id := range c.terms {
 		ids = append(ids, id)
 	}
+	// Drop saved dial requests so no password outlives the window.
+	c.reconnect = make(map[string]reconnectReq)
+	c.closing = true
 	c.mu.Unlock()
 	for _, id := range ids {
 		c.tearDownSession(id)

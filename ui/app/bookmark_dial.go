@@ -82,7 +82,21 @@ func (c *Controller) TestBookmark(b bookmark.Bookmark, onDone func(error)) {
 }
 
 // ConnectBookmark unlocks the vault if needed, dials the bookmark, and attaches a session tab.
+// It reuses the active connect form tab when there is one.
 func (c *Controller) ConnectBookmark(w *gui.Window, id string) {
+	if id == "" {
+		return
+	}
+	targetID := ""
+	if tab := gui.State[State](w).Active(); tab != nil && tab.Kind == TabConnect {
+		targetID = tab.ID
+	}
+	c.beginBookmarkConnect(w, targetID, id)
+}
+
+// beginBookmarkConnect is the shared vault gate + dial entry for bookmarks.
+// targetTabID is the tab the session should land in ("" appends a new one).
+func (c *Controller) beginBookmarkConnect(w *gui.Window, targetTabID, id string) {
 	if id == "" {
 		return
 	}
@@ -90,18 +104,19 @@ func (c *Controller) ConnectBookmark(w *gui.Window, id string) {
 	if st.Busy {
 		return
 	}
-	st.Busy = true
-	st.BusyOp = "connect"
-
 	c.mu.Lock()
 	vault := c.vault
 	store := c.store
 	db := c.db
 	c.mu.Unlock()
 	if vault == nil || store == nil {
-		st.Busy = false
-		st.BusyOp = ""
 		return
+	}
+	st.Busy = true
+	st.BusyOp = "connect"
+	if tab := st.TabByID(targetTabID); tab != nil {
+		tab.Status = TabStatusConnecting
+		tab.ConnErr = ""
 	}
 
 	clearBusy := func(win *gui.Window) {
@@ -115,17 +130,21 @@ func (c *Controller) ConnectBookmark(w *gui.Window, id string) {
 		UserDataDir: store.UserDataDir(),
 		Reason:      i18n.T("password.encrypt_decrypt_required"),
 		OnUnlocked: func(win *gui.Window) {
-			go c.runConnectBookmark(win, id)
+			go c.runConnectBookmark(win, targetTabID, id)
 		},
 		OnFail: func(win *gui.Window, err error) {
 			clearBusy(win)
+			c.dialFailed(win, targetTabID, err)
 			win.Toast(gui.ToastCfg{
 				Body:     errText(err),
 				Severity: gui.ToastError,
 				Duration: 4 * time.Second,
 			})
 		},
-		OnCancel: clearBusy,
+		OnCancel: func(win *gui.Window) {
+			clearBusy(win)
+			c.dialFailed(win, targetTabID, nil)
+		},
 	}
 	if vaultcheck.HasEncryptedSecrets(store, db) {
 		cfg.Probe = func(pw string) bool {
@@ -135,13 +154,14 @@ func (c *Controller) ConnectBookmark(w *gui.Window, id string) {
 	vaultprompt.Unlock(w, cfg)
 }
 
-func (c *Controller) runConnectBookmark(w *gui.Window, id string) {
-	sess, err := c.connectBookmarkSync(id)
+func (c *Controller) runConnectBookmark(w *gui.Window, targetTabID, id string) {
+	sess, label, err := c.connectBookmarkSync(id)
 	w.QueueCommand(func(win *gui.Window) {
 		st := gui.State[State](win)
 		st.Busy = false
 		st.BusyOp = ""
 		if err != nil {
+			c.dialFailed(win, targetTabID, err)
 			win.Toast(gui.ToastCfg{
 				Body:     errText(err),
 				Severity: gui.ToastError,
@@ -149,7 +169,9 @@ func (c *Controller) runConnectBookmark(w *gui.Window, id string) {
 			})
 			return
 		}
-		if err := c.attachSession(win, st, sess); err != nil {
+		req := reconnectReq{bookmarkID: id, label: label}
+		if err := c.attachSession(win, st, sess, targetTabID, req); err != nil {
+			c.dialFailed(win, targetTabID, err)
 			win.Toast(gui.ToastCfg{
 				Body:     errText(err),
 				Severity: gui.ToastError,
@@ -167,7 +189,9 @@ func (c *Controller) runConnectBookmark(w *gui.Window, id string) {
 	})
 }
 
-func (c *Controller) connectBookmarkSync(id string) (termio.Session, error) {
+// connectBookmarkSync dials a saved bookmark. The second result is the
+// tab title for that bookmark (name@user), empty when it has no name.
+func (c *Controller) connectBookmarkSync(id string) (termio.Session, string, error) {
 	c.mu.Lock()
 	svc := c.bookmarks
 	sshMgr := c.sshMgr
@@ -176,54 +200,55 @@ func (c *Controller) connectBookmarkSync(id string) (termio.Session, error) {
 	hub := c.hub
 	c.mu.Unlock()
 	if svc == nil {
-		return nil, errors.New("bookmark dial is not configured")
+		return nil, "", errors.New("bookmark dial is not configured")
 	}
 	b, err := svc.GetMasked(id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	label := bookmarkTabLabel(b)
 	proto, ok := termio.ParseProtocol(b.Protocol)
 	if !ok {
-		return nil, usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
+		return nil, "", usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
 	}
 	switch proto {
 	case termio.ProtocolSSH:
 		if sshMgr == nil || globalProxy == nil {
-			return nil, errors.New("bookmark dial is not configured")
+			return nil, "", errors.New("bookmark dial is not configured")
 		}
 		if err := bookmark.ValidateProxy(*b); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		prep, err := svc.PrepareTest(*b)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		hops, err := svc.ResolveHops(prep.Endpoint, prep.JumpID)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		proxy, err := ssh.ResolveDialProxy(b.ProxyMode, ssh.ProxyConfig{
 			Type: b.ProxyType, Host: b.ProxyHost, Port: b.ProxyPort,
 			User: b.ProxyUser, Password: prep.ProxyPassword,
 		}, globalProxy())
 		if err != nil {
-			return nil, ssh.MapUserError(err)
+			return nil, "", ssh.MapUserError(err)
 		}
 		sessID, err := sshMgr.Connect(hops, proxy)
 		if err != nil {
-			return nil, ssh.MapUserError(err)
+			return nil, "", ssh.MapUserError(err)
 		}
 		sess, err := sshMgr.GetSession(sessID)
 		if err != nil {
 			_ = sshMgr.CloseSession(sessID)
-			return nil, ssh.MapUserError(err)
+			return nil, "", ssh.MapUserError(err)
 		}
 		hs := ssh.AsTermio(sess)
 		hub.Register(hs)
-		return hs, nil
+		return hs, label, nil
 	case termio.ProtocolSerial:
 		if serialMgr == nil {
-			return nil, errors.New("bookmark dial is not configured")
+			return nil, "", errors.New("bookmark dial is not configured")
 		}
 		sessID, err := serialMgr.Connect(serial.OpenConfig{
 			Device:      b.SerialDevice,
@@ -235,18 +260,31 @@ func (c *Controller) connectBookmarkSync(id string) (termio.Session, error) {
 			Charset:     b.Charset,
 		})
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		sess, err := serialMgr.GetSession(sessID)
 		if err != nil {
 			_ = serialMgr.CloseSession(sessID)
-			return nil, err
+			return nil, "", err
 		}
 		hub.Register(sess)
-		return sess, nil
+		return sess, label, nil
 	default:
-		return nil, usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
+		return nil, "", usererr.Coded("session.unknown_protocol", "Unknown session protocol: %s", b.Protocol)
 	}
+}
+
+// bookmarkTabLabel is the tab title for a bookmark session: the saved
+// name, plus the login user when the bookmark has one (serial entries
+// have no user).
+func bookmarkTabLabel(b *bookmark.Bookmark) string {
+	if b.Title == "" {
+		return ""
+	}
+	if b.User == "" {
+		return b.Title
+	}
+	return b.Title + "@" + b.User
 }
 
 func (c *Controller) testBookmarkSync(b bookmark.Bookmark) error {
