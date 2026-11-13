@@ -241,3 +241,28 @@ func parseNode(id string) (kind, key string) {
 		return "", id
 	}
 }
+
+// groupTreeNodes builds Tree nodes for grouped bookmarks (shared by manager + quick-connect).
+func groupTreeNodes(groups []*bookmark.Group) []gui.TreeNodeCfg {
+	nodes := make([]gui.TreeNodeCfg, 0, len(groups))
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		kids := make([]gui.TreeNodeCfg, 0, len(g.Bookmarks))
+		for _, b := range g.Bookmarks {
+			kids = append(kids, gui.TreeNodeCfg{
+				ID:   nodeBook(b.ID),
+				Text: treeBookmarkText(b),
+				Icon: iconGlyph(b.Icon),
+			})
+		}
+		nodes = append(nodes, gui.TreeNodeCfg{
+			ID:    nodeGroup(g.Name),
+			Text:  displayGroupName(g.Name),
+			Icon:  gui.IconFolder,
+			Nodes: kids,
+		})
+	}
+	return nodes
+}

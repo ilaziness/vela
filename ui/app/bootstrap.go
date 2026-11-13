@@ -108,6 +108,9 @@ func Bootstrap() (*Runtime, error) {
 		SSH:         sshMgr,
 		Serial:      serialMgr,
 		GlobalProxy: globalProxy,
+		Vault:       vault,
+		Store:       store,
+		DB:          db,
 	})
 	ctrl.SetShutdown(func() {
 		sshMgr.CloseAll()

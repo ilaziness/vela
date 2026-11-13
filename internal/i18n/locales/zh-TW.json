@@ -86,6 +86,7 @@
   "bookmark.cannot_rename_default": "不能修改預設分群組名稱",
   "bookmark.clear_cert": "清除憑證",
   "bookmark.clear_filter": "清除篩選",
+  "bookmark.connect_empty": "暫無書籤",
   "bookmark.connect_fields_required": "主機、連接埠和使用者名为必填項",
   "bookmark.copy_bookmark": "複製書籤",
   "bookmark.copy_failed": "複製書籤失敗：%s",

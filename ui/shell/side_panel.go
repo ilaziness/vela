@@ -8,10 +8,11 @@ import (
 	"github.com/ilaziness/vela/ui/bookmarks"
 )
 
-const sidePanelWidth float32 = 260
+const sidePanelWidth float32 = 220
 
 // SidePanel is the quick-connect bookmark tree, flush against the icon rail.
-func SidePanel(_ *app.Controller) gui.View {
+func SidePanel(w *gui.Window, ctrl *app.Controller) gui.View {
+	st := gui.State[app.State](w)
 	th := gui.CurrentTheme()
 	return gui.Column(flush(gui.ContainerCfg{
 		ID:     "side-panel",
@@ -24,16 +25,44 @@ func SidePanel(_ *app.Controller) gui.View {
 				Padding: gui.NewPadding(10, 12, 10, 12),
 				Spacing: gui.SpacingSmall,
 				Content: []gui.View{
-					gui.Input(gui.InputCfg{
-						ID:          "bookmark-search",
-						Placeholder: i18n.T("bookmark.search_connect_placeholder"),
-						Sizing:      gui.FillFit,
-						OnTextChanged: func(v string, ctx gui.EventCtx) {
-							gui.State[app.State](ctx.Window).SearchQuery = v
-							ctx.Consume()
+					gui.Row(flush(gui.ContainerCfg{
+						Sizing:  gui.FillFit,
+						Spacing: gui.SpacingSmall,
+						VAlign:  gui.VAlignMiddle,
+						Content: []gui.View{
+							gui.Button(gui.ButtonCfg{
+								ID: "qc-refresh", Variant: gui.ButtonSecondary, Sizing: gui.FitFit,
+								Disabled:  st.Busy,
+								A11YLabel: i18n.T("common.refresh"),
+								Content: []gui.View{
+									gui.Text(gui.TextCfg{
+										Text:      gui.IconSync,
+										TextStyle: th.TextStyleIconSmall,
+									}),
+								},
+								OnClick: func(ctx gui.EventCtx) {
+									ctx.Consume()
+									if gui.State[app.State](ctx.Window).Busy {
+										return
+									}
+									ctrl.ReloadBookmarkGroups(ctx.Window)
+								},
+							}),
+							gui.Input(gui.InputCfg{
+								ID:          "qc-search",
+								Placeholder: i18n.T("bookmark.search_connect_placeholder"),
+								Text:        st.SearchQuery,
+								Sizing:      gui.FillFit,
+								OnTextChanged: func(v string, ctx gui.EventCtx) {
+									gui.State[app.State](ctx.Window).SearchQuery = v
+									ctx.Consume()
+								},
+							}),
 						},
+					})),
+					bookmarks.ConnectTree(st.BookmarkGroups, st.SearchQuery, func(id string) {
+						ctrl.ConnectBookmark(w, id)
 					}),
-					bookmarks.TreePlaceholder(),
 				},
 			})),
 		},

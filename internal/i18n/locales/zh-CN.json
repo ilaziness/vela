@@ -86,6 +86,7 @@
   "bookmark.cannot_rename_default": "不能修改默认分组名称",
   "bookmark.clear_cert": "清除证书",
   "bookmark.clear_filter": "清除筛选",
+  "bookmark.connect_empty": "暂无书签",
   "bookmark.connect_fields_required": "主机、端口和用户名为必填项",
   "bookmark.copy_bookmark": "复制书签",
   "bookmark.copy_failed": "复制书签失败：%s",

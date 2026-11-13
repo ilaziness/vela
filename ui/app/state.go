@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/protocol"
 )
@@ -25,15 +26,16 @@ type Tab struct {
 
 // State is the per-window gui.State root (immediate-mode data only).
 type State struct {
-	ActiveNav   string
-	SideVisible bool
-	Tabs        []Tab
-	ActiveTab   string
-	Busy        bool
-	BusyOp      string // "connect" | "test" while Busy
-	SearchQuery string
-	tabSeq      int
-	defaultsOK  bool
+	ActiveNav      string
+	SideVisible    bool
+	Tabs           []Tab
+	ActiveTab      string
+	Busy           bool
+	BusyOp         string // "connect" | "test" while Busy
+	SearchQuery    string
+	BookmarkGroups []*bookmark.Group
+	tabSeq         int
+	defaultsOK     bool
 }
 
 // EnsureDefaults seeds first-run state.

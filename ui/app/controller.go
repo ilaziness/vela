@@ -11,7 +11,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/bookmark"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termio"
@@ -32,11 +35,14 @@ type Controller struct {
 	scrollback int
 	onClose    func()
 
-	// Bookmark dial (test only in this iteration).
+	// Bookmark dial / quick-connect.
 	bookmarks   *bookmark.Service
 	sshMgr      *ssh.Manager
 	serialMgr   *serial.Manager
 	globalProxy func() ssh.GlobalProxy
+	vault       *secret.Vault
+	store       *config.Store
+	db          *database.Database
 }
 
 // NewController constructs the app controller.

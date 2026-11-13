@@ -29,7 +29,7 @@ const (
 
 // IconRail is the far-left nav strip:
 // quick-connect | bookmarks | backup | tools | settings.
-func IconRail(w *gui.Window, chrome Chrome) gui.View {
+func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 	th := gui.CurrentTheme()
 	st := gui.State[app.State](w)
 	quickOpen := st.ActiveNav == navQuickConnect && st.SideVisible
@@ -44,6 +44,7 @@ func IconRail(w *gui.Window, chrome Chrome) gui.View {
 		}
 		s.ActiveNav = navQuickConnect
 		s.SideVisible = true
+		ctrl.ReloadBookmarkGroups(ctx.Window)
 	})
 
 	bookmarksBtn := railBtn(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks"), th, false, func(ctx gui.EventCtx) {

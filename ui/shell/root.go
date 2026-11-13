@@ -14,9 +14,9 @@ func Root(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 	st.EnsureDefaults(ctrl.NewSSHDraft)
 	th := gui.CurrentTheme()
 
-	cols := []gui.View{IconRail(w, chrome), vRule()}
+	cols := []gui.View{IconRail(w, ctrl, chrome), vRule()}
 	if st.SideVisible && st.ActiveNav == navQuickConnect {
-		cols = append(cols, SidePanel(ctrl), vRule())
+		cols = append(cols, SidePanel(w, ctrl), vRule())
 	}
 	cols = append(cols, mainPane(w, ctrl, st))
 

@@ -193,26 +193,7 @@ func selectionActionButtons(st *State, d *Deps) []gui.View {
 func bookmarkTree(w *gui.Window, d *Deps) gui.View {
 	st := gui.State[State](w)
 	groups := filterGroups(st.Groups, st.Search)
-	nodes := make([]gui.TreeNodeCfg, 0, len(groups))
-	for _, g := range groups {
-		if g == nil {
-			continue
-		}
-		kids := make([]gui.TreeNodeCfg, 0, len(g.Bookmarks))
-		for _, b := range g.Bookmarks {
-			kids = append(kids, gui.TreeNodeCfg{
-				ID:   nodeBook(b.ID),
-				Text: treeBookmarkText(b),
-				Icon: iconGlyph(b.Icon),
-			})
-		}
-		nodes = append(nodes, gui.TreeNodeCfg{
-			ID:    nodeGroup(g.Name),
-			Text:  displayGroupName(g.Name),
-			Icon:  gui.IconFolder,
-			Nodes: kids,
-		})
-	}
+	nodes := groupTreeNodes(groups)
 	if len(nodes) == 0 {
 		th := gui.CurrentTheme()
 		msg := i18n.T("bookmark.no_match")

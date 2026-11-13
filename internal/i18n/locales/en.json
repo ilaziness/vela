@@ -86,6 +86,7 @@
   "bookmark.cannot_rename_default": "Cannot rename the default group",
   "bookmark.clear_cert": "Clear certificate",
   "bookmark.clear_filter": "Clear filter",
+  "bookmark.connect_empty": "No bookmarks yet",
   "bookmark.connect_fields_required": "Host, port, and username are required",
   "bookmark.copy_bookmark": "Copy bookmark",
   "bookmark.copy_failed": "Failed to copy bookmark: %s",
