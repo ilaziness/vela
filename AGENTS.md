@@ -9,7 +9,7 @@
 | 类别     | 技术/库                     | 版本要求  |
 | -------- | --------------------------- | --------- |
 | 后端语言 | Go                          | ≥ 1.27.3  |
-| 桌面 UI  | go-gui                      | v0.92.x   |
+| 桌面 UI  | go-gui（**禁止**本地定制）  | v0.92.x   |
 | 终端控件 | go-term（replace 本地补丁） | v0.17.x   |
 | AI 框架  | Genkit                      | ≥ v1.14.0 |
 
@@ -43,13 +43,19 @@
 │   ├── config/             # TOML + BootstrapLanguage
 │   ├── i18n/               # leaf：embed 三语；禁止 import config
 │   ├── usererr/ / secret/ / database / ai / …
-├── third_party/go-term/    # go-term v0.17.1 + NewWithStream 补丁
+├── third_party/go-term/    # go-term 仅此例外：必须本地补丁（NewWithStream 等）
 ├── build/                  # 图标与平台打包资源（appicon*、windows/icon.ico）
 ├── data/                   # 内置默认数据
 ├── sync-backend/           # 同步服务端（独立 go.mod）
 ├── Makefile
 └── go.mod
 ```
+
+**第三方库定制硬规则**：
+
+- **禁止** 把 `go-gui` 复制到 `third_party/`、`replace` 到本地 fork，或在本仓库维护 go-gui 定制版。后续升级依赖官方发布版本。
+- go-gui 公开 API / 组件能力做不到的交互或视觉效果：直接说明「库目前不支持，只能这样」，用公开 API 能做到的折中；**不要**为对齐、样式等去 fork 改库。
+- `third_party/go-term` 是唯一允许的 UI 相关本地补丁（上游无远程 Stream API，业务必须补）；不要把「go-term 可以定制」推广到 go-gui。
 
 ---
 
@@ -91,10 +97,12 @@
 
 ## 4. UI 规范（go-gui）
 
+- **只用** module 依赖的官方 go-gui；禁止 `third_party/go-gui`、禁止对本库做 replace 定制（详见 §2）。
 - 主题：`gui.SetTheme(gui.ThemeDark)`（首期不定制）。
 - 状态：`gui.State[app.State](w)`；Term 实例放在 Controller，不进即时模式 State。
 - 嵌入终端：`term.Cfg{NoWindowHandler: true}`，由壳层转发事件。
 - Connect/Test：后台 goroutine + `Window.QueueCommand` 回写。
+- 能力缺口：以公开 API 为准；做不到则告知限制并接受现状，不 fork 改库。
 
 ---
 

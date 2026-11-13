@@ -38,10 +38,6 @@ func tabChip(th gui.Theme, tab app.Tab, active bool, ctrl *app.Controller) gui.V
 	if tab.Kind == app.TabConnect {
 		fullTitle = i18n.T("shell.tab.new_ellipsis")
 	}
-	label := fullTitle
-	if active {
-		label = "● " + fullTitle
-	}
 	clear := gui.Flat(gui.ColorTransparent)
 	chipID := "tab-chip-" + tab.ID
 
@@ -64,7 +60,7 @@ func tabChip(th gui.Theme, tab app.Tab, active bool, ctrl *app.Controller) gui.V
 					gui.Button(gui.ButtonCfg{
 						ID:            "tab-" + tab.ID,
 						Variant:       gui.ButtonGhost,
-						Label:         label,
+						Label:         fullTitle,
 						Colors:        clear,
 						Radius:        gui.NoRadius,
 						SizeBorder:    gui.NoBorder,
@@ -79,12 +75,17 @@ func tabChip(th gui.Theme, tab app.Tab, active bool, ctrl *app.Controller) gui.V
 					gui.Button(gui.ButtonCfg{
 						ID:            "tab-close-" + tab.ID,
 						Variant:       gui.ButtonGhost,
-						Label:         "×",
 						Colors:        clear,
 						Radius:        gui.NoRadius,
 						SizeBorder:    gui.NoBorder,
 						Padding:       gui.NewPadding(6, 6, 6, 8),
 						FocusDisabled: true,
+						Content: []gui.View{
+							gui.Text(gui.TextCfg{
+								Text:      gui.IconClose,
+								TextStyle: th.TextStyleIconSmall,
+							}),
+						},
 						OnClick: func(ctx gui.EventCtx) {
 							ctx.Consume()
 							ctrl.CloseTab(ctx.Window, tab.ID)
@@ -116,13 +117,18 @@ func tabAddBtn(th gui.Theme, ctrl *app.Controller) gui.View {
 			gui.Button(gui.ButtonCfg{
 				ID:            "tab-add",
 				Variant:       gui.ButtonGhost,
-				Label:         "+",
 				Colors:        clear,
 				Color:         bg,
 				Radius:        gui.RadiusSmall,
 				SizeBorder:    gui.NoBorder,
 				Padding:       gui.NewPadding(6, 10, 6, 10),
 				FocusDisabled: true,
+				Content: []gui.View{
+					gui.Text(gui.TextCfg{
+						Text:      gui.IconPlus,
+						TextStyle: th.TextStyleIconSmall,
+					}),
+				},
 				OnClick: func(ctx gui.EventCtx) {
 					ctx.Consume()
 					gui.State[app.State](ctx.Window).OpenConnectTab(ctrl.NewSSHDraft)

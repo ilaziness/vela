@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/vaultcheck"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/backup"
+	"github.com/ilaziness/vela/ui/bookmarks"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/settings"
@@ -45,6 +46,16 @@ func main() {
 		DB:      rt.DB,
 		IconPNG: appIconPNG,
 	}
+	bookmarksDeps := &bookmarks.Deps{
+		App:       guiApp,
+		Bookmarks: rt.Bookmarks,
+		Keys:      rt.Keys,
+		Ctrl:      rt.Ctrl,
+		Store:     rt.Store,
+		Vault:     rt.Vault,
+		DB:        rt.DB,
+		IconPNG:   appIconPNG,
+	}
 	toolsDeps := &toolsui.Deps{
 		App:     guiApp,
 		Core:    tools.New(),
@@ -73,9 +84,10 @@ func main() {
 			mountShell := func() {
 				w.SetView(func(w *gui.Window) gui.View {
 					return shell.Root(w, rt.Ctrl, shell.Chrome{
-						OnSettings: func() { settings.Open(settingsDeps) },
-						OnTools:    func() { toolsui.Open(toolsDeps) },
-						OnBackup:   func() { backup.Start(w, backupDeps) },
+						OnBookmarks: func() { bookmarks.Open(bookmarksDeps) },
+						OnSettings:  func() { settings.Open(settingsDeps) },
+						OnTools:     func() { toolsui.Open(toolsDeps) },
+						OnBackup:    func() { backup.Start(w, backupDeps) },
 					})
 				})
 			}

@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/applog"
+	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/keybind"
@@ -24,20 +25,21 @@ import (
 
 // Runtime holds process-wide dependencies for the native UI.
 type Runtime struct {
-	App      *gui.App
-	Logger   *zap.Logger
-	Store    *config.Store
-	Hub      *termio.Hub
-	SSH      *ssh.Manager
-	Serial   *serial.Manager
-	Registry *protocol.Registry
-	Ctrl     *Controller
-	HostKey  *sshui.HostKeyPrompter
-	Keyboard *sshui.KeyboardPrompter
-	DB       *database.Database
-	Vault    *secret.Vault
-	Keys     *sshkey.Service
-	Keybind  *keybind.Manager
+	App       *gui.App
+	Logger    *zap.Logger
+	Store     *config.Store
+	Hub       *termio.Hub
+	SSH       *ssh.Manager
+	Serial    *serial.Manager
+	Registry  *protocol.Registry
+	Ctrl      *Controller
+	HostKey   *sshui.HostKeyPrompter
+	Keyboard  *sshui.KeyboardPrompter
+	DB        *database.Database
+	Vault     *secret.Vault
+	Keys      *sshkey.Service
+	Keybind   *keybind.Manager
+	Bookmarks *bookmark.Service
 }
 
 // Bootstrap constructs engines and the protocol registry.
@@ -91,8 +93,22 @@ func Bootstrap() (*Runtime, error) {
 	reg.Register(sshui.Entry(sshMgr, hub, logger, globalProxy))
 	reg.Register(serialui.Entry(serialMgr, hub))
 
+	bmSvc := bookmark.New(logger, db, func(reason string) (string, error) {
+		return vault.Get()
+	}, nil, func() {
+		vault.Clear()
+	}, func(id string) (string, error) {
+		return keys.PrivatePEM(id)
+	}, nil)
+
 	ctrl := NewController(hub, reg, logger)
 	ctrl.SetTermDefaults(fonts.TermStyle(store.Config.Terminal), store.Config.Terminal.Scrollback)
+	ctrl.SetBookmarkDial(BookmarkDialDeps{
+		Bookmarks:   bmSvc,
+		SSH:         sshMgr,
+		Serial:      serialMgr,
+		GlobalProxy: globalProxy,
+	})
 	ctrl.SetShutdown(func() {
 		sshMgr.CloseAll()
 		serialMgr.CloseAll()
@@ -101,19 +117,20 @@ func Bootstrap() (*Runtime, error) {
 	})
 
 	return &Runtime{
-		Logger:   logger,
-		Store:    store,
-		Hub:      hub,
-		SSH:      sshMgr,
-		Serial:   serialMgr,
-		Registry: reg,
-		Ctrl:     ctrl,
-		HostKey:  hostKey,
-		Keyboard: keyboard,
-		DB:       db,
-		Vault:    vault,
-		Keys:     keys,
-		Keybind:  kb,
+		Logger:    logger,
+		Store:     store,
+		Hub:       hub,
+		SSH:       sshMgr,
+		Serial:    serialMgr,
+		Registry:  reg,
+		Ctrl:      ctrl,
+		HostKey:   hostKey,
+		Keyboard:  keyboard,
+		DB:        db,
+		Vault:     vault,
+		Keys:      keys,
+		Keybind:   kb,
+		Bookmarks: bmSvc,
 	}, nil
 }
 

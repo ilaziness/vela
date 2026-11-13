@@ -100,7 +100,31 @@ func normalizeColor(color string) string {
 	if _, ok := allowedColors[color]; ok {
 		return color
 	}
-	return ""
+	return normalizeColorHex(color)
+}
+
+// normalizeColorHex accepts #rgb / #rrggbb / #rrggbbaa (leading # optional).
+// Returns canonical lowercase "#rrggbb" or "#rrggbbaa"; invalid → "".
+func normalizeColorHex(color string) string {
+	s := strings.TrimPrefix(color, "#")
+	n := len(s)
+	if n != 3 && n != 6 && n != 8 {
+		return ""
+	}
+	for _, c := range s {
+		if !isHexDigit(c) {
+			return ""
+		}
+	}
+	if n == 3 {
+		// #rgb → #rrggbb
+		s = string([]byte{s[0], s[0], s[1], s[1], s[2], s[2]})
+	}
+	return "#" + s
+}
+
+func isHexDigit(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
 }
 
 func normalizeMeta(b *Bookmark) {

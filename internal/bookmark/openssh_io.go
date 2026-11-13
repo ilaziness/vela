@@ -2,6 +2,7 @@ package bookmark
 
 import (
 	"fmt"
+	"os/user"
 	"sort"
 	"strings"
 	"time"
@@ -209,13 +210,19 @@ func entryToBookmark(e sshconfig.HostEntry, title, groupName string) Bookmark {
 	if port <= 0 {
 		port = 22
 	}
+	login := e.User
+	if login == "" {
+		if u, err := user.Current(); err == nil {
+			login = u.Username
+		}
+	}
 	b := Bookmark{
 		GroupName:  groupName,
 		Title:      title,
 		Protocol:   string(termio.ProtocolSSH),
 		Host:       host,
 		Port:       port,
-		User:       e.User,
+		User:       login,
 		ProxyMode:  "inherit",
 		StartupCmd: e.RemoteCommand,
 		Charset:    termcharset.UTF8,

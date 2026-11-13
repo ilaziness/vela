@@ -8,9 +8,10 @@ import (
 
 // Chrome holds icon-rail actions for secondary windows.
 type Chrome struct {
-	OnSettings func()
-	OnTools    func()
-	OnBackup   func()
+	OnBookmarks func()
+	OnSettings  func()
+	OnTools     func()
+	OnBackup    func()
 }
 
 func flush(cfg gui.ContainerCfg) gui.ContainerCfg { return layout.Flush(cfg) }

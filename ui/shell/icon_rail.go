@@ -1,8 +1,6 @@
 package shell
 
 import (
-	"time"
-
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
@@ -36,17 +34,6 @@ func IconRail(w *gui.Window, chrome Chrome) gui.View {
 	st := gui.State[app.State](w)
 	quickOpen := st.ActiveNav == navQuickConnect && st.SideVisible
 
-	placeholder := func(id, glyph, tip string) gui.View {
-		return railBtn(id, glyph, tip, th, false, func(ctx gui.EventCtx) {
-			ctx.Consume()
-			ctx.Window.Toast(gui.ToastCfg{
-				Body:     i18n.Tf("shell.placeholder.feature", tip),
-				Severity: gui.ToastInfo,
-				Duration: 2 * time.Second,
-			})
-		})
-	}
-
 	// Quick connect: toggle the bookmark side panel.
 	quickBtn := railBtn(navQuickConnect, gui.IconBolt, i18n.T("shell.nav.quick_connect"), th, quickOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
@@ -57,6 +44,13 @@ func IconRail(w *gui.Window, chrome Chrome) gui.View {
 		}
 		s.ActiveNav = navQuickConnect
 		s.SideVisible = true
+	})
+
+	bookmarksBtn := railBtn(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks"), th, false, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		if chrome.OnBookmarks != nil {
+			chrome.OnBookmarks()
+		}
 	})
 
 	backupBtn := railBtn(navBackup, gui.IconSync, i18n.T("header.backup_restore"), th, false, func(ctx gui.EventCtx) {
@@ -95,7 +89,7 @@ func IconRail(w *gui.Window, chrome Chrome) gui.View {
 				HAlign:  gui.HAlignCenter,
 				Content: []gui.View{
 					quickBtn,
-					placeholder(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks")),
+					bookmarksBtn,
 					backupBtn,
 					toolsBtn,
 					settingsBtn,

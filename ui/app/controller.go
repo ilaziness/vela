@@ -10,7 +10,10 @@ import (
 	"github.com/go-gui-org/go-term/term"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/serial"
+	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/termstream"
 	"github.com/ilaziness/vela/internal/usererr"
@@ -28,6 +31,12 @@ type Controller struct {
 	termStyle  gui.TextStyle
 	scrollback int
 	onClose    func()
+
+	// Bookmark dial (test only in this iteration).
+	bookmarks   *bookmark.Service
+	sshMgr      *ssh.Manager
+	serialMgr   *serial.Manager
+	globalProxy func() ssh.GlobalProxy
 }
 
 // NewController constructs the app controller.

@@ -795,48 +795,26 @@ func (s *Service) PrepareTest(b Bookmark) (PrepareTestResult, error) {
 	ep := b.Endpoint()
 	jumpID := b.ProxyJumpID
 	proxyPass := b.ProxyPassword
+	// Only PasswordMask means "reuse stored secret". Empty string is an
+	// intentional clear (matches Save / encryptFieldIfNeeded).
 	if b.ID != "" {
-		existing, err := s.Get(b.ID)
-		if err != nil {
-			return PrepareTestResult{}, err
-		}
-		sameHost := b.Host == existing.Host && b.Port == existing.Port && b.User == existing.User
-		passwordUnchanged := b.Password == "" || b.Password == PasswordMask
-		keyPassUnchanged := b.PrivateKeyPassword == "" || b.PrivateKeyPassword == PasswordMask
-		proxyPassUnchanged := b.ProxyPassword == "" || b.ProxyPassword == PasswordMask
-		sameKeyFile := b.PrivateKey == existing.PrivateKey
-		sameStoredKey := b.SshKeyID == existing.SshKeyID
-		fullReuse := sameHost && passwordUnchanged && keyPassUnchanged && sameKeyFile && sameStoredKey
-		switch {
-		case fullReuse:
+		needLogin := b.Password == PasswordMask
+		needKeyPass := b.PrivateKeyPassword == PasswordMask
+		needProxy := b.ProxyPassword == PasswordMask
+		if needLogin || needKeyPass || needProxy {
 			decrypted, err := s.GetDecrypted(b.ID)
 			if err != nil {
 				return PrepareTestResult{}, err
 			}
-			ep = decrypted.Endpoint()
-			if proxyPassUnchanged {
-				proxyPass = decrypted.ProxyPassword
+			if needLogin {
+				ep.Password = decrypted.Password
 			}
-		case sameHost && b.Password == PasswordMask:
-			decrypted, err := s.GetDecrypted(b.ID)
-			if err != nil {
-				return PrepareTestResult{}, err
-			}
-			ep.Password = decrypted.Password
-			if sameKeyFile && keyPassUnchanged {
+			if needKeyPass {
 				ep.KeyPassword = decrypted.PrivateKeyPassword
-			} else if b.PrivateKeyPassword == PasswordMask {
-				ep.KeyPassword = ""
 			}
-			if proxyPassUnchanged {
+			if needProxy {
 				proxyPass = decrypted.ProxyPassword
 			}
-		case b.ProxyPassword == PasswordMask:
-			decrypted, err := s.GetDecrypted(b.ID)
-			if err != nil {
-				return PrepareTestResult{}, err
-			}
-			proxyPass = decrypted.ProxyPassword
 		}
 	}
 	ep, err := s.attachKey(ep, b.SshKeyID)
