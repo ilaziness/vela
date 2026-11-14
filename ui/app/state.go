@@ -39,6 +39,12 @@ type Tab struct {
 	// PerfOpen remembers whether this tab's performance panel is shown
 	// on the right-side tool rail.
 	PerfOpen bool
+	// SFTPOpen remembers whether this tab's SFTP panel covers the
+	// terminal stage. The terminal keeps running underneath.
+	SFTPOpen bool
+	// OwnerKey scopes persisted transfer-queue rows for this session
+	// (bookmark id, or user@host:port). Empty until the session binds.
+	OwnerKey string
 }
 
 // State is the per-window gui.State root (immediate-mode data only).
@@ -51,8 +57,12 @@ type State struct {
 	BusyOp         string // "connect" | "test" while Busy
 	SearchQuery    string
 	BookmarkGroups []*bookmark.Group
-	tabSeq         int
-	defaultsOK     bool
+	// SFTP holds per-session SFTP panel state, keyed by session id.
+	// Entries are created lazily when a panel opens and survive tab
+	// switches; they are dropped when the session dies.
+	SFTP       map[string]*SFTPState
+	tabSeq     int
+	defaultsOK bool
 }
 
 // EnsureDefaults seeds first-run state.
@@ -64,6 +74,9 @@ func (s *State) EnsureDefaults(newDraft func() protocol.Draft) {
 	}
 	if len(s.Tabs) == 0 {
 		s.OpenConnectTab(newDraft)
+	}
+	if s.SFTP == nil {
+		s.SFTP = make(map[string]*SFTPState)
 	}
 }
 

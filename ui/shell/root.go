@@ -4,8 +4,10 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/session"
+	"github.com/ilaziness/vela/ui/sftp"
 )
 
 // Root builds the edge-to-edge shell: icon rail | [bookmarks] | main.
@@ -41,17 +43,31 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 	}
 
 	// [terminal] [perf panel?] | [tool rail?] — the rail belongs to a
-	// live session tab and appears only once it has connected.
-	if tab != nil && tab.Kind == app.TabSession && tab.SessID != "" {
+	// live SSH session tab and appears only once it has connected;
+	// every tool it offers (sftp, perf, tunnel, transfers) is
+	// SSH-only, so serial sessions get no rail. The SFTP panel stacks
+	// over the terminal/perf stage only; the rail and tab bar stay
+	// visible and the terminal keeps running underneath.
+	if tab != nil && tab.Kind == app.TabSession && tab.SessID != "" && tab.Protocol == termio.ProtocolSSH {
+		stage := body
 		if tab.PerfOpen {
-			body = gui.Row(flush(gui.ContainerCfg{
+			stage = gui.Row(flush(gui.ContainerCfg{
 				Sizing:  gui.FillFill,
-				Content: []gui.View{body, session.PerfPanel(ctrl, tab)},
+				Content: []gui.View{stage, session.PerfPanel(ctrl, tab)},
+			}))
+		}
+		if tab.SFTPOpen {
+			stage = gui.Stack(flush(gui.ContainerCfg{
+				Sizing: gui.FillFill,
+				Content: []gui.View{
+					stage,
+					sftpui.View(w, ctrl, tab),
+				},
 			}))
 		}
 		body = gui.Row(flush(gui.ContainerCfg{
 			Sizing:  gui.FillFill,
-			Content: []gui.View{body, vRule(), session.TabRail(ctrl, tab)},
+			Content: []gui.View{stage, vRule(), session.TabRail(ctrl, tab)},
 		}))
 	}
 

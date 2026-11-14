@@ -16,11 +16,13 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/serial"
+	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/termstream"
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/ui/protocol"
+	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
 )
 
 // Controller owns session hub wiring and terminal widgets.
@@ -55,6 +57,11 @@ type Controller struct {
 	// perf holds per-session performance polling state, keyed by
 	// sessID. Owned by perf.go; started/stopped from the tool rail.
 	perf map[string]*perfMon
+
+	// sftpMgr is the SFTP engine; edits tracks remote-edit watchers.
+	// Both are wired by SetSFTP during bootstrap.
+	sftpMgr *sftp.Manager
+	edits   *sftpEditBook
 }
 
 // reconnectReq is how a session tab reached its session: either a
@@ -83,6 +90,7 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		terms:      make(map[string]*term.Term),
 		scrollback: 10000,
 		reconnect:  make(map[string]reconnectReq),
+		edits:      newEditBook(),
 	}
 }
 
@@ -333,10 +341,15 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 		tab.Title = sess.Label()
 	}
 	tab.Protocol = sess.Protocol()
+	if tab.SessID != "" {
+		delete(st.SFTP, tab.SessID)
+	}
 	tab.SessID = sess.ID()
 	tab.Draft = protocol.Draft{}
 	tab.Status = TabStatusConnected
 	tab.ConnErr = ""
+	tab.SFTPOpen = false
+	tab.OwnerKey = c.sftpOwnerKey(req)
 	st.ActiveTab = tab.ID
 
 	c.mu.Lock()
@@ -375,8 +388,17 @@ func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 	// A dead session has nothing to monitor; the user reopens the
 	// panel after reconnecting.
 	tab.PerfOpen = false
+	tab.SFTPOpen = false
+	delete(st.SFTP, sessID)
+	// The SSH session is already dead: discard unsaved edits and
+	// close the SFTP client without prompting.
+	c.closeSFTPSession(sessID)
 	c.tearDownSession(sessID)
 	c.DropPerf(sessID)
+	// If the SFTP panel held focus its ID dies with the session;
+	// clear first so go-gui's fixup does not park focus on the first
+	// tab stop (the quick-connect refresh button).
+	w.ClearFocus()
 	c.focusActiveTerm(st)
 }
 
@@ -387,7 +409,8 @@ func (c *Controller) TermFor(sessID string) *term.Term {
 	return c.terms[sessID]
 }
 
-// CloseTab closes a UI tab and its session if any.
+// CloseTab closes a UI tab and its session if any. When the session
+// has unsaved remote edits the user is asked once before teardown.
 func (c *Controller) CloseTab(w *gui.Window, tabID string) {
 	st := gui.State[State](w)
 	var sessID string
@@ -397,10 +420,30 @@ func (c *Controller) CloseTab(w *gui.Window, tabID string) {
 			break
 		}
 	}
+	if sessID != "" && c.UnsavedEditCount(sessID) > 0 {
+		c.requestCloseSession(w, sessID, func() {
+			c.closeTabNow(w, tabID, sessID)
+		})
+		return
+	}
+	c.closeTabNow(w, tabID, sessID)
+}
+
+// closeTabNow performs the tab removal and session teardown. Runs on
+// the UI thread, possibly deferred by an edit-confirm dialog.
+func (c *Controller) closeTabNow(w *gui.Window, tabID, sessID string) {
+	st := gui.State[State](w)
 	// Drop focus before the close chip leaves the tree; otherwise go-gui
 	// reassigns to the first remaining focusable (icon rail → blue ring).
 	w.ClearFocus()
 	st.RemoveTab(tabID)
+	if sessID != "" {
+		delete(st.SFTP, sessID)
+		// Close the SFTP client too: without this the session's file
+		// channel would leak after the tab is gone. Edit uploads were
+		// already resolved by requestCloseSession when needed.
+		c.closeSFTPSession(sessID)
+	}
 	// Forget how the tab dialed: the saved draft may hold a password.
 	c.mu.Lock()
 	delete(c.reconnect, tabID)
@@ -503,7 +546,7 @@ func (c *Controller) focusActiveTerm(st *State) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	active := ""
-	if t := st.Active(); t != nil && t.Kind == TabSession {
+	if t := st.Active(); t != nil && t.Kind == TabSession && !t.SFTPOpen {
 		active = t.SessID
 	}
 	for id, tm := range c.terms {
@@ -514,10 +557,12 @@ func (c *Controller) focusActiveTerm(st *State) {
 	}
 }
 
-// HandleWindowEvent routes events to the focused terminal.
+// HandleWindowEvent routes events to the focused terminal. While the
+// SFTP panel covers the stage the terminal gets nothing: its PTY keeps
+// running, it just does not receive input.
 func (c *Controller) HandleWindowEvent(e *gui.Event, st *State) {
 	t := st.Active()
-	if t == nil || t.Kind != TabSession {
+	if t == nil || t.Kind != TabSession || t.SFTPOpen {
 		return
 	}
 	tm := c.TermFor(t.SessID)
@@ -537,6 +582,9 @@ func (c *Controller) Shutdown() {
 	c.reconnect = make(map[string]reconnectReq)
 	c.closing = true
 	c.mu.Unlock()
+	// SFTP clients and edit watchers go down before the SSH sessions
+	// they ride on; watchers are discarded, never prompted, here.
+	c.CloseAllSFTP()
 	for _, id := range ids {
 		c.tearDownSession(id)
 	}
@@ -555,6 +603,32 @@ func (c *Controller) NewSSHDraft() protocol.Draft {
 		return e.NewDraft()
 	}
 	return protocol.Draft{Protocol: termio.ProtocolSSH}
+}
+
+// sftpOwnerKey scopes the persisted transfer queue for a session:
+// the bookmark id for saved entries, else user@host:port from the
+// SSH form payload (port defaults to 22).
+func (c *Controller) sftpOwnerKey(req reconnectReq) string {
+	if req.bookmarkID != "" {
+		return req.bookmarkID
+	}
+	var p sshui.Payload
+	switch v := req.draft.Payload.(type) {
+	case sshui.Payload:
+		p = v
+	case *sshui.Payload:
+		if v == nil {
+			return ""
+		}
+		p = *v
+	default:
+		return ""
+	}
+	port := p.Port
+	if port <= 0 {
+		port = 22
+	}
+	return fmt.Sprintf("%s@%s:%d", p.User, p.Host, port)
 }
 
 // Statusf is a small helper for formatted toast messages.

@@ -14,9 +14,11 @@ import (
 	"github.com/ilaziness/vela/internal/keybind"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/serial"
+	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/internal/termio"
+	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
 	serialui "github.com/ilaziness/vela/ui/protocol/serial"
@@ -103,6 +105,16 @@ func Bootstrap() (*Runtime, error) {
 
 	ctrl := NewController(hub, reg, logger)
 	ctrl.SetTermDefaults(fonts.TermStyle(store.Config.Terminal), store.Config.Terminal.Scrollback)
+
+	// SFTP rides on the live SSH sessions: the manager reuses the
+	// existing ssh client per session, so opening the panel never
+	// touches the terminal's PTY.
+	transfers := transfer.NewRegistry(ctrl.OnTransferProgress)
+	sftpMgr := sftp.NewManager(logger, sshMgr, transfers, db.SftpTransferRepo)
+	ctrl.SetSFTP(sftpMgr)
+	sftpMgr.SetOnQueued(ctrl.OnSFTPQueued)
+	sshMgr.SetOnCwd(ctrl.OnTerminalCwd)
+
 	ctrl.SetBookmarkDial(BookmarkDialDeps{
 		Bookmarks:   bmSvc,
 		SSH:         sshMgr,

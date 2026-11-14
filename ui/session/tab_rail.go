@@ -4,7 +4,6 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
-	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/layout"
 )
@@ -19,23 +18,28 @@ const (
 
 // Tool IDs for the right-side per-tab rail.
 const (
-	toolSSH      = "ssh"
+	toolSFTP     = "sftp"
 	toolPerf     = "perf"
 	toolTunnel   = "tunnel"
 	toolTransfer = "transfer"
 )
 
 // TabRail is the right-side tool strip bound to the active live
-// session tab: ssh | performance | tunnel | transfer list. Only
-// performance is wired; the rest are placeholders.
+// session tab, top to bottom: sftp | performance | tunnel | transfer
+// list. Only sftp and performance are wired; the rest are placeholders.
 func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 	th := gui.CurrentTheme()
 	perfOpen := tab.PerfOpen
 
-	sshBtn := toolBtn(toolSSH, gui.IconTerminal, i18n.T("shell.tools.ssh"), th, false, func(ctx gui.EventCtx) {
-		ctx.Consume()
-		placeholder(ctrl, i18n.T("shell.tools.ssh"))
-	})
+	// The SFTP toggle only exists for connected SSH sessions; other
+	// tabs keep the slot empty rather than showing a dead button.
+	var sftpBtn gui.View
+	if app.SFTPControls(tab) {
+		sftpBtn = toolBtn(toolSFTP, gui.IconColumns, i18n.T("shell.tools.sftp"), th, tab.SFTPOpen, func(ctx gui.EventCtx) {
+			ctx.Consume()
+			ctrl.ToggleSFTP(ctx.Window, tab.ID)
+		})
+	}
 
 	perfBtn := toolBtn(toolPerf, gui.IconActivity, i18n.T("shell.tools.perf"), th, perfOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
@@ -44,12 +48,8 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 		if t == nil {
 			return
 		}
-		if t.Protocol != termio.ProtocolSSH {
-			// Host metrics come from the SSH probe (/proc); a serial
-			// link has nothing to sample.
-			ctrl.SetStatus(i18n.T("shell.perf.unsupported"))
-			return
-		}
+		// The rail only renders for SSH session tabs (root.go gates
+		// on the protocol), so no protocol check is needed here.
 		t.PerfOpen = !t.PerfOpen
 		if t.PerfOpen {
 			ctrl.StartPerf(ctx.Window, t.SessID)
@@ -63,7 +63,9 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 		placeholder(ctrl, i18n.T("shell.tools.tunnel"))
 	})
 
-	transferBtn := toolBtn(toolTransfer, gui.IconDownload, i18n.T("shell.tools.transfer"), th, false, func(ctx gui.EventCtx) {
+	// The transfer list opens the SFTP queue view; it lands with the
+	// panel work, so the slot is a placeholder for now.
+	transferBtn := toolBtn(toolTransfer, gui.IconListOrder, i18n.T("shell.tools.transfer"), th, false, func(ctx gui.EventCtx) {
 		ctx.Consume()
 		placeholder(ctrl, i18n.T("shell.tools.transfer"))
 	})
@@ -82,7 +84,7 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 				Padding: gui.NewPadding(4, 0, 4, 0),
 				HAlign:  gui.HAlignCenter,
 				Content: []gui.View{
-					sshBtn,
+					sftpBtn,
 					perfBtn,
 					tunnelBtn,
 					transferBtn,
