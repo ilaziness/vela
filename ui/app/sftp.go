@@ -80,11 +80,12 @@ func (c *Controller) OnTransferProgress(p transfer.ProgressData) {
 	}
 	w.QueueCommand(func(w *gui.Window) {
 		st := gui.State[State](w)
-		s := st.SFTP[p.SessionID]
-		if s == nil {
+		if st.TabBySessID(p.SessionID) == nil {
 			return
 		}
-		s.Transfers = transferUpsert(s.Transfers, p)
+		c.mu.Lock()
+		c.transfers[p.SessionID] = transferUpsert(c.transfers[p.SessionID], p)
+		c.mu.Unlock()
 		if p.Done {
 			c.refreshAfterTransfer(w, p.SessionID)
 		}
@@ -740,15 +741,13 @@ func (c *Controller) SFTPStateFor(w *gui.Window, sessID string) *SFTPState {
 func (c *Controller) refreshTransfers(w *gui.Window, sessID string) {
 	mgr := c.SFTPManager()
 	st := gui.State[State](w)
-	s := st.SFTP[sessID]
-	if mgr == nil || s == nil {
+	tab := st.TabBySessID(sessID)
+	if mgr == nil || tab == nil {
 		return
 	}
-	ownerKey := s.OwnerKey
+	ownerKey := tab.OwnerKey
 	if ownerKey == "" {
-		if tab := st.TabBySessID(sessID); tab != nil {
-			ownerKey = tab.OwnerKey
-		}
+		ownerKey = c.sftpOwnerKey(reconnectReq{draft: tab.Draft})
 	}
 	go func() {
 		pending, err := mgr.ListPendingTransfers(ownerKey)
@@ -757,22 +756,19 @@ func (c *Controller) refreshTransfers(w *gui.Window, sessID string) {
 			return
 		}
 		w.QueueCommand(func(w *gui.Window) {
-			st := gui.State[State](w)
-			s := st.SFTP[sessID]
-			if s == nil {
-				return
-			}
+			c.mu.Lock()
 			// Merge: live rows win over persisted ones with the same ID.
-			live := make(map[string]bool, len(s.Transfers))
-			for _, p := range s.Transfers {
+			live := make(map[string]bool, len(c.transfers[sessID]))
+			for _, p := range c.transfers[sessID] {
 				live[p.ID] = true
 			}
 			for _, p := range pending {
 				p.SessionID = sessID
 				if !live[p.ID] {
-					s.Transfers = transferUpsert(s.Transfers, p)
+					c.transfers[sessID] = transferUpsert(c.transfers[sessID], p)
 				}
 			}
+			c.mu.Unlock()
 		})
 	}()
 }
@@ -810,12 +806,12 @@ func (c *Controller) SFTPRetryTransfer(w *gui.Window, sessID, id string) {
 // SFTPDismissTransfer removes a finished transfer record.
 func (c *Controller) SFTPDismissTransfer(w *gui.Window, sessID, id string) {
 	mgr := c.SFTPManager()
-	st := gui.State[State](w)
-	s := st.SFTP[sessID]
-	if mgr == nil || s == nil {
+	if mgr == nil {
 		return
 	}
-	s.Transfers = transferRemove(s.Transfers, id)
+	c.mu.Lock()
+	c.transfers[sessID] = transferRemove(c.transfers[sessID], id)
+	c.mu.Unlock()
 	go func() {
 		if err := mgr.DismissTransfer(id); err != nil {
 			c.logger.Warn("dismiss transfer failed", zap.String("id", id), zap.Error(err))
@@ -827,14 +823,13 @@ func (c *Controller) SFTPDismissTransfer(w *gui.Window, sessID, id string) {
 // rows from the list and the queue.
 func (c *Controller) SFTPClearFinished(w *gui.Window, sessID string, onlyFailed bool) {
 	mgr := c.SFTPManager()
-	st := gui.State[State](w)
-	s := st.SFTP[sessID]
-	if mgr == nil || s == nil {
+	if mgr == nil {
 		return
 	}
+	c.mu.Lock()
 	var ids []string
-	kept := s.Transfers[:0]
-	for _, p := range s.Transfers {
+	kept := c.transfers[sessID][:0]
+	for _, p := range c.transfers[sessID] {
 		done := p.Done
 		failed := p.Error != ""
 		match := done && (!onlyFailed || failed)
@@ -844,7 +839,8 @@ func (c *Controller) SFTPClearFinished(w *gui.Window, sessID string, onlyFailed 
 		}
 		kept = append(kept, p)
 	}
-	s.Transfers = kept
+	c.transfers[sessID] = kept
+	c.mu.Unlock()
 	go func() {
 		for _, id := range ids {
 			if err := mgr.DismissTransfer(id); err != nil {
@@ -852,6 +848,19 @@ func (c *Controller) SFTPClearFinished(w *gui.Window, sessID string, onlyFailed 
 			}
 		}
 	}()
+}
+
+// ToggleTransfer opens or closes the transfer panel for a tab.
+func (c *Controller) ToggleTransfer(w *gui.Window, tabID string) {
+	st := gui.State[State](w)
+	tab := st.TabByID(tabID)
+	if tab == nil || tab.Kind != TabSession || tab.SessID == "" {
+		return
+	}
+	tab.TransferOpen = !tab.TransferOpen
+	if tab.TransferOpen {
+		c.refreshTransfers(w, tab.SessID)
+	}
 }
 
 // --- session lifecycle ---

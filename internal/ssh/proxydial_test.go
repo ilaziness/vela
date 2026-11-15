@@ -73,7 +73,7 @@ func TestDialHTTPConnect(t *testing.T) {
 				errCh := make(chan error, 2)
 				go func() { _, err := io.Copy(upstream, br); errCh <- err }()
 				go func() { _, err := io.Copy(c, upstream); errCh <- err }()
-				<-errCh
+				<-errCh //nolint:errcheck // copy errors are expected on teardown; we only wait for the first direction to end
 			}(c)
 		}
 	}()

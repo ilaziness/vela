@@ -104,6 +104,7 @@
 - 嵌入终端：`term.Cfg{NoWindowHandler: true}`，由壳层转发事件。
 - Connect/Test：后台 goroutine + `Window.QueueCommand` 回写。
 - 能力缺口：以公开 API 为准；做不到则告知限制并接受现状，不 fork 改库。
+- 禁止使用emoji文字代替`go-gui`图标，图标需要使用`go-gui`库的`Feather`图标。
 
 ---
 

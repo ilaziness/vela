@@ -63,11 +63,10 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 		placeholder(ctrl, i18n.T("shell.tools.tunnel"))
 	})
 
-	// The transfer list opens the SFTP queue view; it lands with the
-	// panel work, so the slot is a placeholder for now.
-	transferBtn := toolBtn(toolTransfer, gui.IconListOrder, i18n.T("shell.tools.transfer"), th, false, func(ctx gui.EventCtx) {
+	// The transfer list opens the transfer panel.
+	transferBtn := toolBtn(toolTransfer, gui.IconListOrder, i18n.T("shell.tools.transfer"), th, tab.TransferOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		placeholder(ctrl, i18n.T("shell.tools.transfer"))
+		ctrl.ToggleTransfer(ctx.Window, tab.ID)
 	})
 
 	return gui.Column(layout.Flush(gui.ContainerCfg{

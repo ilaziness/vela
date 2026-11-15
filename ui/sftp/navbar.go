@@ -213,7 +213,7 @@ func tipBtn(id, glyph, tip string, th gui.Theme, size float32, variant gui.Butto
 			}),
 		}
 		if is.Hovered && tip != "" {
-			content = append(content, tipBubble(tip, th))
+			content = append(content, TipBubble(tip, th))
 		}
 		return gui.Column(layout.Flush(gui.ContainerCfg{
 			ID:      cellID,
@@ -228,9 +228,9 @@ func tipBtn(id, glyph, tip string, th gui.Theme, size float32, variant gui.Butto
 	})
 }
 
-// tipBubble is the floating label shown while a tipBtn or file name
+// TipBubble is the floating label shown while a tipBtn or file name
 // is hovered.
-func tipBubble(text string, th gui.Theme) gui.View {
+func TipBubble(text string, th gui.Theme) gui.View {
 	return gui.Column(layout.Flush(gui.ContainerCfg{
 		Float:         true,
 		FloatAutoFlip: true,

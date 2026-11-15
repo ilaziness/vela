@@ -68,7 +68,6 @@ func View(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 		OnKeyUp:      swallowUnhandled,
 		Content: []gui.View{
 			body,
-			transferBar(ctrl, sessID, s),
 		},
 	}))
 }

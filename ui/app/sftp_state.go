@@ -11,7 +11,6 @@ import (
 	"github.com/ilaziness/vela/internal/localfs"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/internal/tools"
-	"github.com/ilaziness/vela/internal/transfer"
 )
 
 // SFTPStatus is the panel's connection lifecycle.
@@ -74,9 +73,6 @@ type SFTPState struct {
 	LastLocalClickAt  time.Time
 	LastRemoteClick   string
 	LastRemoteClickAt time.Time
-
-	// Transfers shown in the bottom list.
-	Transfers []transfer.ProgressData
 
 	// dlg is the open modal form/confirm, if any.
 	dlg sftpDialog
@@ -305,26 +301,4 @@ func deletePrompt(paths []string) string {
 		return i18n.Tf("sftp.confirm_delete_one", path.Base(paths[0]))
 	}
 	return i18n.Tf("sftp.confirm_delete_many", len(paths))
-}
-
-// transferUpsert replaces or appends a progress row by ID.
-func transferUpsert(list []transfer.ProgressData, p transfer.ProgressData) []transfer.ProgressData {
-	for i := range list {
-		if list[i].ID == p.ID {
-			list[i] = p
-			return list
-		}
-	}
-	return append(list, p)
-}
-
-// transferRemove drops a row by ID.
-func transferRemove(list []transfer.ProgressData, id string) []transfer.ProgressData {
-	out := list[:0]
-	for _, p := range list {
-		if p.ID != id {
-			out = append(out, p)
-		}
-	}
-	return out
 }

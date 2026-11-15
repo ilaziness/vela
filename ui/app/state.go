@@ -42,6 +42,9 @@ type Tab struct {
 	// SFTPOpen remembers whether this tab's SFTP panel covers the
 	// terminal stage. The terminal keeps running underneath.
 	SFTPOpen bool
+	// TransferOpen remembers whether this tab's transfer panel is shown
+	// on the right-side tool rail.
+	TransferOpen bool
 	// OwnerKey scopes persisted transfer-queue rows for this session
 	// (bookmark id, or user@host:port). Empty until the session binds.
 	OwnerKey string

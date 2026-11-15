@@ -102,7 +102,8 @@ func restoreListView(d *Deps, st *restoreState) gui.View {
 				},
 			}))
 		}
-		if st.loading {
+		switch {
+		case st.loading:
 			rows = append(rows, gui.Row(layout.Flush(gui.ContainerCfg{
 				Sizing: gui.FillFit,
 				HAlign: gui.HAlignCenter,
@@ -114,7 +115,7 @@ func restoreListView(d *Deps, st *restoreState) gui.View {
 					}),
 				},
 			})))
-		} else if st.hasMore && len(st.items) > 0 {
+		case st.hasMore && len(st.items) > 0:
 			rows = append(rows, gui.Button(gui.ButtonCfg{
 				ID:      "backup-restore-more",
 				Variant: gui.ButtonSecondary,
@@ -124,7 +125,7 @@ func restoreListView(d *Deps, st *restoreState) gui.View {
 					loadRestorePage(ctx.Window, d, st, st.page+1)
 				},
 			}))
-		} else if !st.hasMore && len(st.items) > 0 {
+		case !st.hasMore && len(st.items) > 0:
 			rows = append(rows, gui.Text(gui.TextCfg{
 				Text:      i18n.T("settings.sync.all_backups_loaded"),
 				TextStyle: th.TextStyleSecondary,

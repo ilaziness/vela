@@ -20,6 +20,7 @@ import (
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/termstream"
+	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/ui/protocol"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -58,6 +59,9 @@ type Controller struct {
 	// sessID. Owned by perf.go; started/stopped from the tool rail.
 	perf map[string]*perfMon
 
+	// transfers holds per-session transfer progress, keyed by sessID.
+	transfers map[string][]transfer.ProgressData
+
 	// sftpMgr is the SFTP engine; edits tracks remote-edit watchers.
 	// Both are wired by SetSFTP during bootstrap.
 	sftpMgr *sftp.Manager
@@ -90,6 +94,7 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		terms:      make(map[string]*term.Term),
 		scrollback: 10000,
 		reconnect:  make(map[string]reconnectReq),
+		transfers:  make(map[string][]transfer.ProgressData),
 		edits:      newEditBook(),
 	}
 }
@@ -389,12 +394,16 @@ func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 	// panel after reconnecting.
 	tab.PerfOpen = false
 	tab.SFTPOpen = false
+	tab.TransferOpen = false
 	delete(st.SFTP, sessID)
 	// The SSH session is already dead: discard unsaved edits and
 	// close the SFTP client without prompting.
 	c.closeSFTPSession(sessID)
 	c.tearDownSession(sessID)
 	c.DropPerf(sessID)
+	// The reconnect gets a fresh sessID, so this snapshot could never
+	// be read again; retryable rows survive in the transfer queue.
+	c.DropTransfers(sessID)
 	// If the SFTP panel held focus its ID dies with the session;
 	// clear first so go-gui's fixup does not park focus on the first
 	// tab stop (the quick-connect refresh button).
@@ -451,6 +460,7 @@ func (c *Controller) closeTabNow(w *gui.Window, tabID, sessID string) {
 	if sessID != "" {
 		c.tearDownSession(sessID)
 		c.DropPerf(sessID)
+		c.DropTransfers(sessID)
 	}
 	if len(st.Tabs) == 0 {
 		var newDraft func() protocol.Draft
@@ -629,6 +639,44 @@ func (c *Controller) sftpOwnerKey(req reconnectReq) string {
 		port = 22
 	}
 	return fmt.Sprintf("%s@%s:%d", p.User, p.Host, port)
+}
+
+// TransferSnapshot returns a copy of the session's transfer list.
+func (c *Controller) TransferSnapshot(sessID string) []transfer.ProgressData {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]transfer.ProgressData, len(c.transfers[sessID]))
+	copy(out, c.transfers[sessID])
+	return out
+}
+
+// DropTransfers discards a session's transfer state (tab closed, session dropped).
+func (c *Controller) DropTransfers(sessID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.transfers, sessID)
+}
+
+// transferUpsert replaces or appends a progress row by ID.
+func transferUpsert(list []transfer.ProgressData, p transfer.ProgressData) []transfer.ProgressData {
+	for i := range list {
+		if list[i].ID == p.ID {
+			list[i] = p
+			return list
+		}
+	}
+	return append(list, p)
+}
+
+// transferRemove drops a row by ID.
+func transferRemove(list []transfer.ProgressData, id string) []transfer.ProgressData {
+	out := list[:0]
+	for _, p := range list {
+		if p.ID != id {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Statusf is a small helper for formatted toast messages.

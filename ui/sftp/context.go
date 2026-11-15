@@ -30,13 +30,13 @@ func remoteItemMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e sftp
 			}
 			ctrl.SFTPDeleteRemote(ctx.Window, sessID, paths)
 		}},
-		gui.MenuItemCfg{ID: "rename", Text: i18n.T("common.rename"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+		{ID: "rename", Text: i18n.T("common.rename"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 			ctrl.SFTPRenameRemote(ctx.Window, sessID, path)
 		}},
-		gui.MenuItemCfg{ID: "chmod", Text: i18n.T("sftp.chmod"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+		{ID: "chmod", Text: i18n.T("sftp.chmod"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 			ctrl.SFTPChmodRemote(ctx.Window, sessID, path)
 		}},
-		gui.MenuItemCfg{ID: "chown", Text: i18n.T("sftp.chown"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+		{ID: "chown", Text: i18n.T("sftp.chown"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 			ctrl.SFTPChownRemote(ctx.Window, sessID, path)
 		}},
 	}

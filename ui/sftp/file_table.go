@@ -275,14 +275,14 @@ func fixedCell(text string, width float32, th gui.Theme) gui.View {
 // nameCell renders the file name and floats the full name as a
 // tooltip on hover. WithTooltip is avoided: its wrapper Column takes
 // the theme's default padding and would break the flush row.
-// Interactive plus the shared tipBubble float keeps the cell flush.
+// Interactive plus the shared TipBubble float keeps the cell flush.
 func nameCell(id, full, display string, style gui.TextStyle, th gui.Theme) gui.View {
 	return gui.Interactive(id, func(is gui.InteractionState) gui.View {
 		content := []gui.View{
 			gui.Text(gui.TextCfg{Text: display, TextStyle: style, Sizing: gui.FillFit, Clip: true}),
 		}
 		if is.Hovered {
-			content = append(content, tipBubble(full, th))
+			content = append(content, TipBubble(full, th))
 		}
 		return gui.Row(layout.Flush(gui.ContainerCfg{
 			ID:      id,
