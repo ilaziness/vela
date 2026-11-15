@@ -90,14 +90,34 @@ func (b *editBook) begin(ed *remoteEdit) (beginAction, string) {
 		opened := cur.opened
 		local := cur.local
 		cancel := cur.cancel
+		snapSize := cur.snapSize
+		snapMod := cur.snapMod
+		baseline := cur.baseline
 		cur.mu.Unlock()
 		if downloading {
 			return beginDownloading, local
 		}
 		if opened {
-			return beginReopen, local
-		}
-		if cancel != nil {
+			// 远端文件自首次下载后发生了变化（服务器端被其他进程改写等），
+			// 且本地临时文件自下载完成以来没有被用户编辑过时，重新下载，
+			// 避免再次"编辑"拿到的永远是最初的缓存副本。
+			// 本地有未保存修改时保持 reopen，防止静默丢弃用户编辑。
+			remoteChanged := ed.snapSize != snapSize || ed.snapMod != snapMod
+			localClean := false
+			if st, err := os.Stat(local); err == nil && !st.ModTime().After(baseline) {
+				localClean = true
+			}
+			if !remoteChanged || !localClean {
+				if cancel != nil {
+					cancel()
+				}
+				return beginReopen, local
+			}
+			if cancel != nil {
+				cancel()
+			}
+			// 落到下方：files[ed.remote] = ed，按全新编辑重新下载
+		} else if cancel != nil {
 			cancel()
 		}
 	}
