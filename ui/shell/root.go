@@ -6,6 +6,7 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/ui/app"
+	chromeui "github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/session"
 	sftpui "github.com/ilaziness/vela/ui/sftp"
 	transferui "github.com/ilaziness/vela/ui/transfer"
@@ -23,6 +24,11 @@ func Root(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 		cols = append(cols, SidePanel(w, ctrl), vRule())
 	}
 	cols = append(cols, mainPane(w, ctrl, st))
+	if st.Frameless {
+		// Bottom-right corner resize for the borderless frame; the
+		// float child overlays the layout, so it needs no column.
+		cols = append(cols, chromeui.ResizeGrip())
+	}
 
 	return gui.Row(flush(gui.ContainerCfg{
 		Sizing:  gui.FillFill,

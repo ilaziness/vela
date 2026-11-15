@@ -12,6 +12,7 @@ import (
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/backup"
 	"github.com/ilaziness/vela/ui/bookmarks"
+	"github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/settings"
@@ -59,6 +60,7 @@ func main() {
 	toolsDeps := &toolsui.Deps{
 		App:     guiApp,
 		Core:    tools.New(),
+		Store:   rt.Store,
 		IconPNG: appIconPNG,
 	}
 	backupDeps := &backup.Deps{
@@ -69,13 +71,19 @@ func main() {
 	}
 
 	mainWin := gui.NewWindow(gui.WindowCfg{
-		Title:   "Vela",
-		Width:   1280,
-		Height:  800,
-		IconPNG: appIconPNG,
-		State:   &app.State{},
+		Title:       "Vela",
+		Width:       1280,
+		Height:      800,
+		IconPNG:     appIconPNG,
+		State:       &app.State{},
+		Decorations: chrome.Decoration(rt.Store.Config.General.Frameless),
 		OnInit: func(w *gui.Window) {
 			rt.BindWindow(w)
+			frameless := rt.Store.Config.General.Frameless
+			gui.State[app.State](w).Frameless = frameless
+			if frameless {
+				chrome.CenterOnScreen(w)
+			}
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
 				st := gui.State[app.State](w)
 				rt.Ctrl.HandleWindowEvent(e, st)

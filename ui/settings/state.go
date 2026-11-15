@@ -7,6 +7,7 @@ import (
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/internal/sync"
+	"github.com/ilaziness/vela/ui/chrome"
 )
 
 const (
@@ -50,6 +51,11 @@ type State struct {
 
 	MCPServers []ai.MCPServerEntry
 	Skills     []ai.SkillInfo
+
+	// Frameless is the decoration mode captured at window creation;
+	// BarClicks feeds the title strip's double-click maximize.
+	Frameless bool
+	BarClicks chrome.ClickTracker
 
 	loaded bool
 }

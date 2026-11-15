@@ -1160,6 +1160,9 @@
   "validation.tunnel_local": "本機轉送",
   "validation.tunnel_remote": "遠端轉送",
   "window.command": "命令面板",
+  "window.maximize": "最大化",
+  "window.minimize": "最小化",
+  "window.restore": "還原",
   "window.settings": "設定",
   "window.tools": "工具箱"
 }

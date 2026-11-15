@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/termio"
+	"github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/protocol"
 )
 
@@ -70,7 +71,16 @@ type State struct {
 	// SFTP holds per-session SFTP panel state, keyed by session id.
 	// Entries are created lazily when a panel opens and survive tab
 	// switches; they are dropped when the session dies.
-	SFTP       map[string]*SFTPState
+	SFTP map[string]*SFTPState
+
+	// Frameless and BarClicks are window chrome captured at creation:
+	// WindowCfg.Decorations is fixed when the window is made, so
+	// Frameless reflects the config the window was built with, not
+	// later settings drafts. BarClicks feeds the tab bar's
+	// double-click-to-maximize detection.
+	Frameless bool
+	BarClicks chrome.ClickTracker
+
 	tabSeq     int
 	defaultsOK bool
 }

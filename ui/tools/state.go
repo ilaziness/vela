@@ -1,6 +1,9 @@
 package toolsui
 
-import "github.com/ilaziness/vela/internal/tools"
+import (
+	"github.com/ilaziness/vela/internal/tools"
+	"github.com/ilaziness/vela/ui/chrome"
+)
 
 const defaultToolID = "json-yaml"
 
@@ -10,7 +13,13 @@ type State struct {
 	Busy     bool
 	RunGen   uint64
 	Lang     string
-	loaded   bool
+
+	// Frameless is the decoration mode captured at window creation;
+	// BarClicks feeds the title strip's double-click maximize.
+	Frameless bool
+	BarClicks chrome.ClickTracker
+
+	loaded bool
 
 	JSON    jsonState
 	TS      timestampState

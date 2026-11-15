@@ -112,6 +112,7 @@ func saveGeneral(w *gui.Window, d *Deps) {
 	g.Theme = fonts.CanonicalThemeName(g.Theme)
 	st.Busy = true
 	draft := g
+	wasFrameless := d.Store.Config.General.Frameless
 	go func() {
 		err := persistGeneral(d, draft)
 		w.QueueCommand(func(win *gui.Window) {
@@ -127,6 +128,15 @@ func saveGeneral(w *gui.Window, d *Deps) {
 			fonts.Apply(d.Store.Config)
 			refreshTitle(win)
 			toastOK(win, i18n.T("settings.general.save_success"))
+			if draft.Frameless != wasFrameless {
+				// Decorations is fixed at window creation, so the
+				// new frame style applies on next launch.
+				win.Dialog(gui.DialogCfg{
+					DialogType: gui.DialogMessage,
+					Title:      i18n.T("settings.sync.restart_title"),
+					Body:       i18n.T("dialog.frameless_restart"),
+				})
+			}
 		})
 	}()
 }

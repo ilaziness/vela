@@ -4,6 +4,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -83,9 +84,13 @@ func Root(w *gui.Window, d *Deps) gui.View {
 		Content: navBtns,
 	}))
 
-	return gui.Row(layout.Flush(gui.ContainerCfg{
+	bodyRow := gui.Row(layout.Flush(gui.ContainerCfg{
 		Sizing:  gui.FillFill,
 		Color:   th.ColorBackground,
 		Content: []gui.View{nav, layout.VRule(), body},
 	}))
+	if st.Frameless {
+		return chrome.Frame(w, i18n.T("header.settings"), &st.BarClicks, bodyRow)
+	}
+	return bodyRow
 }

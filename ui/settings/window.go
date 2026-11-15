@@ -6,6 +6,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/chrome"
 )
 
 var (
@@ -31,12 +32,14 @@ func Open(d *Deps) {
 	mu.Unlock()
 
 	deps := d
+	frameless := deps.Store.Config.General.Frameless
 	d.App.OpenWindow(gui.WindowCfg{
-		Title:   i18n.T("header.settings"),
-		Width:   960,
-		Height:  720,
-		IconPNG: d.IconPNG,
-		State:   &State{},
+		Title:       i18n.T("header.settings"),
+		Width:       960,
+		Height:      720,
+		IconPNG:     d.IconPNG,
+		State:       &State{Frameless: frameless},
+		Decorations: chrome.Decoration(frameless),
 		OnInit: func(w *gui.Window) {
 			mu.Lock()
 			settingsWin = w
@@ -44,6 +47,9 @@ func Open(d *Deps) {
 			mu.Unlock()
 			st := gui.State[State](w)
 			st.ensureLoaded(deps)
+			if frameless {
+				chrome.CenterOnScreen(w)
+			}
 			w.SetView(func(win *gui.Window) gui.View {
 				return Root(win, deps)
 			})

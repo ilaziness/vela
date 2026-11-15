@@ -5,6 +5,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/sshkey"
+	"github.com/ilaziness/vela/ui/chrome"
 )
 
 const (
@@ -41,7 +42,13 @@ type State struct {
 	Busy      bool
 	Dirty     bool
 	Lang      string
-	loaded    bool
+
+	// Frameless is the decoration mode captured at window creation;
+	// BarClicks feeds the title strip's double-click maximize.
+	Frameless bool
+	BarClicks chrome.ClickTracker
+
+	loaded bool
 
 	// Dialog drafts for import/export/rename/add-group/color.
 	ImportGroup string

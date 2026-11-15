@@ -1160,6 +1160,9 @@
   "validation.tunnel_local": "Local",
   "validation.tunnel_remote": "Remote",
   "window.command": "Command Palette",
+  "window.maximize": "Maximize",
+  "window.minimize": "Minimize",
+  "window.restore": "Restore",
   "window.settings": "Settings",
   "window.tools": "Tools"
 }

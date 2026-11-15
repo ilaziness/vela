@@ -4,6 +4,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -15,7 +16,7 @@ func Root(w *gui.Window, d *Deps) gui.View {
 		st.Lang = lang
 		w.SetTitle(i18n.T("header.bookmarks"))
 	}
-	return gui.Row(layout.Flush(gui.ContainerCfg{
+	body := gui.Row(layout.Flush(gui.ContainerCfg{
 		ID:     "bm-root",
 		Sizing: gui.FillFill,
 		Color:  gui.CurrentTheme().ColorBackground,
@@ -25,4 +26,8 @@ func Root(w *gui.Window, d *Deps) gui.View {
 			editor(w, d),
 		},
 	}))
+	if st.Frameless {
+		return chrome.Frame(w, i18n.T("header.bookmarks"), &st.BarClicks, body)
+	}
+	return body
 }

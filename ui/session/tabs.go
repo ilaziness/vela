@@ -5,6 +5,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
+	"github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -32,23 +33,40 @@ const tabTitleBudget = tabTitleMaxWidth - tabTitlePadL - tabTitlePadR
 
 // TabBar is flush to the top of the main pane.
 // Tips use layout.Tip on hover — not WithTooltip (wrapper forces theme padding).
+//
+// When the window was created frameless (general.frameless), the bar
+// doubles as the title strip: it grows the min/max/close controls at
+// its right end and empty areas drag the window / double-click
+// maximize. Interactive children (chips, buttons) consume their own
+// presses, so they never start a drag.
 func TabBar(w *gui.Window, ctrl *app.Controller) gui.View {
 	st := gui.State[app.State](w)
 	th := gui.CurrentTheme()
-	items := make([]gui.View, 0, len(st.Tabs)+1)
+	items := make([]gui.View, 0, len(st.Tabs)+3)
 	for _, t := range st.Tabs {
 		items = append(items, tabChip(w, th, t, t.ID == st.ActiveTab, ctrl))
 	}
 	items = append(items, tabAddBtn(th, ctrl))
 
-	return gui.Row(layout.Flush(gui.ContainerCfg{
+	cfg := layout.Flush(gui.ContainerCfg{
 		ID:      "session-tabs",
 		Sizing:  gui.FillFit,
 		Color:   th.ColorPanel,
 		VAlign:  gui.VAlignMiddle,
 		Spacing: gui.NoSpacing,
 		Content: items,
-	}))
+	})
+	if st.Frameless {
+		items = append(items,
+			gui.Rectangle(gui.RectangleCfg{Sizing: gui.FillFit}),
+			chrome.Controls(w),
+		)
+		cfg.Content = items
+		cfg.OnMouseDown = func(ctx gui.EventCtx) {
+			chrome.DragOrToggle(ctx, &st.BarClicks)
+		}
+	}
+	return gui.Row(cfg)
 }
 
 // tabChip is one dot+title+close unit sharing a single fill so they read
