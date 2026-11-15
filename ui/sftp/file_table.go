@@ -223,7 +223,7 @@ func fileRow(w *gui.Window, id string, selected, isDir bool, name, mode, size, m
 				Clip:    true,
 				Content: []gui.View{
 					gui.Text(gui.TextCfg{Text: icon, TextStyle: iconStyle, Sizing: gui.FitFit}),
-					nameCell(id+"-name", name, display, nameStyle, th),
+					nameCell(id+"-name", name, display, nameStyle),
 					gui.Text(gui.TextCfg{Text: mode, TextStyle: th.TextStyleSecondary, Sizing: gui.FitFit, Clip: true}),
 				},
 			})),
@@ -275,14 +275,15 @@ func fixedCell(text string, width float32, th gui.Theme) gui.View {
 // nameCell renders the file name and floats the full name as a
 // tooltip on hover. WithTooltip is avoided: its wrapper Column takes
 // the theme's default padding and would break the flush row.
-// Interactive plus the shared TipBubble float keeps the cell flush.
-func nameCell(id, full, display string, style gui.TextStyle, th gui.Theme) gui.View {
+// Interactive plus the shared layout.Tip float keeps the cell flush.
+func nameCell(id, full, display string, style gui.TextStyle) gui.View {
 	return gui.Interactive(id, func(is gui.InteractionState) gui.View {
 		content := []gui.View{
 			gui.Text(gui.TextCfg{Text: display, TextStyle: style, Sizing: gui.FillFit, Clip: true}),
 		}
 		if is.Hovered {
-			content = append(content, TipBubble(full, th))
+			content = append(content, layout.Tip(id+"-tip", full,
+				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
 		}
 		return gui.Row(layout.Flush(gui.ContainerCfg{
 			ID:      id,

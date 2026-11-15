@@ -5,9 +5,9 @@ go 1.27.3
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/firebase/genkit/go v1.14.0
-	github.com/go-gui-org/go-charts v0.30.0
-	github.com/go-gui-org/go-gui v0.95.0
-	github.com/go-gui-org/go-term v0.17.1
+	github.com/go-gui-org/go-charts v0.31.0
+	github.com/go-gui-org/go-gui v0.96.0
+	github.com/go-gui-org/go-term v0.18.0
 	github.com/google/dotprompt/go v0.0.0-20260918022926-df612903a877
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/minio/minio-go/v7 v7.4.1
@@ -22,8 +22,8 @@ require (
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/text v0.43.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/text v0.44.0
 	google.golang.org/genai v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.1
@@ -43,7 +43,7 @@ require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/go-gui-org/go-glyph v1.26.4 // indirect
+	github.com/go-gui-org/go-glyph v1.26.5 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
@@ -101,7 +101,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
-	golang.org/x/image v0.47.0 // indirect
+	golang.org/x/image v0.48.0 // indirect
 	google.golang.org/api v0.298.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260918162117-cecb64721679 // indirect
 	google.golang.org/grpc v1.84.0 // indirect

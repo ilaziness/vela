@@ -9,7 +9,6 @@ import (
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/layout"
-	sftpui "github.com/ilaziness/vela/ui/sftp"
 )
 
 // transferRow is one queue entry: name, progress bar, status, actions.
@@ -46,18 +45,18 @@ func transferRow(ctrl *app.Controller, tab *app.Tab, p transfer.ProgressData, id
 
 	var actions []gui.View
 	if !p.Done {
-		actions = append(actions, miniBtn(fmt.Sprintf("transfer-t%d-cancel", idx), "×", i18n.T("common.cancel"), th, func(ctx gui.EventCtx) {
+		actions = append(actions, miniBtn(fmt.Sprintf("transfer-t%d-cancel", idx), "×", i18n.T("common.cancel"), func(ctx gui.EventCtx) {
 			ctx.Consume()
 			ctrl.SFTPCancelTransfer(ctx.Window, sessID, p.ID)
 		}))
 	} else {
 		if p.Error != "" {
-			actions = append(actions, miniBtn(fmt.Sprintf("transfer-t%d-retry", idx), "↻", i18n.T("common.retry"), th, func(ctx gui.EventCtx) {
+			actions = append(actions, miniBtn(fmt.Sprintf("transfer-t%d-retry", idx), "↻", i18n.T("common.retry"), func(ctx gui.EventCtx) {
 				ctx.Consume()
 				ctrl.SFTPRetryTransfer(ctx.Window, sessID, p.ID)
 			}))
 		}
-		actions = append(actions, miniBtn(fmt.Sprintf("transfer-t%d-dismiss", idx), "✕", i18n.T("transfer.dismiss"), th, func(ctx gui.EventCtx) {
+		actions = append(actions, miniBtn(fmt.Sprintf("transfer-t%d-dismiss", idx), "✕", i18n.T("transfer.dismiss"), func(ctx gui.EventCtx) {
 			ctx.Consume()
 			ctrl.SFTPDismissTransfer(ctx.Window, sessID, p.ID)
 		}))
@@ -74,10 +73,10 @@ func transferRow(ctrl *app.Controller, tab *app.Tab, p transfer.ProgressData, id
 				Spacing: gui.SpacingTight,
 				Content: []gui.View{
 					gui.Text(gui.TextCfg{Text: transferTypeIcon(p.TransferType), TextStyle: iconStyle, Sizing: gui.FitFit}),
-					tipCell(fmt.Sprintf("transfer-t%d-name", idx), transferNameTip(p), name, th.TextStyleBody, th),
+					tipCell(fmt.Sprintf("transfer-t%d-name", idx), transferNameTip(p), name, th.TextStyleBody),
 				},
 			})),
-			tipCell(fmt.Sprintf("transfer-t%d-path", idx), fullPath, pathText, th.TextStyleSecondary, th),
+			tipCell(fmt.Sprintf("transfer-t%d-path", idx), fullPath, pathText, th.TextStyleSecondary),
 			gui.ProgressBar(gui.ProgressBarCfg{
 				ID:         fmt.Sprintf("transfer-t%d-bar", idx),
 				Percent:    pct,
@@ -122,13 +121,14 @@ func transferRow(ctrl *app.Controller, tab *app.Tab, p transfer.ProgressData, id
 // tipCell renders ellipsized text and floats tip on hover. The
 // Interactive root must carry the same ID or the hover state never
 // turns true (gui.Interactive contract).
-func tipCell(id, tip, display string, style gui.TextStyle, th gui.Theme) gui.View {
+func tipCell(id, tip, display string, style gui.TextStyle) gui.View {
 	return gui.Interactive(id, func(is gui.InteractionState) gui.View {
 		content := []gui.View{
 			gui.Text(gui.TextCfg{Text: display, TextStyle: style, Sizing: gui.FillFit, Clip: true}),
 		}
 		if is.Hovered {
-			content = append(content, sftpui.TipBubble(tip, th))
+			content = append(content, layout.Tip(id+"-tip", tip,
+				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
 		}
 		return gui.Row(layout.Flush(gui.ContainerCfg{
 			ID:      id,
@@ -142,7 +142,7 @@ func tipCell(id, tip, display string, style gui.TextStyle, th gui.Theme) gui.Vie
 
 // miniBtn wraps a button with a hover tooltip, same Interactive
 // contract as tipCell.
-func miniBtn(id, label, tip string, th gui.Theme, onClick func(gui.EventCtx)) gui.View {
+func miniBtn(id, label, tip string, onClick func(gui.EventCtx)) gui.View {
 	return gui.Interactive(id, func(is gui.InteractionState) gui.View {
 		content := []gui.View{
 			gui.Button(gui.ButtonCfg{
@@ -154,7 +154,8 @@ func miniBtn(id, label, tip string, th gui.Theme, onClick func(gui.EventCtx)) gu
 			}),
 		}
 		if is.Hovered && tip != "" {
-			content = append(content, sftpui.TipBubble(tip, th))
+			content = append(content, layout.Tip(id+"-tip", tip,
+				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
 		}
 		return gui.Row(layout.Flush(gui.ContainerCfg{
 			ID:      id,

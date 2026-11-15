@@ -182,7 +182,7 @@ func iconBtn(id, glyph, tip string, th gui.Theme, active bool, onClick func(gui.
 // tipBtn is a fixed-size icon button with a hover tip, built on
 // gui.Interactive like session.toolBtn. WithTooltip wraps its content
 // in a default-padded column, which breaks the flush bars' vertical
-// alignment, so the tip floats manually on hover instead.
+// alignment, so the tip floats via layout.Tip on hover instead.
 func tipBtn(id, glyph, tip string, th gui.Theme, size float32, variant gui.ButtonVariant, active, disabled bool, onClick func(gui.EventCtx)) gui.View {
 	cellID := "tipbtn-" + id
 	return gui.Interactive(cellID, func(is gui.InteractionState) gui.View {
@@ -213,7 +213,8 @@ func tipBtn(id, glyph, tip string, th gui.Theme, size float32, variant gui.Butto
 			}),
 		}
 		if is.Hovered && tip != "" {
-			content = append(content, TipBubble(tip, th))
+			content = append(content, layout.Tip(cellID+"-tip", tip,
+				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
 		}
 		return gui.Column(layout.Flush(gui.ContainerCfg{
 			ID:      cellID,
@@ -226,25 +227,4 @@ func tipBtn(id, glyph, tip string, th gui.Theme, size float32, variant gui.Butto
 			Content: content,
 		}))
 	})
-}
-
-// TipBubble is the floating label shown while a tipBtn or file name
-// is hovered.
-func TipBubble(text string, th gui.Theme) gui.View {
-	return gui.Column(layout.Flush(gui.ContainerCfg{
-		Float:         true,
-		FloatAutoFlip: true,
-		FloatAnchor:   gui.FloatBottomCenter,
-		FloatTieOff:   gui.FloatTopCenter,
-		FloatOffsetY:  4,
-		FloatZIndex:   10,
-		Color:         th.ColorInterior,
-		ColorBorder:   th.ColorBorder,
-		SizeBorder:    gui.BorderThin,
-		Radius:        gui.RadiusSmall,
-		Padding:       gui.PaddingXSmall,
-		Content: []gui.View{
-			gui.Text(gui.TextCfg{Text: text, TextStyle: th.TextStyleSecondary}),
-		},
-	}))
 }

@@ -223,11 +223,15 @@ func perfColumn(tab *app.Tab, header gui.View, rest ...gui.View) gui.View {
 	th := gui.CurrentTheme()
 	content := append([]gui.View{header}, rest...)
 	return gui.Column(layout.Flush(gui.ContainerCfg{
-		ID:      "perf-panel-" + tab.ID,
-		Sizing:  gui.FixedFill,
-		Width:   perfPanelWidth,
-		Color:   th.ColorPanel,
-		Padding: gui.NewPadding(6, 8, 6, 6),
+		ID:     "perf-panel-" + tab.ID,
+		Sizing: gui.FixedFill,
+		Width:  perfPanelWidth,
+		Color:  th.ColorPanel,
+		// The scrollbar overlays the edge instead of taking layout
+		// space, so the right pad reserves its footprint (theme gap +
+		// bar size) on top of the usual gap — the go-gui scrollable
+		// example does the same.
+		Padding: gui.NewPadding(6, 8+th.ScrollbarStyle.GapEdge+th.ScrollbarStyle.Size, 6, 6),
 		// One scrollable column: cards flow top-to-bottom.
 		Scrollable: true,
 		ScrollMode: gui.ScrollVerticalOnly,
@@ -251,11 +255,7 @@ func closeBtn(ctrl *app.Controller, tab *app.Tab) gui.View {
 		},
 		OnClick: func(ctx gui.EventCtx) {
 			ctx.Consume()
-			st := gui.State[app.State](ctx.Window)
-			if t := st.TabByID(tab.ID); t != nil {
-				t.PerfOpen = false
-			}
-			ctrl.StopPerf(tab.SessID)
+			ctrl.TogglePanel(ctx.Window, tab.ID, app.PanelPerf)
 		},
 	})
 }

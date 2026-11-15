@@ -31,7 +31,7 @@ const (
 const tabTitleBudget = tabTitleMaxWidth - tabTitlePadL - tabTitlePadR
 
 // TabBar is flush to the top of the main pane.
-// Tips use gui.Tooltip on hover — not WithTooltip (wrapper forces theme padding).
+// Tips use layout.Tip on hover — not WithTooltip (wrapper forces theme padding).
 func TabBar(w *gui.Window, ctrl *app.Controller) gui.View {
 	st := gui.State[app.State](w)
 	th := gui.CurrentTheme()
@@ -56,7 +56,7 @@ func TabBar(w *gui.Window, ctrl *app.Controller) gui.View {
 func tabChip(w *gui.Window, th gui.Theme, tab app.Tab, active bool, ctrl *app.Controller) gui.View {
 	fullTitle := tab.Title
 	if tab.Kind == app.TabConnect {
-		fullTitle = i18n.T("shell.tab.new_ellipsis")
+		fullTitle = i18n.T("shell.tab.new_connection")
 	}
 	// go-gui has no text-overflow: ellipsis. Shorten the label ourselves
 	// and measure with the style Button renders its label with, so the
@@ -208,16 +208,8 @@ func tabAddBtn(th gui.Theme, ctrl *app.Controller) gui.View {
 	})
 }
 
-// tabTip uses the built-in Tooltip popup (theme colors/shadow), not
+// tabTip uses the shared layout.Tip bubble (theme colors/shadow), not
 // WithTooltip's padded wrapper.
 func tabTip(id, text string) gui.View {
-	return gui.Tooltip(gui.TooltipCfg{
-		ID: id,
-		Content: []gui.View{
-			gui.Text(gui.TextCfg{
-				Text: text,
-				Mode: gui.TextModeWrap,
-			}),
-		},
-	})
+	return layout.Tip(id, text, gui.FloatBottomCenter, gui.FloatTopCenter, -3, -3)
 }

@@ -35,38 +35,28 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 	// tabs keep the slot empty rather than showing a dead button.
 	var sftpBtn gui.View
 	if app.SFTPControls(tab) {
-		sftpBtn = toolBtn(toolSFTP, gui.IconColumns, i18n.T("shell.tools.sftp"), th, tab.SFTPOpen, func(ctx gui.EventCtx) {
+		sftpBtn = toolBtn(toolSFTP, gui.IconFolderOpen, i18n.T("shell.tools.sftp"), th, tab.SFTPOpen, func(ctx gui.EventCtx) {
 			ctx.Consume()
 			ctrl.ToggleSFTP(ctx.Window, tab.ID)
 		})
 	}
 
+	// The three side panels share the stage width, so TogglePanel
+	// keeps at most one of them open per tab.
 	perfBtn := toolBtn(toolPerf, gui.IconActivity, i18n.T("shell.tools.perf"), th, perfOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		st := gui.State[app.State](ctx.Window)
-		t := st.TabByID(tab.ID)
-		if t == nil {
-			return
-		}
-		// The rail only renders for SSH session tabs (root.go gates
-		// on the protocol), so no protocol check is needed here.
-		t.PerfOpen = !t.PerfOpen
-		if t.PerfOpen {
-			ctrl.StartPerf(ctx.Window, t.SessID)
-		} else {
-			ctrl.StopPerf(t.SessID)
-		}
+		ctrl.TogglePanel(ctx.Window, tab.ID, app.PanelPerf)
 	})
 
-	tunnelBtn := toolBtn(toolTunnel, gui.IconLink, i18n.T("shell.tools.tunnel"), th, tab.TunnelOpen, func(ctx gui.EventCtx) {
+	tunnelBtn := toolBtn(toolTunnel, gui.IconPlug, i18n.T("shell.tools.tunnel"), th, tab.TunnelOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		ctrl.ToggleTunnel(ctx.Window, tab.ID)
+		ctrl.TogglePanel(ctx.Window, tab.ID, app.PanelTunnel)
 	})
 
 	// The transfer list opens the transfer panel.
-	transferBtn := toolBtn(toolTransfer, gui.IconListOrder, i18n.T("shell.tools.transfer"), th, tab.TransferOpen, func(ctx gui.EventCtx) {
+	transferBtn := toolBtn(toolTransfer, gui.IconListTask, i18n.T("shell.tools.transfer"), th, tab.TransferOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		ctrl.ToggleTransfer(ctx.Window, tab.ID)
+		ctrl.TogglePanel(ctx.Window, tab.ID, app.PanelTransfer)
 	})
 
 	return gui.Column(layout.Flush(gui.ContainerCfg{
@@ -128,7 +118,8 @@ func toolBtn(
 			}),
 		}
 		if is.Hovered && tip != "" {
-			views = append(views, toolTip(cellID+"-tip", tip, th))
+			views = append(views, layout.Tip(cellID+"-tip", tip,
+				gui.FloatMiddleRight, gui.FloatMiddleLeft, 8, 0))
 		}
 		return gui.Column(layout.Flush(gui.ContainerCfg{
 			ID:      cellID,
@@ -140,29 +131,5 @@ func toolBtn(
 			VAlign:  gui.VAlignMiddle,
 			Content: views,
 		}))
-	})
-}
-
-// toolTip is the left-floating sibling of shell.railTip: anchor the
-// middle-right edge of the button, tie off to the tip's middle-left.
-func toolTip(id, text string, th gui.Theme) gui.View {
-	return gui.Column(gui.ContainerCfg{
-		Float:         true,
-		FloatAutoFlip: true,
-		FloatAnchor:   gui.FloatMiddleRight,
-		FloatTieOff:   gui.FloatMiddleLeft,
-		FloatOffsetX:  8,
-		FloatZIndex:   10,
-		Color:         th.ColorInterior,
-		ColorBorder:   th.ColorBorder,
-		SizeBorder:    gui.BorderThin,
-		Radius:        gui.RadiusSmall,
-		Padding:       gui.PaddingSmall,
-		Content: []gui.View{
-			gui.Text(gui.TextCfg{
-				Text:      text,
-				TextStyle: th.TextStyleBody,
-			}),
-		},
 	})
 }

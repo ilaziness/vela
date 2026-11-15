@@ -101,19 +101,6 @@ func TunnelTypeLabel(t string) string {
 	}
 }
 
-// ToggleTunnel opens or closes the tunnel panel for a tab.
-func (c *Controller) ToggleTunnel(w *gui.Window, tabID string) {
-	st := gui.State[State](w)
-	tab := st.TabByID(tabID)
-	if tab == nil || !TunnelControls(tab) {
-		return
-	}
-	tab.TunnelOpen = !tab.TunnelOpen
-	if tab.TunnelOpen && tab.BookmarkID != "" {
-		c.refreshTunnelRules(w, tab.BookmarkID)
-	}
-}
-
 // TunnelSnapshot returns the session's running tunnels, sorted by type
 // then address. Call from view build only.
 func (c *Controller) TunnelSnapshot(sessID string) []tunnel.TunnelInfo {

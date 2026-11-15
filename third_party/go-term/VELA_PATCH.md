@@ -1,6 +1,6 @@
 # Vela patch
 
-Based on upstream `github.com/go-gui-org/go-term` **v0.17.1**.
+Based on upstream `github.com/go-gui-org/go-term` **v0.18.0**.
 
 Local addition (only):
 

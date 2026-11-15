@@ -9,9 +9,9 @@
 | 类别     | 技术/库                     | 版本要求  |
 | -------- | --------------------------- | --------- |
 | 后端语言 | Go                          | ≥ 1.27.3  |
-| 桌面 UI  | go-gui（**禁止**本地定制）  | v0.95.x   |
-| 终端控件 | go-term（replace 本地补丁） | v0.17.x   |
-| 图表     | go-charts（go-gui 生态）    | v0.30.x   |
+| 桌面 UI  | go-gui（**禁止**本地定制）  | v0.96.x   |
+| 终端控件 | go-term（replace 本地补丁） | v0.18.x   |
+| 图表     | go-charts（go-gui 生态）    | v0.31.x   |
 | AI 框架  | Genkit                      | ≥ v1.14.0 |
 
 ---
@@ -105,6 +105,7 @@
 - Connect/Test：后台 goroutine + `Window.QueueCommand` 回写。
 - 能力缺口：以公开 API 为准；做不到则告知限制并接受现状，不 fork 改库。
 - 禁止使用emoji文字代替`go-gui`图标，图标需要使用`go-gui`库的`Feather`图标。
+- UI组件能通用的尽量创建组件公用，不要不同地方写逻辑语言的重复UI组件
 
 ---
 

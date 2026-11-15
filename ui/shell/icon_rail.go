@@ -5,6 +5,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
+	"github.com/ilaziness/vela/ui/layout"
 )
 
 // Rail geometry. Cells nearly fill the strip (1px inset each side).
@@ -133,7 +134,8 @@ func railBtn(
 			}),
 		}
 		if is.Hovered && tip != "" {
-			views = append(views, railTip(tip, th))
+			views = append(views, layout.Tip(cellID+"-tip", tip,
+				gui.FloatMiddleRight, gui.FloatMiddleLeft, 8, 0))
 		}
 		return gui.Column(flush(gui.ContainerCfg{
 			ID:      cellID,
@@ -145,29 +147,5 @@ func railBtn(
 			VAlign:  gui.VAlignMiddle,
 			Content: views,
 		}))
-	})
-}
-
-// railTip floats to the right. gui.Tooltip's TieOff is unexported in
-// go-gui v0.92, so side-anchored tips stay a plain Float column.
-func railTip(text string, th gui.Theme) gui.View {
-	return gui.Column(gui.ContainerCfg{
-		Float:         true,
-		FloatAutoFlip: true,
-		FloatAnchor:   gui.FloatMiddleRight,
-		FloatTieOff:   gui.FloatMiddleLeft,
-		FloatOffsetX:  8,
-		FloatZIndex:   10,
-		Color:         th.ColorInterior,
-		ColorBorder:   th.ColorBorder,
-		SizeBorder:    gui.BorderThin,
-		Radius:        gui.RadiusSmall,
-		Padding:       gui.PaddingSmall,
-		Content: []gui.View{
-			gui.Text(gui.TextCfg{
-				Text:      text,
-				TextStyle: th.TextStyleBody,
-			}),
-		},
 	})
 }

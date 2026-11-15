@@ -850,19 +850,6 @@ func (c *Controller) SFTPClearFinished(w *gui.Window, sessID string, onlyFailed 
 	}()
 }
 
-// ToggleTransfer opens or closes the transfer panel for a tab.
-func (c *Controller) ToggleTransfer(w *gui.Window, tabID string) {
-	st := gui.State[State](w)
-	tab := st.TabByID(tabID)
-	if tab == nil || tab.Kind != TabSession || tab.SessID == "" {
-		return
-	}
-	tab.TransferOpen = !tab.TransferOpen
-	if tab.TransferOpen {
-		c.refreshTransfers(w, tab.SessID)
-	}
-}
-
 // --- session lifecycle ---
 
 // closeSFTPSession tears down SFTP state for a dying session. When
