@@ -13,6 +13,7 @@ import (
 )
 
 func panelGeneral(d *Deps, st *State) gui.View {
+	theme := fonts.CanonicalThemeName(st.General.Theme)
 	lang := strings.TrimSpace(st.General.Language)
 	if lang == "" {
 		lang = i18n.Language()
@@ -28,6 +29,19 @@ func panelGeneral(d *Deps, st *State) gui.View {
 	}
 
 	return panelColumn(i18n.T("settings.general.title"), []gui.View{
+		gui.Select(gui.SelectCfg{
+			ID:       "settings-theme",
+			Label:    i18n.T("settings.general.theme"),
+			Selected: []string{theme},
+			Items:    gui.ThemeRegisteredNames(),
+			Sizing:   gui.FillFit,
+			OnSelect: func(vals []string, ctx gui.EventCtx) {
+				ctx.Consume()
+				if len(vals) > 0 {
+					gui.State[State](ctx.Window).General.Theme = vals[0]
+				}
+			},
+		}),
 		gui.Select(gui.SelectCfg{
 			ID:       "settings-lang",
 			Label:    i18n.T("settings.general.language"),
@@ -95,7 +109,7 @@ func saveGeneral(w *gui.Window, d *Deps) {
 		w.Toast(gui.ToastCfg{Body: i18n.T("settings.general.font_size_range"), Severity: gui.ToastError})
 		return
 	}
-	g.Theme = d.Store.Config.General.Theme
+	g.Theme = fonts.CanonicalThemeName(g.Theme)
 	st.Busy = true
 	draft := g
 	go func() {

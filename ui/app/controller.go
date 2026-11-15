@@ -37,7 +37,13 @@ type Controller struct {
 	terms      map[string]*term.Term
 	termStyle  gui.TextStyle
 	scrollback int
-	onClose    func()
+	// termTheme is the theme new sessions start with; termThemes and
+	// termThemeItems are the lazily built go-term theme catalog for the
+	// settings dropdown (Default first, then bundled themes).
+	termTheme      term.NamedTheme
+	termThemes     []term.NamedTheme
+	termThemeItems []string
+	onClose        func()
 
 	// reconnect remembers how each session tab was dialed so the tab can
 	// dial again after a drop. Keyed by tab id; secrets stay in memory
@@ -99,6 +105,7 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		logger:     logger,
 		terms:      make(map[string]*term.Term),
 		scrollback: 10000,
+		termTheme:  defaultTermTheme(),
 		reconnect:  make(map[string]reconnectReq),
 		transfers:  make(map[string][]transfer.ProgressData),
 		edits:      newEditBook(),
@@ -308,9 +315,13 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	c.mu.Lock()
 	termStyle := c.termStyle
 	scrollback := c.scrollback
+	termTheme := c.termTheme
 	c.mu.Unlock()
 	if scrollback <= 0 {
 		scrollback = 10000
+	}
+	if termTheme.Name == "" {
+		termTheme = defaultTermTheme()
 	}
 
 	stream := termstream.New(sess)
@@ -318,9 +329,7 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 		NoWindowHandler: true,
 		ScrollbackRows:  scrollback,
 		TextStyle:       termStyle,
-		Themes: []term.NamedTheme{
-			{Name: "Default", Theme: term.DefaultTheme},
-		},
+		Themes:          []term.NamedTheme{termTheme},
 		OnExit: func() {
 			id := sess.ID()
 			w.QueueCommand(func(w *gui.Window) {

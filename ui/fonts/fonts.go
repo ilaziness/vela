@@ -9,9 +9,10 @@ import (
 	"github.com/ilaziness/vela/internal/config"
 )
 
-// Apply configures ThemeDark text sizes and font families:
+// Apply installs the go-gui theme selected by general.theme (dark when unset
+// or unknown) with Vela font overrides on top:
 //   - UI Family (TextStyleDef): opt-in — only set when general.font is a
-//     real family; otherwise leave ThemeDark's platform default
+//     real family; otherwise keep the theme's platform default
 //   - UI Size: from general.font_size
 //   - Mono (theme code roles): from terminal.font (platform mono defaults)
 //
@@ -28,7 +29,7 @@ func Apply(cfg *config.Config) {
 		uiSize = 14
 	}
 
-	tcfg := gui.ThemeDark.Cfg
+	tcfg := themeCfg(cfg.General.Theme)
 	if fam := configuredUIFamily(cfg.General.Font); fam != "" {
 		tcfg.TextStyleDef.Family = fam
 	}
@@ -37,6 +38,36 @@ func Apply(cfg *config.Config) {
 	// Keep the bundled Feather icon face for TextStyleIcon* roles.
 	tcfg.IconFontFamily = gui.IconFontName
 	gui.SetTheme(gui.ThemeMaker(tcfg))
+}
+
+// CanonicalThemeName returns the registered go-gui theme name matching name
+// (exact first, then case-insensitive), falling back to the dark preset for
+// empty or unknown values.
+func CanonicalThemeName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return gui.ThemeDark.Name
+	}
+	names := gui.ThemeRegisteredNames()
+	for _, n := range names {
+		if n == name {
+			return n
+		}
+	}
+	for _, n := range names {
+		if strings.EqualFold(n, name) {
+			return n
+		}
+	}
+	return gui.ThemeDark.Name
+}
+
+// themeCfg returns the ThemeCfg for the canonical go-gui theme name.
+func themeCfg(name string) gui.ThemeCfg {
+	if t, ok := gui.ThemeGet(CanonicalThemeName(name)); ok {
+		return t.Cfg
+	}
+	return gui.ThemeDark.Cfg
 }
 
 // TermStyle is the go-term face: system monospace first; non-mono glyphs

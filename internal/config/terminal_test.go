@@ -19,6 +19,9 @@ func TestTerminalConfigNormalize(t *testing.T) {
 	if c.Font != defaultTerminalFont {
 		t.Fatalf("font=%q want %q", c.Font, defaultTerminalFont)
 	}
+	if c.Theme != defaultTerminalTheme {
+		t.Fatalf("theme=%q", c.Theme)
+	}
 
 	c = TerminalConfig{Scrollback: 50, FontSize: 14, LineHeight: 1, Font: "Consolas"}
 	c.Normalize()
@@ -40,5 +43,21 @@ func TestTerminalConfigNormalize(t *testing.T) {
 	c.Normalize()
 	if c.Bell || !c.CopyOnSelect || !c.RightClickPaste {
 		t.Fatalf("bools mutated: %+v", c)
+	}
+
+	c = TerminalConfig{Theme: "   ", Font: "Consolas", FontSize: 14, LineHeight: 1, Scrollback: 5000}
+	c.Normalize()
+	if c.Theme != defaultTerminalTheme {
+		t.Fatalf("blank theme=%q", c.Theme)
+	}
+
+	c = TerminalConfig{Theme: " Dracula ", Font: "Consolas", FontSize: 14, LineHeight: 1, Scrollback: 5000}
+	c.Normalize()
+	if c.Theme != "Dracula" {
+		t.Fatalf("theme=%q", c.Theme)
+	}
+
+	if Default().Terminal.Theme != defaultTerminalTheme {
+		t.Fatalf("default theme = %q", Default().Terminal.Theme)
 	}
 }

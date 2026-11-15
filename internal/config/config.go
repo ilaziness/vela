@@ -23,6 +23,11 @@ const FileName = "config.toml"
 // sans/CJK fonts. Leave empty in user config to keep this default.
 const defaultTerminalFont = "monospace"
 
+const (
+	defaultGeneralTheme  = "dark"
+	defaultTerminalTheme = "Default"
+)
+
 type Config struct {
 	General     GeneralConfig     `toml:"general"`
 	Terminal    TerminalConfig    `toml:"terminal"`
@@ -42,6 +47,7 @@ type GeneralConfig struct {
 }
 
 type TerminalConfig struct {
+	Theme           string  `toml:"theme" json:"theme"`
 	Font            string  `toml:"font" json:"fontFamily"`
 	FontSize        int     `toml:"font_size" json:"fontSize"`
 	LineHeight      float64 `toml:"line_height" json:"lineHeight"`
@@ -89,10 +95,11 @@ func Default() *Config {
 	return &Config{
 		General: GeneralConfig{
 			UserDataDir: filepath.Join(execDir, "data"),
-			Theme:       "dark",
+			Theme:       defaultGeneralTheme,
 			FontSize:    14,
 		},
 		Terminal: TerminalConfig{
+			Theme:           defaultTerminalTheme,
 			Font:            defaultTerminalFont,
 			FontSize:        14,
 			LineHeight:      1,
@@ -112,6 +119,10 @@ func Default() *Config {
 // Normalize clamps the UI font size and strips characters that would break CSS.
 // An empty font keeps the system stack.
 func (c *GeneralConfig) Normalize() {
+	c.Theme = strings.TrimSpace(c.Theme)
+	if c.Theme == "" {
+		c.Theme = defaultGeneralTheme
+	}
 	c.Font = sanitizeUIFont(c.Font)
 	if c.FontSize < 8 || c.FontSize > 72 {
 		c.FontSize = 14
@@ -159,6 +170,10 @@ func (c *TerminalConfig) Normalize() {
 	}
 	if strings.TrimSpace(c.Font) == "" {
 		c.Font = def.Font
+	}
+	c.Theme = strings.TrimSpace(c.Theme)
+	if c.Theme == "" {
+		c.Theme = defaultTerminalTheme
 	}
 }
 

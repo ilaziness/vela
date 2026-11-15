@@ -99,7 +99,7 @@
 ## 4. UI 规范（go-gui）
 
 - **只用** module 依赖的官方 go-gui；禁止 `third_party/go-gui`、禁止对本库做 replace 定制（详见 §2）。
-- 主题：`gui.SetTheme(gui.ThemeDark)`（首期不定制）。
+- 主题：应用主题由 `general.theme` 在 go-gui 注册主题中选择，`fonts.Apply` 应用并叠加字体覆盖；终端配色由 `terminal.theme` 在 go-term `Default`+`BundledThemes` 中选择，保存后应用到所有终端。
 - 状态：`gui.State[app.State](w)`；Term 实例放在 Controller，不进即时模式 State。
 - 嵌入终端：`term.Cfg{NoWindowHandler: true}`，由壳层转发事件。
 - Connect/Test：后台 goroutine + `Window.QueueCommand` 回写。

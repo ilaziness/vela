@@ -106,6 +106,7 @@ func Bootstrap() (*Runtime, error) {
 	}, nil)
 
 	ctrl := NewController(hub, reg, logger)
+	ctrl.SetTermTheme(store.Config.Terminal.Theme)
 	ctrl.SetTermDefaults(fonts.TermStyle(store.Config.Terminal), store.Config.Terminal.Scrollback)
 
 	// SFTP rides on the live SSH sessions: the manager reuses the

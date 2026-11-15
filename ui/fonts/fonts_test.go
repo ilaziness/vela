@@ -48,3 +48,40 @@ func TestMonoFamilySkipsPseudo(t *testing.T) {
 		t.Fatalf("got %q want Consolas", got)
 	}
 }
+
+func TestCanonicalThemeName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", "dark"},
+		{"   ", "dark"},
+		{"bogus", "dark"},
+		{"dark", "dark"},
+		{"Dark", "dark"},
+		{" light ", "light"},
+		{"gnome-dark", "gnome-dark"},
+		{"GRAPHITE", "graphite"},
+		{"windows-dark", "windows-dark"},
+		{"  macos  ", "macos"},
+	}
+	for _, tc := range cases {
+		if got := CanonicalThemeName(tc.in); got != tc.want {
+			t.Errorf("CanonicalThemeName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestThemeCfg(t *testing.T) {
+	t.Parallel()
+	if got := themeCfg("light").Name; got != "light" {
+		t.Fatalf("themeCfg(light).Name = %q", got)
+	}
+	if got := themeCfg("Bogus").Name; got != "dark" {
+		t.Fatalf("themeCfg(bogus).Name = %q", got)
+	}
+	if got := themeCfg("").Name; got != "dark" {
+		t.Fatalf("themeCfg(\"\").Name = %q", got)
+	}
+}

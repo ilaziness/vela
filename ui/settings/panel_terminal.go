@@ -17,10 +17,21 @@ func panelTerminal(d *Deps, st *State) gui.View {
 	lineHeight := strconv.FormatFloat(t.LineHeight, 'f', -1, 64)
 
 	return panelColumn(i18n.T("settings.terminal.title"), []gui.View{
+		gui.Combobox(gui.ComboboxCfg{
+			ID:     "settings-term-theme",
+			Label:  i18n.T("settings.terminal.theme"),
+			Value:  d.Ctrl.TermThemeName(t.Theme),
+			Items:  d.Ctrl.TermThemeItems(),
+			Sizing: gui.FillFit,
+			OnSelect: func(name string, ctx gui.EventCtx) {
+				ctx.Consume()
+				gui.State[State](ctx.Window).Terminal.Theme = name
+			},
+		}),
 		formRow("settings-term-font", i18n.T("settings.terminal.font"), t.Font,
 			i18n.T("settings.terminal.font_placeholder"), false, func(v string) { t.Font = v }),
 		formRow("settings-term-font-size", i18n.T("settings.terminal.font_size"), fontSize,
-			i18n.T("settings.general.font_size_placeholder"), false, func(v string) {
+			i18n.T("settings.terminal.font_size_placeholder"), false, func(v string) {
 				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 					t.FontSize = n
 				}
@@ -70,6 +81,7 @@ func saveTerminal(w *gui.Window, d *Deps) {
 		w.Toast(gui.ToastCfg{Body: i18n.T("settings.terminal.line_height_positive"), Severity: gui.ToastError})
 		return
 	}
+	t.Theme = d.Ctrl.TermThemeName(t.Theme)
 	st.Busy = true
 	draft := t
 	go func() {
@@ -84,6 +96,7 @@ func saveTerminal(w *gui.Window, d *Deps) {
 			}
 			s.Terminal = draft
 			d.Ctrl.SetTermDefaults(fonts.TermStyle(draft), draft.Scrollback)
+			d.Ctrl.SetTermTheme(draft.Theme)
 			toastOK(win, i18n.T("settings.terminal.save_success"))
 		})
 	}()

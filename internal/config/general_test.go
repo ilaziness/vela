@@ -26,4 +26,20 @@ func TestGeneralConfigNormalize(t *testing.T) {
 	if cfg.Font != "" || cfg.FontSize != 16 {
 		t.Fatalf("cfg = %+v", cfg)
 	}
+
+	cfg = GeneralConfig{}
+	cfg.Normalize()
+	if cfg.Theme != defaultGeneralTheme {
+		t.Fatalf("empty theme = %q", cfg.Theme)
+	}
+
+	cfg = GeneralConfig{Theme: "  Light  "}
+	cfg.Normalize()
+	if cfg.Theme != "Light" {
+		t.Fatalf("theme = %q", cfg.Theme)
+	}
+
+	if Default().General.Theme != defaultGeneralTheme {
+		t.Fatalf("default theme = %q", Default().General.Theme)
+	}
 }
