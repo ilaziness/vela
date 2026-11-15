@@ -7,16 +7,14 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
-	"github.com/ilaziness/vela/ui/fonts"
 )
 
 func panelTerminal(d *Deps, st *State) gui.View {
 	t := &st.Terminal
 	fontSize := strconv.Itoa(t.FontSize)
 	scrollback := strconv.Itoa(t.Scrollback)
-	lineHeight := strconv.FormatFloat(t.LineHeight, 'f', -1, 64)
 
-	return panelColumn(i18n.T("settings.terminal.title"), []gui.View{
+	body := []gui.View{
 		gui.Combobox(gui.ComboboxCfg{
 			ID:     "settings-term-theme",
 			Label:  i18n.T("settings.terminal.theme"),
@@ -36,51 +34,93 @@ func panelTerminal(d *Deps, st *State) gui.View {
 					t.FontSize = n
 				}
 			}),
-		formRow("settings-term-line-height", i18n.T("settings.terminal.line_height"), lineHeight,
-			i18n.T("settings.terminal.line_height_placeholder"), false, func(v string) {
-				if n, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
-					t.LineHeight = n
-				}
-			}),
 		formRow("settings-term-scrollback", i18n.T("settings.terminal.scrollback"), scrollback,
 			i18n.T("settings.terminal.scrollback_placeholder"), false, func(v string) {
 				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 					t.Scrollback = n
 				}
 			}),
-		switchRow("settings-term-bell", i18n.T("settings.terminal.bell_label"), t.Bell, func(gui.EventCtx) { t.Bell = !t.Bell }),
-		switchRow("settings-term-copy", i18n.T("settings.terminal.copy_on_select_label"), t.CopyOnSelect, func(gui.EventCtx) {
-			t.CopyOnSelect = !t.CopyOnSelect
+		gui.Select(gui.SelectCfg{
+			ID:       "settings-term-cursor-style",
+			Label:    i18n.T("settings.terminal.cursor_style"),
+			Sizing:   gui.FillFit,
+			Options:  cursorStyleOptions(),
+			Selected: []string{cursorStyleValue(t.CursorStyle)},
+			OnSelect: func(values []string, ctx gui.EventCtx) {
+				ctx.Consume()
+				if len(values) > 0 {
+					gui.State[State](ctx.Window).Terminal.CursorStyle = values[0]
+				}
+			},
 		}),
-		switchRow("settings-term-paste", i18n.T("settings.terminal.right_click_paste_label"), t.RightClickPaste, func(gui.EventCtx) {
-			t.RightClickPaste = !t.RightClickPaste
+		switchRow("settings-term-cursor-blink", i18n.T("settings.terminal.cursor_blink"), t.CursorBlink, func(gui.EventCtx) {
+			t.CursorBlink = !t.CursorBlink
 		}),
-		saveBtn("settings-term-save", i18n.T("common.save"), st.Busy, func(ctx gui.EventCtx) {
-			ctx.Consume()
-			saveTerminal(ctx.Window, d)
+		switchRow("settings-term-cursor-lock", i18n.T("settings.terminal.cursor_lock"), t.CursorLock, func(gui.EventCtx) {
+			t.CursorLock = !t.CursorLock
 		}),
-	})
+		pathBrowseRow(
+			"settings-term-record-dir",
+			i18n.T("settings.terminal.record_dir"),
+			t.RecordDir,
+			i18n.T("settings.terminal.record_dir_placeholder"),
+			i18n.T("dialog.select_dir"),
+			func(ctx gui.EventCtx) {
+				ctx.Consume()
+				start := gui.State[State](ctx.Window).Terminal.RecordDir
+				ctx.Window.NativeFolderDialog(gui.NativeFolderDialogCfg{
+					Title:    i18n.T("settings.terminal.record_dir"),
+					StartDir: start,
+					OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
+						if res.Status != gui.DialogOK || len(res.Paths) == 0 {
+							return
+						}
+						gui.State[State](win).Terminal.RecordDir = res.Paths[0].Path
+					},
+				})
+			},
+		),
+		gui.Label(i18n.T("settings.terminal.record_dir_hint"), gui.CurrentTheme().TextStyleSecondary),
+		switchRow("settings-term-record-input", i18n.T("settings.terminal.record_input"), t.RecordInput, func(gui.EventCtx) {
+			t.RecordInput = !t.RecordInput
+		}),
+	}
+	if t.RecordInput {
+		body = append(body, gui.Label(i18n.T("settings.terminal.record_input_warning"), gui.CurrentTheme().TextStyleSecondary))
+	}
+	body = append(body, saveBtn("settings-term-save", i18n.T("common.save"), st.Busy, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		saveTerminal(ctx.Window, d)
+	}))
+
+	return panelColumn(i18n.T("settings.terminal.title"), body)
+}
+
+// cursorStyleOptions lists the go-term cursor shapes; Values are the
+// persisted strings, Labels are localized.
+func cursorStyleOptions() []gui.SelectOption {
+	return []gui.SelectOption{
+		gui.NewSelectOption(i18n.T("settings.terminal.cursor_style_block"), "block"),
+		gui.NewSelectOption(i18n.T("settings.terminal.cursor_style_underline"), "underline"),
+		gui.NewSelectOption(i18n.T("settings.terminal.cursor_style_bar"), "bar"),
+	}
+}
+
+// cursorStyleValue normalizes the stored value for the Select's Selected
+// list so an empty/unknown config still shows the block cursor.
+func cursorStyleValue(s string) string {
+	switch v := strings.ToLower(strings.TrimSpace(s)); v {
+	case "underline", "bar":
+		return v
+	default:
+		return "block"
+	}
 }
 
 func saveTerminal(w *gui.Window, d *Deps) {
 	st := gui.State[State](w)
 	t := st.Terminal
 	t.Normalize()
-	if strings.TrimSpace(t.Font) == "" {
-		w.Toast(gui.ToastCfg{Body: i18n.T("settings.terminal.font_required"), Severity: gui.ToastError})
-		return
-	}
-	if t.FontSize < 1 || t.FontSize > 72 {
-		w.Toast(gui.ToastCfg{
-			Body:     i18n.Tf("settings.terminal.font_size_range", 1, 72),
-			Severity: gui.ToastError,
-		})
-		return
-	}
-	if t.LineHeight <= 0 {
-		w.Toast(gui.ToastCfg{Body: i18n.T("settings.terminal.line_height_positive"), Severity: gui.ToastError})
-		return
-	}
 	t.Theme = d.Ctrl.TermThemeName(t.Theme)
 	st.Busy = true
 	draft := t
@@ -95,7 +135,6 @@ func saveTerminal(w *gui.Window, d *Deps) {
 				return
 			}
 			s.Terminal = draft
-			d.Ctrl.SetTermDefaults(fonts.TermStyle(draft), draft.Scrollback)
 			d.Ctrl.SetTermTheme(draft.Theme)
 			toastOK(win, i18n.T("settings.terminal.save_success"))
 		})

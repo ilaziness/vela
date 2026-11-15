@@ -47,14 +47,19 @@ type GeneralConfig struct {
 }
 
 type TerminalConfig struct {
-	Theme           string  `toml:"theme" json:"theme"`
-	Font            string  `toml:"font" json:"fontFamily"`
-	FontSize        int     `toml:"font_size" json:"fontSize"`
-	LineHeight      float64 `toml:"line_height" json:"lineHeight"`
-	Scrollback      int     `toml:"scrollback" json:"scrollback"`
-	Bell            bool    `toml:"bell" json:"bell"`
-	CopyOnSelect    bool    `toml:"copy_on_select" json:"copyOnSelect"`
-	RightClickPaste bool    `toml:"right_click_paste" json:"rightClickPaste"`
+	Theme       string `toml:"theme" json:"theme"`
+	Font        string `toml:"font" json:"fontFamily"`
+	FontSize    int    `toml:"font_size" json:"fontSize"`
+	Scrollback  int    `toml:"scrollback" json:"scrollback"`
+	CursorStyle string `toml:"cursor_style" json:"cursorStyle"`
+	CursorBlink bool   `toml:"cursor_blink" json:"cursorBlink"`
+	CursorLock  bool   `toml:"cursor_lock" json:"cursorLock"`
+	// RecordDir is the default save directory for session recordings
+	// (.gtr files). RecordInput controls whether recordings include
+	// keystrokes and pastes (off by default — they may contain passwords).
+	// Both are consumed by the manual record controls, not term.Cfg.
+	RecordDir   string `toml:"record_dir" json:"recordDir"`
+	RecordInput bool   `toml:"record_input" json:"recordInput"`
 }
 
 const (
@@ -99,14 +104,11 @@ func Default() *Config {
 			FontSize:    14,
 		},
 		Terminal: TerminalConfig{
-			Theme:           defaultTerminalTheme,
-			Font:            defaultTerminalFont,
-			FontSize:        14,
-			LineHeight:      1,
-			Scrollback:      defaultTerminalScrollback,
-			Bell:            true,
-			CopyOnSelect:    false,
-			RightClickPaste: false,
+			Theme:       defaultTerminalTheme,
+			Font:        defaultTerminalFont,
+			FontSize:    14,
+			Scrollback:  defaultTerminalScrollback,
+			CursorStyle: "block",
 		},
 		SSH: SSHConfig{
 			ServerAliveInterval: 30,
@@ -150,15 +152,11 @@ func sanitizeUIFont(font string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// Normalize clamps terminal display options. Does not force Bell/CopyOnSelect/
-// RightClickPaste defaults — absent TOML keys keep Default() values via merge.
+// Normalize clamps terminal display options to sane values.
 func (c *TerminalConfig) Normalize() {
 	def := Default().Terminal
 	if c.FontSize < 1 || c.FontSize > 72 {
 		c.FontSize = def.FontSize
-	}
-	if c.LineHeight <= 0 {
-		c.LineHeight = def.LineHeight
 	}
 	switch {
 	case c.Scrollback <= 0:
@@ -175,6 +173,13 @@ func (c *TerminalConfig) Normalize() {
 	if c.Theme == "" {
 		c.Theme = defaultTerminalTheme
 	}
+	c.CursorStyle = strings.ToLower(strings.TrimSpace(c.CursorStyle))
+	switch c.CursorStyle {
+	case "block", "underline", "bar":
+	default:
+		c.CursorStyle = def.CursorStyle
+	}
+	c.RecordDir = strings.TrimSpace(c.RecordDir)
 }
 
 // Normalize fills invalid/missing fields with defaults after loading from disk.

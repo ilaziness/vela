@@ -23,20 +23,20 @@ import (
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
 )
 
 // Controller owns session hub wiring and terminal widgets.
 type Controller struct {
-	mu         sync.Mutex
-	win        *gui.Window
-	hub        *termio.Hub
-	registry   *protocol.Registry
-	logger     *zap.Logger
-	terms      map[string]*term.Term
-	termStyle  gui.TextStyle
-	scrollback int
+	mu       sync.Mutex
+	win      *gui.Window
+	hub      *termio.Hub
+	registry *protocol.Registry
+	logger   *zap.Logger
+	terms    map[string]*term.Term
+	termCfg  config.TerminalConfig
 	// termTheme is the theme new sessions start with; termThemes and
 	// termThemeItems are the lazily built go-term theme catalog for the
 	// settings dropdown (Default first, then bundled themes).
@@ -100,26 +100,26 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		logger = zap.NewNop()
 	}
 	return &Controller{
-		hub:        hub,
-		registry:   registry,
-		logger:     logger,
-		terms:      make(map[string]*term.Term),
-		scrollback: 10000,
-		termTheme:  defaultTermTheme(),
-		reconnect:  make(map[string]reconnectReq),
-		transfers:  make(map[string][]transfer.ProgressData),
-		edits:      newEditBook(),
+		hub:       hub,
+		registry:  registry,
+		logger:    logger,
+		terms:     make(map[string]*term.Term),
+		termCfg:   config.Default().Terminal,
+		termTheme: defaultTermTheme(),
+		reconnect: make(map[string]reconnectReq),
+		transfers: make(map[string][]transfer.ProgressData),
+		edits:     newEditBook(),
 	}
 }
 
-// SetTermDefaults configures go-term font face/size and scrollback for new sessions.
-func (c *Controller) SetTermDefaults(style gui.TextStyle, scrollback int) {
+// setTermConfig snapshots the terminal settings used to build every new
+// session. It only affects terminals created afterwards — live terminals
+// keep their construction-time configuration until restart.
+func (c *Controller) setTermConfig(cfg config.TerminalConfig) {
+	cfg.Normalize()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.termStyle = style
-	if scrollback > 0 {
-		c.scrollback = scrollback
-	}
+	c.termCfg = cfg
 }
 
 // SetWindow binds the live window (for QueueCommand / dialogs).
@@ -313,10 +313,10 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 // new one); req is how the tab can dial again after a drop.
 func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session, targetTabID string, req reconnectReq) error {
 	c.mu.Lock()
-	termStyle := c.termStyle
-	scrollback := c.scrollback
+	termCfg := c.termCfg
 	termTheme := c.termTheme
 	c.mu.Unlock()
+	scrollback := termCfg.Scrollback
 	if scrollback <= 0 {
 		scrollback = 10000
 	}
@@ -328,8 +328,11 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	tm, err := term.NewWithStream(w, term.Cfg{
 		NoWindowHandler: true,
 		ScrollbackRows:  scrollback,
-		TextStyle:       termStyle,
+		TextStyle:       fonts.TermStyle(termCfg),
 		Themes:          []term.NamedTheme{termTheme},
+		CursorStyle:     cursorStyleOf(termCfg.CursorStyle),
+		CursorBlink:     termCfg.CursorBlink,
+		CursorLocked:    termCfg.CursorLock,
 		OnExit: func() {
 			id := sess.ID()
 			w.QueueCommand(func(w *gui.Window) {

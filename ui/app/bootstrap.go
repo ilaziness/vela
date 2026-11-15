@@ -20,7 +20,6 @@ import (
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
-	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
 	serialui "github.com/ilaziness/vela/ui/protocol/serial"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -107,7 +106,7 @@ func Bootstrap() (*Runtime, error) {
 
 	ctrl := NewController(hub, reg, logger)
 	ctrl.SetTermTheme(store.Config.Terminal.Theme)
-	ctrl.SetTermDefaults(fonts.TermStyle(store.Config.Terminal), store.Config.Terminal.Scrollback)
+	ctrl.setTermConfig(store.Config.Terminal)
 
 	// SFTP rides on the live SSH sessions: the manager reuses the
 	// existing ssh client per session, so opening the panel never
