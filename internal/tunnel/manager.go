@@ -88,6 +88,12 @@ func (t *Manager) List() []TunnelList {
 }
 
 func (t *Manager) StartLocal(sessionID, localAddr, remoteAddr string) (string, error) {
+	if err := ValidateListenAddr(localAddr); err != nil {
+		return "", err
+	}
+	if err := ValidateTargetAddr(remoteAddr); err != nil {
+		return "", err
+	}
 	sc, err := t.ssh.GetClient(sessionID)
 	if err != nil {
 		return "", ErrSessionNotFound
@@ -128,6 +134,12 @@ func (t *Manager) StartLocal(sessionID, localAddr, remoteAddr string) (string, e
 }
 
 func (t *Manager) StartRemote(sessionID string, remotePort int, localAddr string) (string, error) {
+	if err := ValidateTargetAddr(localAddr); err != nil {
+		return "", err
+	}
+	if err := ValidatePort(remotePort); err != nil {
+		return "", err
+	}
 	sc, err := t.ssh.GetClient(sessionID)
 	if err != nil {
 		return "", ErrSessionNotFound
@@ -169,6 +181,9 @@ func (t *Manager) StartRemote(sessionID string, remotePort int, localAddr string
 }
 
 func (t *Manager) StartDynamic(sessionID, localAddr string) (string, error) {
+	if err := ValidateListenAddr(localAddr); err != nil {
+		return "", err
+	}
 	sc, err := t.ssh.GetClient(sessionID)
 	if err != nil {
 		return "", ErrSessionNotFound

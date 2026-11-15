@@ -45,6 +45,13 @@ type Tab struct {
 	// TransferOpen remembers whether this tab's transfer panel is shown
 	// on the right-side tool rail.
 	TransferOpen bool
+	// TunnelOpen remembers whether this tab's tunnel panel is shown
+	// on the right-side tool rail.
+	TunnelOpen bool
+	// BookmarkID scopes persisted tunnel rules for this session: set
+	// when the tab was dialed from a saved bookmark, empty for quick
+	// connects (whose tunnels stay temporary).
+	BookmarkID string
 	// OwnerKey scopes persisted transfer-queue rows for this session
 	// (bookmark id, or user@host:port). Empty until the session binds.
 	OwnerKey string

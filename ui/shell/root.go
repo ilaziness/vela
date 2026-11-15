@@ -9,6 +9,7 @@ import (
 	"github.com/ilaziness/vela/ui/session"
 	sftpui "github.com/ilaziness/vela/ui/sftp"
 	transferui "github.com/ilaziness/vela/ui/transfer"
+	tunnelui "github.com/ilaziness/vela/ui/tunnel"
 )
 
 // Root builds the edge-to-edge shell: icon rail | [bookmarks] | main.
@@ -55,6 +56,12 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 			stage = gui.Row(flush(gui.ContainerCfg{
 				Sizing:  gui.FillFill,
 				Content: []gui.View{stage, session.PerfPanel(ctrl, tab)},
+			}))
+		}
+		if tab.TunnelOpen {
+			stage = gui.Row(flush(gui.ContainerCfg{
+				Sizing:  gui.FillFill,
+				Content: []gui.View{stage, tunnelui.TunnelPanel(ctrl, tab)},
 			}))
 		}
 		if tab.TransferOpen {

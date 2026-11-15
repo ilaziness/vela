@@ -655,6 +655,12 @@ func (s *Service) Delete(id string) error {
 	if err := s.db.BookmarkRepo.DeleteBookmark(id); err != nil {
 		return err
 	}
+	// Tunnel rules are bookmark-scoped; a missing cleanup only orphans
+	// rows, so warn instead of failing the delete.
+	if err := s.db.SSHTunnelRepo.DeleteByBookmark(id); err != nil {
+		s.logger.Warn("delete bookmark tunnel rules failed",
+			zap.String("bookmark_id", id), zap.Error(err))
+	}
 	s.emit()
 	return nil
 }

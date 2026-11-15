@@ -21,6 +21,7 @@ import (
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/termstream"
 	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/internal/tunnel"
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/ui/protocol"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -66,6 +67,11 @@ type Controller struct {
 	// Both are wired by SetSFTP during bootstrap.
 	sftpMgr *sftp.Manager
 	edits   *sftpEditBook
+
+	// tunnels is the port-forward engine (SetTunnels); tunnelRules
+	// caches saved bookmark rules keyed by bookmark id.
+	tunnels     *tunnel.Manager
+	tunnelRules map[string]*tunnelRuleCache
 }
 
 // reconnectReq is how a session tab reached its session: either a
@@ -355,6 +361,7 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	tab.ConnErr = ""
 	tab.SFTPOpen = false
 	tab.OwnerKey = c.sftpOwnerKey(req)
+	tab.BookmarkID = req.bookmarkID
 	st.ActiveTab = tab.ID
 
 	c.mu.Lock()
@@ -395,6 +402,7 @@ func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 	tab.PerfOpen = false
 	tab.SFTPOpen = false
 	tab.TransferOpen = false
+	tab.TunnelOpen = false
 	delete(st.SFTP, sessID)
 	// The SSH session is already dead: discard unsaved edits and
 	// close the SFTP client without prompting.
@@ -546,10 +554,20 @@ func (c *Controller) tearDownSession(sessID string) {
 	if tm != nil {
 		_ = tm.Close()
 	}
-	if sess, ok := c.hub.Get(sessID); ok && sess != nil {
-		_ = sess.Close()
+	closeSess := func() {
+		if sess, ok := c.hub.Get(sessID); ok && sess != nil {
+			_ = sess.Close()
+		}
+		c.hub.Unregister(sessID)
 	}
-	c.hub.Unregister(sessID)
+	if mgr := c.TunnelManager(); mgr != nil {
+		// Signal tunnel listeners first, then close the SSH session so
+		// in-flight remote dials fail fast, then wait for tunnel
+		// goroutines to drain.
+		mgr.StopSessionAfter(sessID, closeSess)
+		return
+	}
+	closeSess()
 }
 
 func (c *Controller) focusActiveTerm(st *State) {
@@ -599,6 +617,9 @@ func (c *Controller) Shutdown() {
 		c.tearDownSession(id)
 	}
 	c.DropAllPerf()
+	if mgr := c.TunnelManager(); mgr != nil {
+		mgr.StopAll()
+	}
 	if c.onClose != nil {
 		c.onClose()
 	}

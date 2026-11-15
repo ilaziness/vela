@@ -19,6 +19,7 @@ import (
 	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/internal/tunnel"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
 	serialui "github.com/ilaziness/vela/ui/protocol/serial"
@@ -42,6 +43,7 @@ type Runtime struct {
 	Keys      *sshkey.Service
 	Keybind   *keybind.Manager
 	Bookmarks *bookmark.Service
+	Tunnels   *tunnel.Manager
 }
 
 // Bootstrap constructs engines and the protocol registry.
@@ -115,6 +117,11 @@ func Bootstrap() (*Runtime, error) {
 	sftpMgr.SetOnQueued(ctrl.OnSFTPQueued)
 	sshMgr.SetOnCwd(ctrl.OnTerminalCwd)
 
+	// Port forwarding rides on the live SSH sessions like SFTP: the
+	// tunnel manager reuses each session's ssh client.
+	tunnelMgr := tunnel.NewManager(logger, sshMgr)
+	ctrl.SetTunnels(tunnelMgr)
+
 	ctrl.SetBookmarkDial(BookmarkDialDeps{
 		Bookmarks:   bmSvc,
 		SSH:         sshMgr,
@@ -146,6 +153,7 @@ func Bootstrap() (*Runtime, error) {
 		Keys:      keys,
 		Keybind:   kb,
 		Bookmarks: bmSvc,
+		Tunnels:   tunnelMgr,
 	}, nil
 }
 

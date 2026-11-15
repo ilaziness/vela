@@ -26,7 +26,7 @@ const (
 
 // TabRail is the right-side tool strip bound to the active live
 // session tab, top to bottom: sftp | performance | tunnel | transfer
-// list. Only sftp and performance are wired; the rest are placeholders.
+// list.
 func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 	th := gui.CurrentTheme()
 	perfOpen := tab.PerfOpen
@@ -58,9 +58,9 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 		}
 	})
 
-	tunnelBtn := toolBtn(toolTunnel, gui.IconLink, i18n.T("shell.tools.tunnel"), th, false, func(ctx gui.EventCtx) {
+	tunnelBtn := toolBtn(toolTunnel, gui.IconLink, i18n.T("shell.tools.tunnel"), th, tab.TunnelOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		placeholder(ctrl, i18n.T("shell.tools.tunnel"))
+		ctrl.ToggleTunnel(ctx.Window, tab.ID)
 	})
 
 	// The transfer list opens the transfer panel.
@@ -91,10 +91,6 @@ func TabRail(ctrl *app.Controller, tab *app.Tab) gui.View {
 			})),
 		},
 	}))
-}
-
-func placeholder(ctrl *app.Controller, name string) {
-	ctrl.SetStatus(i18n.Tf("shell.placeholder.feature", name))
 }
 
 // toolBtn mirrors shell.railBtn; the hover tip floats to the left
