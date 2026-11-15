@@ -18,7 +18,7 @@
 
 ## 2. 项目结构规范
 
-```
+```shell
 ├── main.go                 # 应用入口（go-gui + embed logo）
 ├── assets/                 # 应用图标等静态资源（appicon.png）
 ├── ui/                     # 桌面 UI（禁止 import Wails；壳层不绑死某协议）
