@@ -333,6 +333,10 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 		CursorStyle:     cursorStyleOf(termCfg.CursorStyle),
 		CursorBlink:     termCfg.CursorBlink,
 		CursorLocked:    termCfg.CursorLock,
+		// Baked into the Term at construction: StartRecording reads
+		// t.cfg.RecordInput, so the setting must arrive here to take
+		// effect for manually started recordings too.
+		RecordInput: termCfg.RecordInput,
 		OnExit: func() {
 			id := sess.ID()
 			w.QueueCommand(func(w *gui.Window) {

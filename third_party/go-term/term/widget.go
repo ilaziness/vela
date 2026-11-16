@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -559,7 +560,12 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// runs on every layout rebuild — i.e. every keystroke. Re-asserting
 		// unconditionally is what surfaced go-gui#157, where SetFocus was not
 		// idempotent and cleared the IME preedit mid-composition.
-		if !w.DialogIsVisible() && w.FocusID() != t.focusID {
+		//
+		// A go-gui context-menu popup ("<menu>:popup") is the same kind of
+		// transient focus owner as a dialog: it takes focus on open for
+		// keyboard navigation, and reclaiming it here would close the menu
+		// on the next rebuild.
+		if !w.DialogIsVisible() && w.FocusID() != t.focusID && !contextMenuFocused(w) {
 			w.SetFocus(t.focusID)
 		}
 	}
@@ -571,6 +577,16 @@ func (t *Term) View(w *gui.Window) gui.View {
 	// the wrapping.
 	colCfg.Sizing = gui.FillFill
 	return gui.Column(colCfg)
+}
+
+// contextMenuFocused reports whether the window's keyboard focus sits in a
+// go-gui context-menu popup. go-gui scopes the popup's focus ID as
+// "<menu>:popup" (ScopeID(cfg.ID, "popup") in view_context_menu.go); the
+// leaf is stable across scopes, so a suffix match covers menus nested
+// inside ID-bearing panels.
+func contextMenuFocused(w *gui.Window) bool {
+	id := w.FocusID()
+	return id == "popup" || strings.HasSuffix(id, ":popup")
 }
 
 // Close stops the shell, reader, and blink goroutine. Safe to call once;
