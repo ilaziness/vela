@@ -208,4 +208,12 @@ func TestStagingDirRemotePath(t *testing.T) {
 	if n := len(path.Base(stagingDirRemotePath("/d/" + strings.Repeat("b", 300)))); n > 240 {
 		t.Fatalf("staging dir base name too long: %d", n)
 	}
+	// A destination whose ".." follows a symlink must keep its spelling:
+	// path.Join would clean it lexically and place staging in the wrong tree.
+	if got, want := stagingDirRemotePath("/srv/link/../out"), "/srv/link/../out/.out.vela-extract-"; !strings.HasPrefix(got, want) {
+		t.Fatalf("staging dir for symlink-sensitive dest = %q, want prefix %q", got, want)
+	}
+	if got := stagingDirRemotePath("out"); !strings.HasPrefix(got, "out/.out.vela-extract-") {
+		t.Fatalf("staging dir for relative dest = %q", got)
+	}
 }

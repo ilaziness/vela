@@ -166,18 +166,33 @@ func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int) 
 //   - missing parent directories are created as real directories, refusing to
 //     write through a symlink in the parent chain (extractParentsSafe parity)
 //     and tolerating a parent another writer created concurrently;
-//   - directory entries keep the archive's directory mode on the directories
-//     they create (find visits a directory before its contents) and leave
-//     pre-existing target directories — including their mode — untouched.
+//   - directories created by this operation keep the archive's mode, but it is
+//     applied only AFTER all descendants are installed: a read-only archive
+//     directory (0555) would otherwise block its own children. New directories
+//     stay 0700 (owner-only) during population; pre-existing target directories
+//     — including their mode — are untouched;
+//   - a hard link that fails with EXDEV (a nested destination mount lives on a
+//     different filesystem) falls back to copying into an operation-owned file
+//     on the TARGET filesystem and claiming the final name with the same
+//     atomic no-overwrite link, so no existing file is ever replaced;
+//   - symlink targets are reproduced byte-for-byte (sentinel capture strips
+//     only readlink's own output delimiter, keeping trailing newlines that
+//     command substitution would otherwise remove);
 //
 // The staging tree lives INSIDE destDir (write access to destDir's parent must
 // not be required) and is removed on every exit path. The promotion loop walks
 // the staging tree itself instead of an inline name list: the command size
 // stays bounded for archives with thousands of members (the whole command is
 // one shell argument, capped at ~128KiB per argument on Linux).
+//
+// All paths are resolved to absolute forms against the initial working
+// directory before the shell changes into a globally searchable directory:
+// find(1) saves a descriptor of its startup cwd and cannot restore it when a
+// non-root user inherits an unreadable cwd (e.g. /root via su), while relative
+// destination/archive spellings must keep their original meaning.
 func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, strip int) string {
 	st := stagingDirRemotePath(destDir)
-	tarPart := fmt.Sprintf("tar x%sf %s -C \"$st\"", tarCompressFlag(f), shellQuote(archivePath))
+	tarPart := fmt.Sprintf("tar x%sf \"$a\" -C \"$st\"", tarCompressFlag(f))
 	if strip == 1 {
 		tarPart += " --strip-components=1"
 	}
@@ -185,9 +200,10 @@ func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, 
 	// argument count stays bounded too) and reports failures through a
 	// marker file: find's own exit status is not relied on across
 	// implementations. Paths are handled as "$1"-style arguments, so names
-	// with spaces, newlines or glob characters are safe.
-	promote := "rc=0; cd \"$d\" 2>/dev/null || touch -- \"$fl\"; find \"$st\" -mindepth 1 -exec sh -c '" +
-		"st=$1; fl=$2; d=$3; shift 3; " +
+	// with spaces, newlines or glob characters are safe. dl records the
+	// directories this operation created together with their archived modes.
+	promote := "rc=0; find \"$st\" -mindepth 1 -exec sh -c '" +
+		"st=$1; fl=$2; d=$3; dl=$4; shift 4; " +
 		"for s in \"$@\"; do " +
 		"n=${s#\"$st\"/}; t=\"$d/$n\"; " +
 		"[ -e \"$s\" ] || [ -L \"$s\" ] || continue; " +
@@ -198,21 +214,36 @@ func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, 
 		"if [ -L \"$q\" ]; then touch -- \"$fl\"; continue 2; fi; " +
 		"if [ ! -d \"$q\" ]; then mkdir -- \"$q\" 2>/dev/null || { [ -d \"$q\" ] && [ ! -L \"$q\" ] || { touch -- \"$fl\"; continue 2; }; }; fi; done; " +
 		"if mkdir -- \"$t\" 2>/dev/null; then " +
-		"m=$(stat -c %a -- \"$s\") && chmod -- \"$m\" \"$t\" || touch -- \"$fl\"; " +
+		"m=$(stat -c %a -- \"$s\") && chmod -- 700 \"$t\" && printf \"%s %s\\n\" \"$m\" \"$t\" >> \"$dl\" || touch -- \"$fl\"; " +
 		"elif [ ! -d \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; fi; " +
 		"continue; fi; " +
 		"if [ -e \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; continue; fi; " +
 		"q=\"$d\"; r=\"$n\"; while [ \"$r\" != \"${r%/*}\" ]; do c=\"${r%%/*}\"; r=\"${r#*/}\"; q=\"$q/$c\"; " +
 		"if [ -L \"$q\" ]; then touch -- \"$fl\"; continue 2; fi; " +
 		"if [ ! -d \"$q\" ]; then mkdir -- \"$q\" 2>/dev/null || { [ -d \"$q\" ] && [ ! -L \"$q\" ] || { touch -- \"$fl\"; continue 2; }; }; fi; done; " +
-		"if [ -L \"$s\" ]; then g=$(readlink -- \"$s\") && ln -s -- \"$g\" \"$t\" || touch -- \"$fl\"; " +
-		"else ln -- \"$s\" \"$t\" 2>/dev/null && rm -rf -- \"$s\" || touch -- \"$fl\"; fi; " +
-		"done' sh \"$st\" \"$fl\" \"$d\" {} + || touch -- \"$fl\"; " +
-		"rc=0; [ -e \"$fl\" ] && rc=1; rm -rf -- \"$st\" \"$fl\"; exit \"$rc\"; }"
-	return "st=" + shellQuote(st) + " fl=" + shellQuote(st+".fail") + " d=" + shellQuote(destDir) +
-		" && rm -rf -- \"$st\" \"$fl\" && mkdir -- \"$st\" && " + tarPart +
+		"if [ -L \"$s\" ]; then " +
+		"g=$(readlink -- \"$s\" && printf x) && g=${g%x} && g=${g%?} && ln -s -- \"$g\" \"$t\" || touch -- \"$fl\"; " +
+		"elif ln -- \"$s\" \"$t\" 2>/dev/null; then :; " +
+		"else c=$(mktemp \"${t%/*}/.vela-copy-XXXXXX\") && cp -p -- \"$s\" \"$c\" && ln -- \"$c\" \"$t\" && rm -f -- \"$c\" || { rm -f -- \"$c\"; touch -- \"$fl\"; }; fi; " +
+		"done' sh \"$st\" \"$fl\" \"$d\" \"$dl\" {} + || touch -- \"$fl\"; " +
+		// Restore archived directory modes bottom-up (deepest first) so a
+		// parent is never locked before its children are complete.
+		"if [ -s \"$dl\" ]; then awk '{n=gsub(/\\//,\"/\",$0); print n, $0}' \"$dl\" | sort -rn | while read -r _ m t; do chmod -- \"$m\" \"$t\" || touch -- \"$fl\"; done; fi; " +
+		"rc=0; [ -e \"$fl\" ] && rc=1; " +
+		// Make read-only staged directories removable, then clean up.
+		"find \"$st\" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- \"$st\" \"$fl\" \"$dl\"; exit \"$rc\"; }"
+	// Resolve every path against the initial cwd, then start find from a
+	// globally searchable directory (see the function comment).
+	head := "o=$(pwd); st=" + shellQuote(st) + " fl=" + shellQuote(st+".fail") +
+		" dl=" + shellQuote(st+".dirs") + " d=" + shellQuote(destDir) + " a=" + shellQuote(archivePath) +
+		" && case \"$st\" in /*) ;; *) st=\"$o/$st\";; esac" +
+		" && case \"$d\" in /*) ;; *) d=\"$o/$d\";; esac" +
+		" && case \"$a\" in /*) ;; *) a=\"$o/$a\";; esac" +
+		" && fl=\"$st.fail\" && dl=\"$st.dirs\" && cd /" +
+		" && rm -rf -- \"$st\" \"$fl\" \"$dl\" && mkdir -- \"$st\" && " + tarPart +
 		" && { " + promote +
-		" || { rm -rf -- \"$st\" \"$fl\"; false; }"
+		" || { find \"$st\" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- \"$st\" \"$fl\" \"$dl\"; false; }"
+	return head
 }
 
 // extractSingleCommand builds the decompression of a bare compressed stream

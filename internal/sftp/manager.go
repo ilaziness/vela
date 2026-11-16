@@ -322,7 +322,12 @@ func stagingDirRemotePath(dir string) string {
 	if dir == "." || dir == "" {
 		return name
 	}
-	return joinRemotePath(dir, name)
+	// Append the generated basename WITHOUT lexical cleaning: path.Join would
+	// collapse ".." before the server follows symlinks (POSIX resolves ".."
+	// after following them), so a destination such as /srv/link/../out would
+	// get a staging directory in the wrong tree. Keep the caller's spelling
+	// intact — the server resolves both paths the same way.
+	return strings.TrimRight(dir, "/") + "/" + name
 }
 
 // stagingToken returns a short random hex token for staging names. The clock
