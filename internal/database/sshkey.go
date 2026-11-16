@@ -87,6 +87,18 @@ func (r *SSHKeyRepository) Insert(key *SSHKeyDB) error {
 	return nil
 }
 
+func (r *SSHKeyRepository) Update(key *SSHKeyDB) error {
+	_, err := r.db.Exec(
+		`UPDATE ssh_keys SET name = ?, comment = ? WHERE id = ?`,
+		key.Name, key.Comment, key.ID,
+	)
+	if err != nil {
+		return fmt.Errorf(errUpdateQuery, "ssh key", err)
+	}
+	r.logger.Debug("ssh key updated", zap.String("id", key.ID))
+	return nil
+}
+
 func (r *SSHKeyRepository) Delete(id string) error {
 	_, err := r.db.Exec(`DELETE FROM ssh_keys WHERE id = ?`, id)
 	if err != nil {

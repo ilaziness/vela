@@ -61,6 +61,9 @@ type KnownHostEntry struct {
 	Host        string `json:"host"`
 	KeyType     string `json:"keyType"`
 	Fingerprint string `json:"fingerprint"`
+	// KeyData is the raw base64 public key blob (third field of the
+	// known_hosts line), shown so users can verify/copy the exact key.
+	KeyData string `json:"keyData"`
 }
 
 func (m *Manager) knownHostsFile() string {
@@ -314,9 +317,21 @@ func (m *Manager) ListKnownHosts() ([]KnownHostEntry, error) {
 			Host:        tokens[0],
 			KeyType:     tokens[1],
 			Fingerprint: fingerprintFromBase64(tokens[2]),
+			KeyData:     tokens[2],
 		})
 	}
 	return entries, nil
+}
+
+// ClearKnownHosts removes every trusted host key entry.
+func (m *Manager) ClearKnownHosts() error {
+	path := m.knownHostsFile()
+	m.knownHostsMu.Lock()
+	defer m.knownHostsMu.Unlock()
+	if err := ensureKnownHostsExists(path); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(""), 0600)
 }
 
 func (m *Manager) DeleteKnownHost(host, keyType string) error {

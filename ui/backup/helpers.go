@@ -124,7 +124,7 @@ func openManager(d *Deps) (*sync.SyncManager, error) {
 
 func vaultPassword(d *Deps) (string, error) {
 	pw, err := d.Vault.Get()
-	if err != nil {
+	if err != nil || strings.TrimSpace(pw) == "" {
 		return "", usererr.Coded("error.password_not_entered", "Password not entered")
 	}
 	return pw, nil

@@ -41,6 +41,13 @@ type State struct {
 	AI       ai.Config
 	AITab    string
 
+	// SyncBackups mirrors the *saved* sync config (d.Store.Config.Sync),
+	// not the draft form above it.
+	SyncBackups        []sync.BackupInfo
+	SyncBackupsLoading bool
+	SyncBackupsErr     string
+	SyncBackupsLoaded  bool
+
 	Keys            []sshkey.Info
 	KeyGenName      string
 	KeyGenAlgo      string

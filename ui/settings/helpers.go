@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -74,6 +75,69 @@ func saveBtn(id, label string, busy bool, onClick func(gui.EventCtx)) gui.View {
 	}))
 }
 
+// dangerConfirmDialog is the shared delete-confirmation dialog: wrapping
+// body text, an optional detail line (e.g. the item name), and
+// cancel/delete buttons with the delete action in danger red.
+// Dialogs are modal, so the fixed button IDs never coexist.
+func dangerConfirmDialog(w *gui.Window, title, body, detail string, onDelete func(*gui.Window)) {
+	th := gui.CurrentTheme()
+	w.Dialog(gui.DialogCfg{
+		DialogType: gui.DialogCustom,
+		Title:      title,
+		MinWidth:   gui.SomeF(360),
+		MaxWidth:   gui.SomeF(560),
+		CustomView: func(*gui.Window) gui.View {
+			content := []gui.View{
+				gui.Text(gui.TextCfg{
+					Text:      body,
+					TextStyle: th.TextStyleBody,
+					Mode:      gui.TextModeWrap,
+					Sizing:    gui.FillFit,
+				}),
+			}
+			if detail != "" {
+				content = append(content, gui.Text(gui.TextCfg{
+					Text:      detail,
+					TextStyle: th.TextStyleSecondary,
+					Mode:      gui.TextModeWrap,
+					Sizing:    gui.FillFit,
+				}))
+			}
+			content = append(content, gui.Row(layout.Flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
+				Spacing: gui.SpacingMedium,
+				HAlign:  gui.HAlignEnd,
+				Content: []gui.View{
+					gui.Button(gui.ButtonCfg{
+						ID:      "danger-confirm-cancel",
+						Variant: gui.ButtonSecondary,
+						Label:   i18n.T("common.cancel"),
+						OnClick: func(ctx gui.EventCtx) {
+							ctx.Consume()
+							ctx.Window.DialogDismiss()
+						},
+					}),
+					gui.Button(gui.ButtonCfg{
+						ID:      "danger-confirm-ok",
+						Variant: gui.ButtonDanger,
+						Label:   i18n.T("common.delete"),
+						OnClick: func(ctx gui.EventCtx) {
+							ctx.Consume()
+							ctx.Window.DialogDismiss()
+							onDelete(ctx.Window)
+						},
+					}),
+				},
+			})))
+			return gui.Column(layout.Flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
+				Spacing: gui.SpacingMedium,
+				Content: content,
+			}))
+		},
+	})
+}
+
 // pathBrowseRow is a labelled read-only path + browse button on one baseline.
 // Input must not carry Label here: labelled Input is a column, so a sibling
 // button would sit beside the label instead of the field.
@@ -110,6 +174,33 @@ func pathBrowseRow(id, label, path, placeholder, browseLabel string, onBrowse fu
 			})),
 		},
 	}))
+}
+
+func formatFileSize(bytes int64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+	return fmt.Sprintf("%.2f %s", float64(bytes)/float64(div), units[exp])
+}
+
+func formatDateTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
 }
 
 func toastOK(w *gui.Window, body string) {
@@ -243,9 +334,10 @@ func settingsTableInnerWidth(w *gui.Window) float32 {
 
 // resolveColWidths starts from per-column minimums. When the pane is
 // narrower than the mins sum, columns shrink proportionally so the
-// table still fills the width. Leftover width goes to flexIdx (long
-// columns like fingerprint). gui.Table has no flex columns of its own.
-func resolveColWidths(w *gui.Window, mins []float32, flexIdx int) []float32 {
+// table still fills the width. Leftover width is shared by the flexIdxs
+// columns proportionally to their minimums (long-content columns like
+// key data get more than short ones). gui.Table has no flex columns.
+func resolveColWidths(w *gui.Window, mins []float32, flexIdxs ...int) []float32 {
 	out := append([]float32(nil), mins...)
 	var sum float32
 	for _, m := range out {
@@ -254,15 +346,36 @@ func resolveColWidths(w *gui.Window, mins []float32, flexIdx int) []float32 {
 	if sum <= 0 {
 		return out
 	}
-	avail := settingsTableInnerWidth(w)
+	// gui.Table adds CellPadding (theme PaddingTwoFive = 10px) to every
+	// column on top of the Value probe — subtract it per column or the
+	// table overflows the pane on the right.
+	avail := settingsTableInnerWidth(w) -
+		float32(len(mins))*gui.PaddingTwoFive.Width()
 	switch {
 	case avail < sum:
 		scale := avail / sum
 		for i := range out {
 			out[i] *= scale
 		}
-	case flexIdx >= 0 && flexIdx < len(out):
-		out[flexIdx] += avail - sum
+	default:
+		// Leftover width is shared by flex columns proportionally to
+		// their minimums, so long-content columns (key data, public
+		// keys) get more than short ones (host, type).
+		var flexSum float32
+		for _, idx := range flexIdxs {
+			if idx >= 0 && idx < len(out) {
+				flexSum += out[idx]
+			}
+		}
+		if flexSum <= 0 {
+			break
+		}
+		leftover := avail - sum
+		for _, idx := range flexIdxs {
+			if idx >= 0 && idx < len(out) {
+				out[idx] += leftover * out[idx] / flexSum
+			}
+		}
 	}
 	return out
 }

@@ -33,7 +33,7 @@ func Root(w *gui.Window, d *Deps) gui.View {
 	case navSSH:
 		body = panelSSH(d, st)
 	case navSync:
-		body = panelSync(d, st)
+		body = panelSync(w, d, st)
 	case navAI:
 		body = panelAI(d, st)
 	case navKeys:
@@ -69,6 +69,9 @@ func Root(w *gui.Window, d *Deps) gui.View {
 				s.ActiveNav = id
 				if id == navKeys || id == navKnownHosts || id == navKeybindings || id == navAI {
 					refreshLists(s, d)
+				}
+				if id == navSync {
+					maybeLoadSyncBackups(ctx.Window, d)
 				}
 			},
 		}))

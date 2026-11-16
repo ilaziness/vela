@@ -1,20 +1,21 @@
 package settings
 
 import (
-	"os"
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
-// Minimum column widths; fingerprint (index 2) absorbs leftover width.
-var keysColMin = []float32{100, 88, 320, 72, 128, 210}
+// Minimum column widths; name (0), fingerprint (2) and comment (3)
+// share leftover width proportionally.
+var keysColMin = []float32{130, 88, 320, 72, 128, 300}
 
 func panelKeys(w *gui.Window, d *Deps, st *State) gui.View {
-	cols := resolveColWidths(w, keysColMin, 2)
+	cols := resolveColWidths(w, keysColMin, 0, 2, 3)
 	algoOpts := []gui.SelectOption{
 		{Label: "Ed25519", Value: "ed25519"},
 		{Label: "ECDSA P-256", Value: "ecdsa-p256"},
@@ -65,12 +66,21 @@ func panelKeys(w *gui.Window, d *Deps, st *State) gui.View {
 						},
 					}),
 					gui.Button(gui.ButtonCfg{
+						ID:      "settings-key-edit-" + id,
+						Variant: gui.ButtonGhost,
+						Label:   i18n.T("common.edit"),
+						OnClick: func(ctx gui.EventCtx) {
+							ctx.Consume()
+							editKey(ctx.Window, d, k)
+						},
+					}),
+					gui.Button(gui.ButtonCfg{
 						ID:      "settings-key-export-" + id,
 						Variant: gui.ButtonGhost,
 						Label:   i18n.T("settings.keys.export"),
 						OnClick: func(ctx gui.EventCtx) {
 							ctx.Consume()
-							exportKey(ctx.Window, d, id, name)
+							exportKey(ctx.Window, d, k)
 						},
 					}),
 					gui.Button(gui.ButtonCfg{
@@ -142,72 +152,191 @@ func generateKey(w *gui.Window, d *Deps) {
 	})
 }
 
-func exportKey(w *gui.Window, d *Deps, id, name string) {
+// editKey shows a small dialog to rename a key and edit its comment.
+func editKey(w *gui.Window, d *Deps, k sshkey.Info) {
+	name, comment := k.Name, k.Comment
+	w.Dialog(gui.DialogCfg{
+		DialogType: gui.DialogCustom,
+		Title:      i18n.T("settings.keys.edit_title"),
+		Width:      420,
+		CustomView: func(*gui.Window) gui.View {
+			return gui.Column(layout.Flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
+				Spacing: gui.SpacingMedium,
+				Content: []gui.View{
+					gui.Input(gui.InputCfg{
+						ID:          "settings-key-edit-name",
+						Label:       i18n.T("settings.keys.name"),
+						Text:        name,
+						Placeholder: i18n.T("settings.keys.name_placeholder"),
+						Sizing:      gui.FillFit,
+						OnTextChanged: func(v string, ctx gui.EventCtx) {
+							name = v
+							ctx.Consume()
+						},
+					}),
+					gui.Input(gui.InputCfg{
+						ID:          "settings-key-edit-comment",
+						Label:       i18n.T("settings.keys.comment"),
+						Text:        comment,
+						Placeholder: i18n.T("settings.keys.comment_placeholder"),
+						Sizing:      gui.FillFit,
+						OnTextChanged: func(v string, ctx gui.EventCtx) {
+							comment = v
+							ctx.Consume()
+						},
+					}),
+					gui.Row(layout.Flush(gui.ContainerCfg{
+						Sizing:  gui.FillFit,
+						Spacing: gui.SpacingMedium,
+						HAlign:  gui.HAlignEnd,
+						Content: []gui.View{
+							gui.Button(gui.ButtonCfg{
+								ID:       "settings-key-edit-ok",
+								Variant:  gui.ButtonPrimary,
+								Label:    i18n.T("common.ok"),
+								Disabled: strings.TrimSpace(name) == "",
+								OnClick: func(ctx gui.EventCtx) {
+									win := ctx.Window
+									ctx.Consume()
+									win.DialogDismiss()
+									go func() {
+										_, err := d.Keys.Update(k.ID, name, comment)
+										win.QueueCommand(func(w2 *gui.Window) {
+											if err != nil {
+												toastErr(w2, err)
+												return
+											}
+											refreshLists(gui.State[State](w2), d)
+											toastOK(w2, i18n.T("settings.keys.updated"))
+										})
+									}()
+								},
+							}),
+							gui.Button(gui.ButtonCfg{
+								ID:      "settings-key-edit-cancel",
+								Variant: gui.ButtonSecondary,
+								Label:   i18n.T("common.cancel"),
+								OnClick: func(ctx gui.EventCtx) {
+									ctx.Consume()
+									ctx.Window.DialogDismiss()
+								},
+							}),
+						},
+					})),
+				},
+			}))
+		},
+	})
+}
+
+func exportKey(w *gui.Window, d *Deps, k sshkey.Info) {
 	withVault(w, d, i18n.T("password.decrypt_ssh_key"), func() {
-		w.NativeSaveDialog(gui.NativeSaveDialogCfg{
-			Title:            i18n.T("settings.keys.export_private_title"),
-			DefaultName:      sanitizeFileName(name) + ".pem",
-			ConfirmOverwrite: true,
-			OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
-				if res.Status != gui.DialogOK || len(res.Paths) == 0 {
-					return
-				}
-				path := res.Paths[0].Path
-				go func() {
-					pem, err := d.Keys.PrivatePEM(id)
-					if err == nil {
-						err = os.WriteFile(path, []byte(pem), 0o600)
-					}
-					win.QueueCommand(func(w2 *gui.Window) {
-						if err != nil {
-							toastErr(w2, err)
-							return
-						}
-						toastOK(w2, i18n.T("settings.keys.private_exported"))
-					})
-				}()
+		passphrase := ""
+		w.Dialog(gui.DialogCfg{
+			DialogType: gui.DialogCustom,
+			Title:      i18n.T("settings.keys.export_private_title"),
+			Width:      420,
+			CustomView: func(*gui.Window) gui.View {
+				th := gui.CurrentTheme()
+				return gui.Column(layout.Flush(gui.ContainerCfg{
+					Sizing:  gui.FillFit,
+					Spacing: gui.SpacingMedium,
+					Content: []gui.View{
+						gui.Text(gui.TextCfg{
+							Text:      i18n.T("settings.keys.export_passphrase_hint"),
+							TextStyle: th.TextStyleSecondary,
+							Mode:      gui.TextModeWrap,
+							Sizing:    gui.FillFit,
+						}),
+						gui.Input(gui.InputCfg{
+							ID:          "settings-key-export-passphrase",
+							Placeholder: i18n.T("settings.keys.passphrase_placeholder"),
+							IsPassword:  true,
+							Sizing:      gui.FillFit,
+							OnTextChanged: func(v string, ctx gui.EventCtx) {
+								passphrase = v
+								ctx.Consume()
+							},
+						}),
+						gui.Row(layout.Flush(gui.ContainerCfg{
+							Sizing:  gui.FillFit,
+							Spacing: gui.SpacingMedium,
+							HAlign:  gui.HAlignEnd,
+							Content: []gui.View{
+								gui.Button(gui.ButtonCfg{
+									ID:      "settings-key-export-pass-ok",
+									Variant: gui.ButtonPrimary,
+									Label:   i18n.T("common.ok"),
+									OnClick: func(ctx gui.EventCtx) {
+										ctx.Consume()
+										ctx.Window.DialogDismiss()
+										pickExportPath(ctx.Window, d, k, passphrase)
+									},
+								}),
+								gui.Button(gui.ButtonCfg{
+									ID:      "settings-key-export-pass-cancel",
+									Variant: gui.ButtonSecondary,
+									Label:   i18n.T("common.cancel"),
+									OnClick: func(ctx gui.EventCtx) {
+										ctx.Consume()
+										ctx.Window.DialogDismiss()
+									},
+								}),
+							},
+						})),
+					},
+				}))
 			},
 		})
 	})
 }
 
-func deleteKey(w *gui.Window, d *Deps, id, name string) {
-	w.Dialog(gui.DialogCfg{
-		DialogType: gui.DialogConfirm,
-		Title:      i18n.T("settings.keys.delete_title"),
-		Body:       i18n.Tf("settings.keys.delete_body", name),
-		OnOkYes: func(win *gui.Window) {
+func pickExportPath(w *gui.Window, d *Deps, k sshkey.Info, passphrase string) {
+	w.NativeSaveDialog(gui.NativeSaveDialogCfg{
+		Title:            i18n.T("settings.keys.export_private_title"),
+		DefaultName:      sshkey.DefaultFileName(k.Algorithm),
+		ConfirmOverwrite: true,
+		OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
+			if res.Status != gui.DialogOK || len(res.Paths) == 0 {
+				return
+			}
+			path := res.Paths[0].Path
 			go func() {
-				err := d.Keys.Delete(id)
+				pem, err := d.Keys.PrivatePEM(k.ID)
+				if err == nil {
+					err = sshkey.WritePrivateKeyFile(path, pem, k.Comment, passphrase)
+				}
 				win.QueueCommand(func(w2 *gui.Window) {
 					if err != nil {
 						toastErr(w2, err)
 						return
 					}
-					refreshLists(gui.State[State](w2), d)
-					toastOK(w2, i18n.T("settings.keys.deleted"))
+					toastOK(w2, i18n.T("settings.keys.private_exported"))
 				})
 			}()
 		},
 	})
 }
 
-func sanitizeFileName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "id_ed25519"
-	}
-	var b strings.Builder
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		case r == ' ':
-			b.WriteByte('_')
-		}
-	}
-	if b.Len() == 0 {
-		return "key"
-	}
-	return b.String()
+func deleteKey(w *gui.Window, d *Deps, id, name string) {
+	dangerConfirmDialog(w,
+		i18n.T("settings.keys.delete_title"),
+		i18n.T("settings.keys.delete_body"),
+		name,
+		func(win *gui.Window) { confirmDeleteKey(win, d, id) })
+}
+
+func confirmDeleteKey(w *gui.Window, d *Deps, id string) {
+	go func() {
+		err := d.Keys.Delete(id)
+		w.QueueCommand(func(w2 *gui.Window) {
+			if err != nil {
+				toastErr(w2, err)
+				return
+			}
+			refreshLists(gui.State[State](w2), d)
+			toastOK(w2, i18n.T("settings.keys.deleted"))
+		})
+	}()
 }

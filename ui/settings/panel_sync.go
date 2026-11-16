@@ -9,15 +9,25 @@ import (
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/sync"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/layout"
 )
 
-func panelSync(d *Deps, st *State) gui.View {
+func panelSync(w *gui.Window, d *Deps, st *State) gui.View {
 	c := &st.Sync
 	provider := string(c.Provider)
 	opts := []gui.SelectOption{
 		{Label: i18n.T("settings.sync.provider_selfhosted"), Value: string(sync.ProviderSelfHosted)},
 		{Label: i18n.T("settings.sync.provider_webdav"), Value: string(sync.ProviderWebDAV)},
 		{Label: i18n.T("settings.sync.provider_s3"), Value: string(sync.ProviderS3)},
+	}
+	providerHint := ""
+	switch c.Provider {
+	case sync.ProviderWebDAV:
+		providerHint = i18n.T("settings.sync.provider_webdav_hint")
+	case sync.ProviderS3:
+		providerHint = i18n.T("settings.sync.provider_s3_hint")
+	default:
+		providerHint = i18n.T("settings.sync.provider_selfhosted_hint")
 	}
 
 	rows := []gui.View{
@@ -34,6 +44,7 @@ func panelSync(d *Deps, st *State) gui.View {
 				}
 			},
 		}),
+		gui.Label(providerHint, gui.CurrentTheme().TextStyleSecondary),
 	}
 
 	switch c.Provider {
@@ -99,7 +110,180 @@ func panelSync(d *Deps, st *State) gui.View {
 			},
 		}),
 	))
+
+	if d.Store.Config.Sync.IsConfigured() {
+		rows = append(rows, syncBackupsSection(w, d, st))
+	}
 	return panelColumn(i18n.T("settings.nav.sync"), rows)
+}
+
+// syncBackupsSection lists backups stored under the *saved* sync config.
+// Draft edits do not affect it until Save succeeds.
+func syncBackupsSection(w *gui.Window, d *Deps, st *State) gui.View {
+	th := gui.CurrentTheme()
+	header := gui.Row(layout.Flush(gui.ContainerCfg{
+		Sizing: gui.FillFit,
+		VAlign: gui.VAlignMiddle,
+		Content: []gui.View{
+			gui.Text(gui.TextCfg{Text: i18n.T("settings.sync.backup_list"), TextStyle: th.TextStyleLabel, Sizing: gui.FillFit}),
+			gui.Button(gui.ButtonCfg{
+				ID:       "settings-sync-backups-refresh",
+				Variant:  gui.ButtonGhost,
+				Label:    i18n.T("common.refresh"),
+				Disabled: st.SyncBackupsLoading || st.Busy,
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					withVault(ctx.Window, d, i18n.T("password.decrypt_sync"), func() {
+						loadSyncBackups(ctx.Window, d)
+					})
+				},
+			}),
+		},
+	}))
+
+	var table gui.View
+	switch {
+	case st.SyncBackupsLoading && !st.SyncBackupsLoaded:
+		table = gui.Text(gui.TextCfg{Text: i18n.T("common.loading"), TextStyle: th.TextStyleSecondary})
+	case st.SyncBackupsErr != "":
+		table = gui.Text(gui.TextCfg{Text: st.SyncBackupsErr, TextStyle: th.TextStyleError, Mode: gui.TextModeWrap, Sizing: gui.FillFit})
+	case st.SyncBackupsLoaded && len(st.SyncBackups) == 0:
+		table = gui.Text(gui.TextCfg{Text: i18n.T("settings.sync.backup_empty"), TextStyle: th.TextStyleSecondary})
+	case len(st.SyncBackups) == 0:
+		table = gui.Text(gui.TextCfg{Text: i18n.T("settings.sync.backup_unlock_hint"), TextStyle: th.TextStyleSecondary})
+	default:
+		table = syncBackupsTable(w, d, st)
+	}
+
+	return gui.Column(layout.Flush(gui.ContainerCfg{
+		Sizing:  gui.FillFill,
+		Spacing: gui.SpacingSmall,
+		Content: []gui.View{
+			gui.Column(layout.Flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
+				Spacing: gui.SpacingTight,
+				Content: []gui.View{
+					header,
+					gui.Label(i18n.T("settings.sync.backup_list_hint"), th.TextStyleSecondary),
+				},
+			})),
+			table,
+		},
+	}))
+}
+
+var syncBackupsColMin = []float32{220, 90, 185, 72}
+
+func syncBackupsTable(w *gui.Window, d *Deps, st *State) gui.View {
+	cols := resolveColWidths(w, syncBackupsColMin, 0)
+	rows := []gui.TableRowCfg{
+		gui.TR([]gui.TableCellCfg{
+			thW(i18n.T("settings.sync.backup_col_name"), cols[0]),
+			thW(i18n.T("settings.sync.backup_col_size"), cols[1]),
+			thW(i18n.T("settings.sync.backup_col_time"), cols[2]),
+			thW(i18n.T("settings.sync.backup_col_actions"), cols[3]),
+		}),
+	}
+	for i := range st.SyncBackups {
+		b := st.SyncBackups[i]
+		name := b.Name
+		rows = append(rows, gui.TR([]gui.TableCellCfg{
+			tdW(name, cols[0]),
+			tdW(formatFileSize(b.FileSize), cols[1]),
+			tdW(formatDateTime(b.CreatedAt), cols[2]),
+			actionCellW(gui.Button(gui.ButtonCfg{
+				ID:      "settings-sync-backup-del-" + name,
+				Variant: gui.ButtonGhost,
+				Label:   i18n.T("common.delete"),
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					deleteSyncBackup(ctx.Window, d, name)
+				},
+			}), cols[3]),
+		}))
+	}
+	return settingsTable("settings-sync-backups-table", rows)
+}
+
+// loadSyncBackups fetches the backup list for the saved sync config.
+// Caller must ensure the vault is unlocked (Vault.Get succeeds) or wrap
+// with withVault first.
+func loadSyncBackups(w *gui.Window, d *Deps) {
+	st := gui.State[State](w)
+	if st.SyncBackupsLoading {
+		return
+	}
+	cfg := d.Store.Config.Sync
+	if cfg.Provider == "" {
+		cfg.Provider = sync.ProviderSelfHosted
+	}
+	if !cfg.IsConfigured() {
+		return
+	}
+	st.SyncBackupsLoading = true
+	st.SyncBackupsErr = ""
+	go func() {
+		manager, err := openSyncManager(d, cfg)
+		var list []sync.BackupInfo
+		if err == nil {
+			list, err = manager.ListBackups(0, 0)
+		}
+		w.QueueCommand(func(win *gui.Window) {
+			s := gui.State[State](win)
+			s.SyncBackupsLoading = false
+			s.SyncBackupsLoaded = true
+			if err != nil {
+				s.SyncBackupsErr = i18n.Tf("settings.sync.backup_load_failed", errText(err))
+				return
+			}
+			s.SyncBackups = list
+			s.SyncBackupsErr = ""
+		})
+	}()
+}
+
+// maybeLoadSyncBackups silently refreshes the backup list when the vault
+// is already unlocked; used on nav entry and after save.
+func maybeLoadSyncBackups(w *gui.Window, d *Deps) {
+	if _, err := d.Vault.Get(); err != nil {
+		return
+	}
+	if !d.Store.Config.Sync.IsConfigured() {
+		return
+	}
+	loadSyncBackups(w, d)
+}
+
+func deleteSyncBackup(w *gui.Window, d *Deps, name string) {
+	dangerConfirmDialog(w,
+		i18n.T("settings.sync.confirm_delete_title"),
+		i18n.T("settings.sync.confirm_delete_body"),
+		name,
+		func(win *gui.Window) { runDeleteSyncBackup(win, d, name) })
+}
+
+// runDeleteSyncBackup performs the delete after the custom confirm dialog.
+func runDeleteSyncBackup(w *gui.Window, d *Deps, name string) {
+	withVault(w, d, i18n.T("password.decrypt_sync"), func() {
+		cfg := d.Store.Config.Sync
+		if cfg.Provider == "" {
+			cfg.Provider = sync.ProviderSelfHosted
+		}
+		go func() {
+			manager, err := openSyncManager(d, cfg)
+			if err == nil {
+				err = manager.DeleteBackup(name)
+			}
+			w.QueueCommand(func(w2 *gui.Window) {
+				if err != nil {
+					toastErr(w2, usererr.Coded("settings.sync.delete_backup_failed", "%s", errText(err)))
+					return
+				}
+				toastOK(w2, i18n.T("settings.sync.delete_backup_success"))
+				loadSyncBackups(w2, d)
+			})
+		}()
+	})
 }
 
 func testSyncConnection(w *gui.Window, d *Deps) {
@@ -150,22 +334,31 @@ func syncNeedsDecrypt(cfg sync.SyncConfig) bool {
 }
 
 func probeSync(d *Deps, draft sync.SyncConfig) error {
-	plain, err := resolveSyncPlain(d, draft)
+	manager, err := openSyncManager(d, draft)
 	if err != nil {
 		return err
+	}
+	return manager.HealthCheck()
+}
+
+// openSyncManager decrypts provider secrets via the vault, then opens a store.
+func openSyncManager(d *Deps, cfg sync.SyncConfig) (*sync.SyncManager, error) {
+	plain, err := resolveSyncPlain(d, cfg)
+	if err != nil {
+		return nil, err
 	}
 	st, err := sync.OpenStore(&plain)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return sync.NewSyncManager(st).HealthCheck()
+	return sync.NewSyncManager(st), nil
 }
 
 func resolveSyncPlain(d *Deps, cfg sync.SyncConfig) (sync.SyncConfig, error) {
 	out := cfg
 	decrypt := func(enc string) (string, error) {
 		pw, err := d.Vault.Get()
-		if err != nil {
+		if err != nil || strings.TrimSpace(pw) == "" {
 			return "", usererr.Coded("error.password_not_entered", "Password not entered")
 		}
 		return secret.Decrypt(pw, enc)
@@ -199,11 +392,68 @@ func resolveSyncPlain(d *Deps, cfg sync.SyncConfig) (sync.SyncConfig, error) {
 	return out, nil
 }
 
+// validateSyncConfig enforces required fields per provider before saving.
+// Secret fields accept either fresh plaintext or a previously stored
+// ciphertext (same rule as SyncConfig.IsConfigured).
+func validateSyncConfig(cfg sync.SyncConfig) error {
+	hasSecret := func(plain, enc string) bool {
+		return strings.TrimSpace(plain) != "" || strings.TrimSpace(enc) != ""
+	}
+	switch cfg.Provider {
+	case sync.ProviderSelfHosted:
+		sh := cfg.SelfHosted
+		if strings.TrimSpace(sh.ServerURL) == "" {
+			return usererr.Coded("settings.sync.server_url_required", "Server URL is required")
+		}
+		if strings.TrimSpace(sh.SyncID) == "" {
+			return usererr.Coded("settings.sync.sync_id_required", "Backup ID is required")
+		}
+		if !hasSecret(sh.UserKey, sh.UserKeyEncrypted) {
+			return usererr.Coded("settings.sync.user_key_required", "User key is required")
+		}
+	case sync.ProviderWebDAV:
+		wv := cfg.WebDAV
+		if strings.TrimSpace(wv.URL) == "" {
+			return usererr.Coded("settings.sync.webdav_url_required", "WebDAV URL is required")
+		}
+		if strings.TrimSpace(wv.Username) == "" {
+			return usererr.Coded("settings.sync.webdav_username_required", "Username is required")
+		}
+		if strings.TrimSpace(wv.RemotePath) == "" {
+			return usererr.Coded("settings.sync.webdav_remote_path_required", "Remote path is required")
+		}
+		if !hasSecret(wv.Password, wv.PasswordEncrypted) {
+			return usererr.Coded("settings.sync.webdav_password_required", "Password is required")
+		}
+	case sync.ProviderS3:
+		s3 := cfg.S3
+		if strings.TrimSpace(s3.Endpoint) == "" {
+			return usererr.Coded("settings.sync.s3_endpoint_required", "Endpoint is required")
+		}
+		if strings.TrimSpace(s3.Bucket) == "" {
+			return usererr.Coded("settings.sync.s3_bucket_required", "Bucket is required")
+		}
+		if strings.TrimSpace(s3.AccessKey) == "" {
+			return usererr.Coded("settings.sync.s3_access_key_required", "Access Key is required")
+		}
+		if !hasSecret(s3.SecretKey, s3.SecretKeyEncrypted) {
+			return usererr.Coded("settings.sync.s3_secret_key_required", "Secret Key is required")
+		}
+	default:
+		return usererr.Coded("settings.sync.provider_required", "Please select a storage provider")
+	}
+	return nil
+}
+
 func saveSync(w *gui.Window, d *Deps) {
 	st := gui.State[State](w)
 	incoming := st.Sync
 	if incoming.Provider == "" {
 		incoming.Provider = sync.ProviderSelfHosted
+	}
+	if err := validateSyncConfig(incoming); err != nil {
+		toastErr(w, err)
+		return
 	}
 	needsSecret := false
 	switch incoming.Provider {
@@ -236,6 +486,7 @@ func saveSync(w *gui.Window, d *Deps) {
 				cfg.S3.SecretKey = ""
 				s.Sync = cfg
 				toastOK(win, i18n.T("settings.sync.save_success"))
+				maybeLoadSyncBackups(win, d)
 			})
 		}()
 	}
