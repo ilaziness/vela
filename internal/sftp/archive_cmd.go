@@ -133,22 +133,62 @@ func listTarCommand(f archiveFormat, archivePath string) string {
 	return fmt.Sprintf("TAR_OPTIONS=--quoting-style=escape tar t%sf %s", tarCompressFlag(f), shellQuote(archivePath))
 }
 
-// extractTarCommand builds the remote extraction invocation. strip == 1 drops
-// one leading path component from every member (mirrors flattenEntries on the
-// streaming zip path) so the archive's common root folder is not recreated;
-// note that tar counts a leading "./" as that first component. With overwrite
-// false, -k turns any member target that appeared after the conflict scan into
-// an error instead of silently replacing it (GNU and busybox tar both support
-// -k).
-func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int, overwrite bool) string {
+// extractTarCommand builds the remote extraction invocation for the overwrite
+// path. strip == 1 drops one leading path component from every member (mirrors
+// flattenEntries on the streaming zip path) so the archive's common root folder
+// is not recreated; note that tar counts a leading "./" as that first component.
+// tar runs with its normal last-member-wins semantics: an archive updated with
+// tar -r stores several versions of one pathname and must restore the newest
+// one. The no-overwrite path uses extractTarNoOverwriteCommand instead — a
+// plain tar guard such as -k would also reject the later version of a repeated
+// member because the earlier one already created the path.
+func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int) string {
 	cmd := fmt.Sprintf("tar x%sf %s -C %s", tarCompressFlag(f), shellQuote(archivePath), shellQuote(destDir))
 	if strip == 1 {
 		cmd += " --strip-components=1"
 	}
-	if !overwrite {
-		cmd += " -k"
-	}
 	return cmd
+}
+
+// extractTarNoOverwriteCommand builds the remote extraction for the
+// no-overwrite path, separating archive materialization from destination
+// conflict protection: the archive is extracted into an operation-owned
+// staging directory first with normal last-member-wins semantics (repeated
+// members — e.g. from tar -r — keep the newest content), and only the final
+// extracted entries are promoted into destDir under per-entry no-overwrite
+// guards:
+//   - a target that exists (including as a symlink) fails the operation and is
+//     left untouched;
+//   - a flattened name already consumed by an earlier promoted directory is
+//     skipped (its content arrived with the directory);
+//   - missing parent directories are created as real directories, refusing to
+//     write through a symlink in the parent chain (extractParentsSafe parity).
+//
+// The staging tree is removed on every exit path. names are the flattened
+// entry names (see flattenEntries) in listing order.
+func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, strip int, names []string) string {
+	staging := stagingRemotePath(destDir)
+	qnames := make([]string, 0, len(names))
+	for _, n := range names {
+		qnames = append(qnames, shellQuote(n))
+	}
+	tarPart := fmt.Sprintf("tar x%sf %s -C \"$st\"", tarCompressFlag(f), shellQuote(archivePath))
+	if strip == 1 {
+		tarPart += " --strip-components=1"
+	}
+	promote := "rc=0; for n in " + strings.Join(qnames, " ") + "; do s=\"$st/$n\"; t=\"$d/$n\"; " +
+		"[ -e \"$s\" ] || [ -L \"$s\" ] || continue; " +
+		"if [ -d \"$s\" ] && [ ! -L \"$s\" ] && [ -d \"$t\" ] && [ ! -L \"$t\" ]; then continue; fi; " +
+		"if [ -e \"$t\" ] || [ -L \"$t\" ]; then rc=1; break; fi; " +
+		"q=\"$d\"; r=\"$n\"; while [ \"$r\" != \"${r%/*}\" ]; do c=\"${r%%/*}\"; r=\"${r#*/}\"; q=\"$q/$c\"; " +
+		"if [ -L \"$q\" ]; then rc=1; break 2; fi; " +
+		"if [ ! -d \"$q\" ] && ! mkdir -- \"$q\"; then rc=1; break 2; fi; done; " +
+		"if [ \"$rc\" -eq 0 ] && ! mv -f -- \"$s\" \"$t\"; then rc=1; break; fi; done; " +
+		"rm -rf -- \"$st\"; exit \"$rc\"; }"
+	return "st=" + shellQuote(staging) + " d=" + shellQuote(destDir) +
+		" && rm -rf -- \"$st\" && mkdir -- \"$st\" && " + tarPart +
+		" && { " + promote +
+		" || { rm -rf -- \"$st\"; false; }"
 }
 
 // extractSingleCommand builds the decompression of a bare compressed stream
@@ -158,7 +198,10 @@ func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int, 
 // final rename replaces a symlink entry at target instead of writing through
 // it (rm -rf unlinks the link; the guarded branch refuses to touch an existing
 // target). With overwrite false, a target that appears after the conflict scan
-// is left untouched and the operation fails.
+// is left untouched and the operation fails. When overwriting an existing
+// regular file, the target's permission bits are preserved: the staged file
+// arrives with the shell's umask default (e.g. 0644) and must never broaden a
+// private target (e.g. 0600).
 func extractSingleCommand(f archiveFormat, archivePath, staging, target string, overwrite bool) string {
 	tool := "gzip"
 	switch f {
@@ -173,7 +216,12 @@ func extractSingleCommand(f archiveFormat, archivePath, staging, target string, 
 		" || { rm -f -- " + shellQuote(staging) + "; false; }"
 	qt, qst := shellQuote(target), shellQuote(staging)
 	if overwrite {
-		return head + fmt.Sprintf(" && rm -rf -- %s && mv -f -- %s %s", qt, qst, qt)
+		// Keep the replaced file's mode (fail closed when it cannot be read);
+		// a symlink at target is replaced, never written through, so no mode
+		// is read from it.
+		preserve := fmt.Sprintf("if [ -f %s ] && [ ! -L %s ]; then m=$(stat -c %%a -- %s) && chmod -- \"$m\" %s || { rm -f -- %s; false; }; fi",
+			qt, qt, qt, qst, qst)
+		return head + " && " + preserve + fmt.Sprintf(" && rm -rf -- %s && mv -f -- %s %s", qt, qst, qt)
 	}
 	return head + fmt.Sprintf(" && if [ -e %s ] || [ -L %s ]; then rm -f -- %s; false; else mv -f -- %s %s; fi",
 		qt, qt, qst, qst, qt)

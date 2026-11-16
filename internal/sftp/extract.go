@@ -116,9 +116,12 @@ func flattenEntries(entries []archiveEntry) (flattened []archiveEntry, stripped 
 	}
 	// Only strip when the common root has children, so a lone "file.txt"
 	// entry is never mangled. A single nested entry ("src/a.txt") does have a
-	// root to strip — but a lone top-level entry without a "/" has none.
-	if len(entries) == 1 && !entries[0].isDir && !strings.Contains(entries[0].name, "/") {
-		return entries, false
+	// root to strip — but a plain file name shared by repeated members (e.g.
+	// an archive updated with tar -r) is not a folder to drop.
+	for _, e := range entries {
+		if e.name == root && !e.isDir {
+			return entries, false
+		}
 	}
 	out := make([]archiveEntry, 0, len(entries))
 	for _, e := range entries {
@@ -230,7 +233,11 @@ func (sft *Manager) ExtractRemoteArchive(sessionID string, archivePath, destDir 
 		case format == formatZip:
 			runErr = sft.extractEntries(client, flat, destDir, overwrite, tracker)
 		case isTarFamily(format):
-			runErr = sft.extractTarRemote(tracker.Context(), sessionID, format, archivePath, destDir, stripped, overwrite)
+			names := make([]string, 0, len(flat))
+			for _, e := range flat {
+				names = append(names, e.name)
+			}
+			runErr = sft.extractTarRemote(tracker.Context(), sessionID, format, archivePath, destDir, stripped, overwrite, names)
 		case isSingleStream(format):
 			runErr = sft.extractSingleRemote(tracker.Context(), sessionID, format, archivePath, destDir, flat[0].name, overwrite)
 		}
@@ -342,10 +349,25 @@ func (sft *Manager) extractFile(client *sftp.Client, zf *zip.File, target string
 		sft.removeStaging(client, staging)
 		return closeErr
 	}
-	// Apply the archived permission bits; the server default would otherwise
-	// broaden private entries (e.g. 0600 becomes 0644 under umask 022).
-	// Entries without any recorded mode keep the server default.
-	if perm := zf.FileInfo().Mode().Perm(); perm != 0 {
+	// Apply the recorded permission bits. An entry without a recorded mode —
+	// or a non-Unix zip entry, where the format only carries a conventional
+	// default — must never broaden a private file it replaces (e.g. 0600
+	// becomes 0644 under umask 022): replacing an existing regular file keeps
+	// that file's mode, fresh targets keep the server default.
+	perm := zf.FileInfo().Mode().Perm()
+	// archive/zip keeps its creator constants unexported; the high byte of
+	// CreatorVersion is 3 for Unix and 19 for macOS — the only creators whose
+	// entries carry real Unix mode bits (others only know a conventional
+	// default such as 0666).
+	creator := zf.CreatorVersion >> 8
+	unixMode := creator == 3 || creator == 19
+	if !unixMode || perm == 0 {
+		perm = 0
+		if st, statErr := client.Lstat(target); statErr == nil && st.Mode().IsRegular() {
+			perm = st.Mode().Perm()
+		}
+	}
+	if perm != 0 {
 		if chErr := client.Chmod(staging, perm); chErr != nil {
 			sft.logger.Warn("extract chmod file failed", zap.String("target", target), zap.Error(chErr))
 		}

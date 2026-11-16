@@ -51,21 +51,40 @@ type pasteJob struct {
 	size int64
 }
 
-// pasteDestInvalid reports dst when a paste would drop an entry onto itself,
+// pasteDestInvalid reports whether a paste would drop an entry onto itself,
 // inside its own subtree (dir into own subdir), or copy a parent entry onto one
 // of its own descendants (dst under src — the walk would chase the output).
-// Both paths are canonicalized lexically first (".", repeated and trailing
-// separators) so equivalent spellings such as /tmp/./a and /tmp/a are
-// recognized as the same entry — a cut of one onto the other must never reach
-// the copy-and-delete fallback.
-func pasteDestInvalid(src, destDir, destName string) (string, bool) {
-	dst := joinRemotePath(destDir, destName)
+// src and dst must already be server-canonical paths (see canonicalRemotePath):
+// POSIX resolves ".." after following symlinks, so lexical cleaning alone can
+// name a different file — the identity and ancestry checks must use the paths
+// the server actually operates on. The lexical Clean below only normalizes
+// spelling noise (".", repeated separators) for robustness. The dst-under-src
+// check is limited to real directory sources: recreating a symlink leaf under
+// its target's tree is safe (the link itself is moved/copied, never its
+// resolved contents).
+func pasteDestInvalid(src, dst string, srcIsRealDir bool) bool {
 	s := path.Clean(src)
 	d := path.Clean(dst)
-	if d == s || strings.HasPrefix(s, d+"/") || strings.HasPrefix(d, s+"/") {
-		return dst, true
+	if d == s || strings.HasPrefix(s, d+"/") {
+		return true
 	}
-	return dst, false
+	return srcIsRealDir && strings.HasPrefix(d, s+"/")
+}
+
+// canonicalRemotePath resolves p to the server-canonical path of the entry it
+// names. The server follows symlinks and resolves ".." after them (POSIX),
+// which lexical cleaning cannot do. Falls back to canonicalizing the parent
+// and re-attaching the base when the server refuses to resolve the lookup
+// (some servers reject a missing leaf), and to lexical cleaning as the last
+// resort.
+func (sft *Manager) canonicalRemotePath(client *sftp.Client, p string) string {
+	if rp, err := client.RealPath(p); err == nil && rp != "" {
+		return path.Clean(rp)
+	}
+	if rp, err := client.RealPath(path.Dir(p)); err == nil && rp != "" {
+		return path.Join(rp, path.Base(p))
+	}
+	return path.Clean(p)
 }
 
 // PasteRemotePaths copies srcPaths into destDir within one session, one tracker
@@ -89,18 +108,30 @@ func (sft *Manager) PasteRemotePaths(sessionID string, srcPaths []string, destNa
 	}
 	jobs := make([]pasteJob, 0, len(srcPaths))
 	for i, src := range srcPaths {
+		// Keep the original spelling for every remote operation: POSIX
+		// resolves ".." after following symlinks, so a lexical path.Clean
+		// could name a different file than the server moves or copies (a cut
+		// of /srv/link/../config must act on the server-resolved entry, not
+		// on /srv/config). Only trailing separators are stripped so entry
+		// semantics hold.
+		src = strings.TrimRight(src, "/")
 		if src == "" {
 			return usererr.Coded("sftp.invalid_paste", "Invalid paste parameters")
 		}
-		// Canonical spelling: "a/./b", "a//b" and "a/b/" name the same remote
-		// entry; every guard and the cut cleanup compare canonical paths.
-		src = path.Clean(src)
-		name := path.Base(src)
+		info, statErr := client.Lstat(src)
+		if statErr != nil {
+			return usererr.Wrap(statErr, "sftp.remote_path", "Remote path %s: %s", src)
+		}
+		// The entry name and the identity/ancestry checks use the
+		// server-resolved canonical paths; a cut of one spelling onto another
+		// naming the same entry must never reach the copy-and-delete path.
+		srcCanon := sft.canonicalRemotePath(client, src)
+		name := path.Base(srcCanon)
 		if i < len(destNames) && destNames[i] != "" {
 			name = destNames[i]
 		}
-		dst, invalid := pasteDestInvalid(src, destDir, name)
-		if invalid {
+		dst := joinRemotePath(destDir, name)
+		if pasteDestInvalid(srcCanon, sft.canonicalRemotePath(client, dst), isRealDir(info)) {
 			return usererr.Coded("sftp.paste_into_self", "Cannot paste %s into itself", src)
 		}
 		// Synchronous conflict guard: without overwrite an existing destination
@@ -113,12 +144,8 @@ func (sft *Manager) PasteRemotePaths(sessionID string, srcPaths []string, destNa
 				return statErr
 			}
 		}
-		info, statErr := client.Stat(src)
-		if statErr != nil {
-			return usererr.Wrap(statErr, "sftp.remote_path", "Remote path %s: %s", src)
-		}
 		total := info.Size()
-		if info.IsDir() {
+		if isRealDir(info) {
 			total, err = sft.calcRemoteDirSize(sessionID, src)
 			if err != nil {
 				return usererr.Wrap(err, "sftp.remote_path", "Remote path %s: %s", src)
@@ -182,7 +209,9 @@ func (sft *Manager) pasteTree(sessionID string, job pasteJob, overwrite bool, tr
 	if err != nil {
 		return err
 	}
-	info, err := client.Stat(job.src)
+	// Lstat: a symlink source is a leaf entry here (see the dispatch below),
+	// not the tree or file its target happens to be.
+	info, err := client.Lstat(job.src)
 	if err != nil {
 		return err
 	}
@@ -193,6 +222,12 @@ func (sft *Manager) pasteTree(sessionID string, job pasteJob, overwrite bool, tr
 	}
 	if dstExists && !overwrite {
 		return usererr.Coded("sftp.path_exists", "%s already exists", job.dst)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		// Recreate the link itself (verbatim link text) — never the content
+		// it resolves to: directory links and dangling links survive as
+		// links, matching the cp -a / mv command path.
+		return sft.copyRemoteLink(client, job.src, job.dst)
 	}
 	if !info.IsDir() {
 		return sft.copyRemoteFile(client, job.src, job.dst, info.Mode().Perm(), tracker)
@@ -280,14 +315,25 @@ func (sft *Manager) copyRemoteDir(client *sftp.Client, srcDir, dstDir string, tr
 		if err := client.MkdirAll(dstDir); err != nil {
 			return err
 		}
+		srcInfo, srcStatErr := client.Lstat(srcDir)
+		if srcStatErr == nil {
+			// Restrict the fresh directory while it is being populated: a
+			// private source mode (e.g. 0700) must not sit at the server
+			// default (0755 under umask 022) during the copy. The owner keeps
+			// write access so children can be created; group/other never see
+			// more than the source allows.
+			if err := client.Chmod(dstDir, dirPopulateMode(srcInfo.Mode().Perm())); err != nil {
+				sft.logger.Warn("paste chmod dir failed", zap.String("dst", dstDir), zap.Error(err))
+			}
+		}
 		// A read-only source mode (e.g. 0555) must not be applied before the
 		// children are copied — the fresh directory needs owner write
-		// permission while it is being populated. The source mode is applied
-		// after the copy completed. Pre-existing merge destinations keep
-		// their own mode (nothing is chmod'ed for them).
+		// permission while it is being populated. The exact source mode is
+		// applied after the copy completed. Pre-existing merge destinations
+		// keep their own mode (nothing is chmod'ed for them).
 		defer func() {
-			if info, statErr := client.Stat(srcDir); statErr == nil {
-				if err := client.Chmod(dstDir, info.Mode().Perm()); err != nil {
+			if srcStatErr == nil {
+				if err := client.Chmod(dstDir, srcInfo.Mode().Perm()); err != nil {
 					sft.logger.Warn("paste chmod dir failed", zap.String("dst", dstDir), zap.Error(err))
 				}
 			}
@@ -302,6 +348,14 @@ func (sft *Manager) copyRemoteDir(client *sftp.Client, srcDir, dstDir string, tr
 	for _, entry := range entries {
 		src := joinRemotePath(srcDir, entry.Name())
 		dst := joinRemotePath(dstDir, entry.Name())
+		if entry.Mode()&os.ModeSymlink != 0 {
+			// File, directory and dangling symlinks are recreated as links.
+			// copyRemoteFile would open and follow their targets instead.
+			if err := sft.copyRemoteLink(client, src, dst); err != nil {
+				return err
+			}
+			continue
+		}
 		if entry.IsDir() {
 			if lst, lstErr := client.Lstat(dst); lstErr == nil && isRealDir(lst) {
 				// Merge into the existing real directory, keep its mode.
@@ -371,4 +425,55 @@ func (sft *Manager) copyRemoteFile(client *sftp.Client, src, dst string, perm os
 		return nil
 	}
 	return sft.replaceStagedFile(client, staging, dst)
+}
+
+// copyRemoteLink recreates one symlink entry at dst without following it: the
+// link text is copied verbatim (ReadLink -> Symlink), so relative links,
+// directory links and dangling links survive a merge unchanged — unlike
+// copyRemoteFile, which would open the link's target. The link is staged at a
+// unique sibling and moved onto dst afterwards; a directory or symlink at dst
+// is removed (a symlink is unlinked, never followed) only after the
+// replacement link is complete, so no failed step destroys an overwritten
+// original and nothing is ever written through a link.
+func (sft *Manager) copyRemoteLink(client *sftp.Client, src, dst string) error {
+	target, err := client.ReadLink(src)
+	if err != nil {
+		return err
+	}
+	staging := stagingRemotePath(dst)
+	if staging == dst {
+		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
+	}
+	// Symlink creation refuses a pre-existing staging name (EEXIST) and never
+	// follows a link planted at it.
+	if err := client.Symlink(target, staging); err != nil {
+		return err
+	}
+	if st, lstErr := client.Lstat(dst); lstErr == nil && !st.Mode().IsRegular() {
+		// A directory tree or a symlink at dst: never move into a symlinked
+		// directory and never write through a link. The old entry is removed
+		// only now, with the replacement link complete at staging.
+		if rmErr := sft.removeRemoteEntry(client, dst); rmErr != nil {
+			sft.removeStaging(client, staging)
+			return rmErr
+		}
+		if err := client.Rename(staging, dst); err != nil {
+			sft.logger.Error("paste rename failed after removing original",
+				zap.String("staging", staging), zap.String("dst", dst), zap.Error(err))
+			return usererr.Wrap(err, "sftp.rename_original_removed",
+				"Original %s was removed but renaming %s into place failed; new contents remain at %s: %s",
+				dst, staging, staging)
+		}
+		return nil
+	}
+	return sft.replaceStagedFile(client, staging, dst)
+}
+
+// dirPopulateMode returns the mode used while a fresh destination directory is
+// being populated: the source permission bits plus owner rwx. Group/other
+// never see more than the source allows (a private 0700 source stays private
+// during the copy) and the owner keeps write access so children can be created
+// even for read-only sources such as 0555.
+func dirPopulateMode(perm os.FileMode) os.FileMode {
+	return perm | 0o700
 }

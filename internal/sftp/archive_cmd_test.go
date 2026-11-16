@@ -123,14 +123,31 @@ func TestListExtractCommands(t *testing.T) {
 	if got, want := listTarCommand(formatTar, "/a.tar"), "TAR_OPTIONS=--quoting-style=escape tar tf '/a.tar'"; got != want {
 		t.Errorf("listTarCommand plain = %q, want %q", got, want)
 	}
-	if got, want := extractTarCommand(formatTarBz2, "/a.tar.bz2", "/dest dir", 1, true), "tar xjf '/a.tar.bz2' -C '/dest dir' --strip-components=1"; got != want {
+	if got, want := extractTarCommand(formatTarBz2, "/a.tar.bz2", "/dest dir", 1), "tar xjf '/a.tar.bz2' -C '/dest dir' --strip-components=1"; got != want {
 		t.Errorf("extractTarCommand bz2 strip = %q, want %q", got, want)
 	}
-	if got, want := extractTarCommand(formatTarXz, "/a.tar.xz", "/d", 0, false), "tar xJf '/a.tar.xz' -C '/d' -k"; got != want {
-		t.Errorf("extractTarCommand xz keep = %q, want %q", got, want)
+	if got, want := extractTarCommand(formatTarXz, "/a.tar.xz", "/d", 0), "tar xJf '/a.tar.xz' -C '/d'"; got != want {
+		t.Errorf("extractTarCommand xz plain = %q, want %q", got, want)
+	}
+	// The no-overwrite path stages the archive in an operation-owned staging
+	// directory and promotes the flattened names under per-entry guards.
+	noOverwrite := extractTarNoOverwriteCommand(formatTarXz, "/a.tar.xz", "/d", 0, []string{"a.txt", "src/b.txt"})
+	for _, want := range []string{
+		"tar xJf '/a.tar.xz' -C \"$st\"",
+		`for n in 'a.txt' 'src/b.txt'`,
+		`[ -e "$s" ] || [ -L "$s" ] || continue`,
+		`if [ -e "$t" ] || [ -L "$t" ]; then rc=1; break; fi`,
+		`if [ -L "$q" ]; then rc=1; break 2; fi`,
+		`mv -f -- "$s" "$t"`,
+		`rm -rf -- "$st"; exit "$rc"`,
+		`|| { rm -rf -- "$st"; false; }`,
+	} {
+		if !strings.Contains(noOverwrite, want) {
+			t.Errorf("extractTarNoOverwriteCommand missing %q in %q", want, noOverwrite)
+		}
 	}
 	const staging = "/d/.f.txt.vela-edit-1a2b3c4d"
-	gzOverwrite := `gzip -dc '/a/f.txt.gz' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && rm -rf -- '/d/f.txt' && mv -f -- '` + staging + `' '/d/f.txt'`
+	gzOverwrite := `gzip -dc '/a/f.txt.gz' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && if [ -f '/d/f.txt' ] && [ ! -L '/d/f.txt' ]; then m=$(stat -c %a -- '/d/f.txt') && chmod -- "$m" '` + staging + `' || { rm -f -- '` + staging + `'; false; }; fi && rm -rf -- '/d/f.txt' && mv -f -- '` + staging + `' '/d/f.txt'`
 	if got, want := extractSingleCommand(formatGz, "/a/f.txt.gz", staging, "/d/f.txt", true), gzOverwrite; got != want {
 		t.Errorf("extractSingleCommand gz overwrite = %q, want %q", got, want)
 	}
@@ -138,7 +155,7 @@ func TestListExtractCommands(t *testing.T) {
 	if got, want := extractSingleCommand(formatBz2, "/a/f.txt.bz2", staging, "/d/f.txt", false), bz2Keep; got != want {
 		t.Errorf("extractSingleCommand bz2 keep = %q, want %q", got, want)
 	}
-	xzOverwrite := `xz -dc '/a/f.txt.xz' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && rm -rf -- '/d/f.txt' && mv -f -- '` + staging + `' '/d/f.txt'`
+	xzOverwrite := `xz -dc '/a/f.txt.xz' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && if [ -f '/d/f.txt' ] && [ ! -L '/d/f.txt' ]; then m=$(stat -c %a -- '/d/f.txt') && chmod -- "$m" '` + staging + `' || { rm -f -- '` + staging + `'; false; }; fi && rm -rf -- '/d/f.txt' && mv -f -- '` + staging + `' '/d/f.txt'`
 	if got, want := extractSingleCommand(formatXz, "/a/f.txt.xz", staging, "/d/f.txt", true), xzOverwrite; got != want {
 		t.Errorf("extractSingleCommand xz overwrite = %q, want %q", got, want)
 	}
@@ -280,6 +297,21 @@ func TestFlattenEntries(t *testing.T) {
 	flat, stripped = flattenEntries(nested)
 	if !stripped || len(flat) != 1 || flat[0].name != "a.txt" {
 		t.Fatalf("single nested entry must strip: stripped=%v flat=%v", stripped, flat)
+	}
+
+	// Repeated top-level members share a plain file name (an archive updated
+	// with tar -r): nothing to strip, every version stays listed.
+	repeatTop := []archiveEntry{{name: "a.txt"}, {name: "a.txt"}}
+	flat, stripped = flattenEntries(repeatTop)
+	if stripped || len(flat) != 2 {
+		t.Fatalf("repeated top-level file must not strip: stripped=%v flat=%v", stripped, flat)
+	}
+
+	// Repeated members under one common root strip and keep every version.
+	repeat := []archiveEntry{{name: "root/a.txt"}, {name: "root/a.txt"}}
+	flat, stripped = flattenEntries(repeat)
+	if !stripped || len(flat) != 2 || flat[0].name != "a.txt" || flat[1].name != "a.txt" {
+		t.Fatalf("repeated nested entries must strip with duplicates: stripped=%v flat=%v", stripped, flat)
 	}
 
 	// A dot-rooted tree flattens like a plain one ("./src/a.txt" -> "src/a.txt"

@@ -105,7 +105,9 @@ func (sft *Manager) pasteRemoteCommand(ctx context.Context, sessionID string, jo
 	if err != nil {
 		return err
 	}
-	srcInfo, err := client.Stat(job.src)
+	// Lstat: a symlink source is a leaf entry (cp -a / mv recreate the link
+	// itself), not the tree or file its target happens to be.
+	srcInfo, err := client.Lstat(job.src)
 	if err != nil {
 		return usererr.Wrap(err, "sftp.remote_path", "Remote path %s: %s", job.src)
 	}

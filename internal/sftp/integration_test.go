@@ -1127,8 +1127,9 @@ func TestIntegrationPasteMergeModeSemantics(t *testing.T) {
 }
 
 // TestIntegrationExtractTarNoOverwriteKeepsExisting: with overwrite false the
-// remote tar keeps existing targets (-k) instead of silently replacing a file
-// that appeared after the conflict scan; the original survives the failed run.
+// remote tar keeps existing targets (per-entry promotion guards) instead of
+// silently replacing a file that appeared after the conflict scan; the
+// original survives the failed run.
 func TestIntegrationExtractTarNoOverwriteKeepsExisting(t *testing.T) {
 	mgr, client, col := newTestManager(t)
 	root := "/root/sftp-test"
@@ -1140,13 +1141,13 @@ func TestIntegrationExtractTarNoOverwriteKeepsExisting(t *testing.T) {
 	uploadBytes(t, client, arc, buildTarGz(t, map[string]string{"a.txt": "new\n"}))
 	writeRemote(t, client, path.Join(work, "ex", "a.txt"), "old\n")
 
-	err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, false)
+	err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, false, []string{"a.txt"})
 	if usererr.CodeOf(err) != "sftp.remote_command_failed" {
 		t.Fatalf("no-overwrite extract error = %v, want remote_command_failed", err)
 	}
 	waitRemoteContent(t, client, path.Join(work, "ex", "a.txt"), "old\n", "existing target preserved")
 
-	if err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, true); err != nil {
+	if err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, true, []string{"a.txt"}); err != nil {
 		t.Fatalf("overwrite extract: %v", err)
 	}
 	waitRemoteContent(t, client, path.Join(work, "ex", "a.txt"), "new\n", "overwrite extract replaced")
