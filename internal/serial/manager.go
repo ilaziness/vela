@@ -17,7 +17,6 @@ type Manager struct {
 	logger              *zap.Logger
 	sessions            sync.Map // id -> *Session
 	devices             sync.Map // device -> session id
-	onClose             func(sessionID string)
 	onSessionLogStopped func(sessionID, reason string)
 }
 
@@ -26,10 +25,6 @@ func NewManager(logger *zap.Logger) *Manager {
 		logger = zap.NewNop()
 	}
 	return &Manager{logger: logger}
-}
-
-func (m *Manager) SetOnClose(fn func(sessionID string)) {
-	m.onClose = fn
 }
 
 func (m *Manager) SetOnSessionLogStopped(fn func(sessionID, reason string)) {
@@ -150,14 +145,14 @@ func (m *Manager) CloseSession(id string) error {
 	if !ok {
 		return nil
 	}
-	_ = v.(*Session).closePort(false)
+	_ = v.(*Session).closePort()
 	m.sessions.Delete(id)
 	return nil
 }
 
 func (m *Manager) CloseAll() {
 	m.sessions.Range(func(key, value any) bool {
-		_ = value.(*Session).closePort(false)
+		_ = value.(*Session).closePort()
 		m.sessions.Delete(key)
 		return true
 	})
@@ -169,12 +164,6 @@ func (m *Manager) releaseDevice(device, id string) {
 	}
 	if v, ok := m.devices.Load(device); ok && fmt.Sprint(v) == id {
 		m.devices.Delete(device)
-	}
-}
-
-func (m *Manager) notifyClosed(id string) {
-	if m.onClose != nil {
-		m.onClose(id)
 	}
 }
 

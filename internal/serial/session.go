@@ -72,10 +72,10 @@ func (s *Session) Start(_, _ int) error {
 func (s *Session) Resize(_, _ int) error { return nil }
 
 func (s *Session) Close() error {
-	return s.closePort(true)
+	return s.closePort()
 }
 
-func (s *Session) closePort(notify bool) error {
+func (s *Session) closePort() error {
 	s.closeMu.Lock()
 	if s.isClosed {
 		s.closeMu.Unlock()
@@ -109,9 +109,6 @@ func (s *Session) closePort(notify bool) error {
 		s.outputWg.Wait()
 		s.closeOutputChan()
 	}()
-	if notify && s.manager != nil {
-		s.manager.notifyClosed(id)
-	}
 	return nil
 }
 
@@ -166,7 +163,7 @@ func (s *Session) readLoop() {
 				s.manager.logger.Error("serial read failed",
 					zap.String("id", s.id), zap.Error(readErr))
 			}
-			_ = s.closePort(true)
+			_ = s.closePort()
 			return
 		}
 	}

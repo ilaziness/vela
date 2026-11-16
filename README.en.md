@@ -27,7 +27,7 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 - Local serial consoles in the same terminal tabs as SSH
 - Jump hosts, HTTP / SOCKS proxies, and local / remote / dynamic port forwarding
 - Generate keys in-app; protect secrets with a master password
-- Keepalive and auto-reconnect; confirm and manage host keys
+- Keepalive and manual reconnect; confirm and manage host keys
 - Import and export OpenSSH config
 
 **Terminal**

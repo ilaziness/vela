@@ -68,11 +68,11 @@ const (
 	maxTerminalScrollback     = 100000
 )
 
-// SSHConfig holds global SSH client options (ServerAliveInterval-style keepalive, dial timeout, auto-reconnect, dial proxy).
+// SSHConfig holds global SSH client options (keepalive interval/count, dial timeout, dial proxy).
 type SSHConfig struct {
 	ServerAliveInterval int    `toml:"server_alive_interval" json:"serverAliveInterval"`
+	ServerAliveCountMax int    `toml:"server_alive_count_max" json:"serverAliveCountMax"`
 	DialTimeoutSec      int    `toml:"dial_timeout_sec" json:"dialTimeoutSec"`
-	AutoReconnect       bool   `toml:"auto_reconnect" json:"autoReconnect"`
 	ProxyType           string `toml:"proxy_type" json:"proxyType"`
 	ProxyHost           string `toml:"proxy_host" json:"proxyHost"`
 	ProxyPort           int    `toml:"proxy_port" json:"proxyPort"`
@@ -112,8 +112,8 @@ func Default() *Config {
 		},
 		SSH: SSHConfig{
 			ServerAliveInterval: 30,
+			ServerAliveCountMax: 3,
 			DialTimeoutSec:      30,
-			AutoReconnect:       true,
 		},
 	}
 }
@@ -191,6 +191,9 @@ func (c *SSHConfig) Normalize() {
 	}
 	if c.DialTimeoutSec <= 0 {
 		c.DialTimeoutSec = def.DialTimeoutSec
+	}
+	if c.ServerAliveCountMax <= 0 {
+		c.ServerAliveCountMax = def.ServerAliveCountMax
 	}
 	if c.ServerAliveInterval < 0 {
 		c.ServerAliveInterval = 0

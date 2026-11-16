@@ -27,15 +27,18 @@ func panelSSH(d *Deps, st *State) gui.View {
 					c.ServerAliveInterval = n
 				}
 			}),
+		formRow("settings-ssh-alive-count-max", i18n.T("settings.ssh.alive_count_max"), strconv.Itoa(c.ServerAliveCountMax),
+			"", false, func(v string) {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					c.ServerAliveCountMax = n
+				}
+			}),
 		formRow("settings-ssh-dial", i18n.T("settings.ssh.dial_timeout_sec"), strconv.Itoa(c.DialTimeoutSec),
 			"", false, func(v string) {
 				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 					c.DialTimeoutSec = n
 				}
 			}),
-		switchRow("settings-ssh-reconnect", i18n.T("settings.ssh.auto_reconnect"), c.AutoReconnect, func(gui.EventCtx) {
-			c.AutoReconnect = !c.AutoReconnect
-		}),
 		gui.Select(gui.SelectCfg{
 			ID:       "settings-ssh-proxy-type",
 			Label:    i18n.T("settings.ssh.proxy_type"),
@@ -96,6 +99,7 @@ func saveSSH(w *gui.Window, d *Deps) {
 			s.SSH = draft
 			d.SSH.SetOptions(ssh.Options{
 				ServerAliveInterval: time.Duration(draft.ServerAliveInterval) * time.Second,
+				ServerAliveCountMax: draft.ServerAliveCountMax,
 				DialTimeout:         time.Duration(draft.DialTimeoutSec) * time.Second,
 			})
 			toastOK(win, i18n.T("settings.ssh.save_success"))

@@ -24,7 +24,7 @@ import (
 // ErrSessionNotFound is returned when a session id is unknown or has no client.
 var ErrSessionNotFound = errors.New("ssh: session not found")
 
-// CloseReason distinguishes clean shell exits from unexpected drops for auto-reconnect.
+// CloseReason distinguishes clean shell exits from unexpected drops.
 type CloseReason string
 
 const (
@@ -155,6 +155,7 @@ func (h *hopClient) Close() {
 // Options are runtime SSH client settings applied on next dial / new keepalive.
 type Options struct {
 	ServerAliveInterval time.Duration
+	ServerAliveCountMax int
 	DialTimeout         time.Duration
 }
 
@@ -164,7 +165,6 @@ type Manager struct {
 	knownHostsMu          sync.Mutex
 	prompter              HostKeyPrompter
 	keyboardPrompter      KeyboardInteractivePrompter
-	onClose               func(sessionID string, reason CloseReason)
 	onCwd                 func(sessionID, path string)
 	onSessionLogStopped   func(sessionID, reason string)
 	clients               *sync.Map
@@ -214,6 +214,9 @@ func (m *Manager) SetOptions(opts Options) {
 	if opts.ServerAliveInterval < 0 {
 		opts.ServerAliveInterval = 0
 	}
+	if opts.ServerAliveCountMax <= 0 {
+		opts.ServerAliveCountMax = defaultServerAliveCountMax
+	}
 	m.optsMu.Lock()
 	m.opts = opts
 	m.optsMu.Unlock()
@@ -234,8 +237,13 @@ func (m *Manager) aliveInterval() time.Duration {
 	return m.opts.ServerAliveInterval
 }
 
-func (m *Manager) SetOnClose(fn func(sessionID string, reason CloseReason)) {
-	m.onClose = fn
+func (m *Manager) aliveCountMax() int {
+	m.optsMu.RLock()
+	defer m.optsMu.RUnlock()
+	if m.opts.ServerAliveCountMax <= 0 {
+		return defaultServerAliveCountMax
+	}
+	return m.opts.ServerAliveCountMax
 }
 
 // SetOnCwd is the SFTP follow-cwd callback (OSC from PTY stdout). Must not block.
@@ -355,14 +363,6 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 		return err
 	}
 	return sess.Resize(cols, rows)
-}
-
-func (m *Manager) notifyClosed(id string, reason CloseReason) {
-	if m.onClose != nil {
-		m.onClose(id, reason)
-		return
-	}
-	_ = m.CloseSession(id)
 }
 
 func (m *Manager) CloseAll() {
@@ -565,7 +565,7 @@ func (sc *Session) Start(cols, rows int) error {
 				zap.String("reason", string(reason)),
 			)
 		}
-		sc.manager.notifyClosed(sc.ID, reason)
+		_ = sc.manager.CloseSession(sc.ID)
 	}()
 	return nil
 }

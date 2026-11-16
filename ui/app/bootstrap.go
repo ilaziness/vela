@@ -80,6 +80,7 @@ func Bootstrap() (*Runtime, error) {
 	keyboard.Bind(nil, sshMgr)
 	sshMgr.SetOptions(ssh.Options{
 		ServerAliveInterval: time.Duration(store.Config.SSH.ServerAliveInterval) * time.Second,
+		ServerAliveCountMax: store.Config.SSH.ServerAliveCountMax,
 		DialTimeout:         time.Duration(store.Config.SSH.DialTimeoutSec) * time.Second,
 	})
 
