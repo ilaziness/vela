@@ -117,26 +117,30 @@ func TestCompressCommand(t *testing.T) {
 }
 
 func TestListExtractCommands(t *testing.T) {
-	if got, want := listTarCommand(formatTarGz, "/a b.tgz"), "tar tzf '/a b.tgz'"; got != want {
+	if got, want := listTarCommand(formatTarGz, "/a b.tgz"), "TAR_OPTIONS=--quoting-style=escape tar tzf '/a b.tgz'"; got != want {
 		t.Errorf("listTarCommand gz = %q, want %q", got, want)
 	}
-	if got, want := listTarCommand(formatTar, "/a.tar"), "tar tf '/a.tar'"; got != want {
+	if got, want := listTarCommand(formatTar, "/a.tar"), "TAR_OPTIONS=--quoting-style=escape tar tf '/a.tar'"; got != want {
 		t.Errorf("listTarCommand plain = %q, want %q", got, want)
 	}
-	if got, want := extractTarCommand(formatTarBz2, "/a.tar.bz2", "/dest dir", 1), "tar xjf '/a.tar.bz2' -C '/dest dir' --strip-components=1"; got != want {
+	if got, want := extractTarCommand(formatTarBz2, "/a.tar.bz2", "/dest dir", 1, true), "tar xjf '/a.tar.bz2' -C '/dest dir' --strip-components=1"; got != want {
 		t.Errorf("extractTarCommand bz2 strip = %q, want %q", got, want)
 	}
-	if got, want := extractTarCommand(formatTarXz, "/a.tar.xz", "/d", 0), "tar xJf '/a.tar.xz' -C '/d'"; got != want {
-		t.Errorf("extractTarCommand xz = %q, want %q", got, want)
+	if got, want := extractTarCommand(formatTarXz, "/a.tar.xz", "/d", 0, false), "tar xJf '/a.tar.xz' -C '/d' -k"; got != want {
+		t.Errorf("extractTarCommand xz keep = %q, want %q", got, want)
 	}
-	if got, want := extractSingleCommand(formatGz, "/a/f.txt.gz", "/d/f.txt"), "gzip -dc '/a/f.txt.gz' > '/d/f.txt'"; got != want {
-		t.Errorf("extractSingleCommand gz = %q, want %q", got, want)
+	const staging = "/d/.f.txt.vela-edit-1a2b3c4d"
+	gzOverwrite := `gzip -dc '/a/f.txt.gz' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && rm -rf -- '/d/f.txt' && mv -f -- '` + staging + `' '/d/f.txt'`
+	if got, want := extractSingleCommand(formatGz, "/a/f.txt.gz", staging, "/d/f.txt", true), gzOverwrite; got != want {
+		t.Errorf("extractSingleCommand gz overwrite = %q, want %q", got, want)
 	}
-	if got, want := extractSingleCommand(formatBz2, "/a/f.txt.bz2", "/d/f.txt"), "bzip2 -dc '/a/f.txt.bz2' > '/d/f.txt'"; got != want {
-		t.Errorf("extractSingleCommand bz2 = %q, want %q", got, want)
+	bz2Keep := `bzip2 -dc '/a/f.txt.bz2' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && if [ -e '/d/f.txt' ] || [ -L '/d/f.txt' ]; then rm -f -- '` + staging + `'; false; else mv -f -- '` + staging + `' '/d/f.txt'; fi`
+	if got, want := extractSingleCommand(formatBz2, "/a/f.txt.bz2", staging, "/d/f.txt", false), bz2Keep; got != want {
+		t.Errorf("extractSingleCommand bz2 keep = %q, want %q", got, want)
 	}
-	if got, want := extractSingleCommand(formatXz, "/a/f.txt.xz", "/d/f.txt"), "xz -dc '/a/f.txt.xz' > '/d/f.txt'"; got != want {
-		t.Errorf("extractSingleCommand xz = %q, want %q", got, want)
+	xzOverwrite := `xz -dc '/a/f.txt.xz' > '` + staging + `' || { rm -f -- '` + staging + `'; false; } && rm -rf -- '/d/f.txt' && mv -f -- '` + staging + `' '/d/f.txt'`
+	if got, want := extractSingleCommand(formatXz, "/a/f.txt.xz", staging, "/d/f.txt", true), xzOverwrite; got != want {
+		t.Errorf("extractSingleCommand xz overwrite = %q, want %q", got, want)
 	}
 }
 
@@ -157,6 +161,23 @@ func TestSingleStreamName(t *testing.T) {
 	}
 }
 
+func TestUnescapeTarName(t *testing.T) {
+	cases := map[string]string{
+		`plain/name.txt`: `plain/name.txt`,
+		`a\nb`:           "a\nb",
+		`c\\d`:           `c\d`,
+		`tab\there`:      "tab\there",
+		`oct\040space`:   "oct space",
+		`unknown\q`:      `unknown\q`,
+		`trailing\`:      `trailing\`,
+	}
+	for in, want := range cases {
+		if got := unescapeTarName(in); got != want {
+			t.Errorf("unescapeTarName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestArchiveEntrySafety(t *testing.T) {
 	cases := []struct {
 		raw        string
@@ -164,15 +185,19 @@ func TestArchiveEntrySafety(t *testing.T) {
 		wantUnsafe bool
 	}{
 		{"a/b.txt", "a/b.txt", false},
-		{"./a", "a", false},
+		// "." components are kept: tar counts a leading "./" as the first
+		// path component, so flattening must agree on the written paths.
+		{"./a", "./a", false},
 		{"a//b", "a/b", false},
-		{"a/./b", "a/b", false},
+		{"a/./b", "a/./b", false},
 		{"src/", "src", false},
 		{"/abs", "", true},
 		{"../x", "", true},
 		{"a/../b", "", true},
 		{"C:/x", "", true},
-		{"a\\..\\b", "", true},
+		// A backslash is an ordinary POSIX filename character, not a
+		// separator: "a\..\b" is one safe component.
+		{`a\..\b`, `a\..\b`, false},
 	}
 	for _, c := range cases {
 		name, unsafe := archiveEntrySafety(c.raw)
@@ -249,6 +274,22 @@ func TestFlattenEntries(t *testing.T) {
 		t.Fatalf("lone file must not strip: stripped=%v flat=%v", stripped, flat)
 	}
 
+	// A single nested entry does have a root to strip — the old guard kept it
+	// whole, creating the root folder again on the remote tar path.
+	nested := []archiveEntry{{name: "src/a.txt"}}
+	flat, stripped = flattenEntries(nested)
+	if !stripped || len(flat) != 1 || flat[0].name != "a.txt" {
+		t.Fatalf("single nested entry must strip: stripped=%v flat=%v", stripped, flat)
+	}
+
+	// A dot-rooted tree flattens like a plain one ("./src/a.txt" -> "src/a.txt"
+	// after tar strips one component).
+	dot := []archiveEntry{{name: "./src", isDir: true}, {name: "./src/a.txt"}}
+	flat, stripped = flattenEntries(dot)
+	if !stripped || len(flat) != 2 || flat[0].name != "src" || flat[1].name != "src/a.txt" {
+		t.Fatalf("dot-rooted tree must strip: stripped=%v flat=%v", stripped, flat)
+	}
+
 	empty, stripped := flattenEntries(nil)
 	if stripped || len(empty) != 0 {
 		t.Fatalf("empty entries: stripped=%v flat=%v", stripped, empty)
@@ -303,7 +344,7 @@ func TestCompressRemoteTarCleansUp(t *testing.T) {
 		}
 		return "", nil
 	})
-	err := mgr.compressRemoteTar("test", "tar czf '/x/y.tar.gz' -C '/d' 's'", "/x/y.tar.gz")
+	err := mgr.compressRemoteTar(context.Background(), "test", "tar czf '/x/y.tar.gz' -C '/d' 's'", "/x/y.tar.gz")
 	if err == nil {
 		t.Fatal("expected compress failure")
 	}
@@ -312,5 +353,27 @@ func TestCompressRemoteTarCleansUp(t *testing.T) {
 	}
 	if want := "rm -f '/x/y.tar.gz'"; (*cmds)[1] != want {
 		t.Fatalf("cleanup cmd = %q, want %q", (*cmds)[1], want)
+	}
+}
+
+// TestCompressRemoteTarCleansUpAfterCancel: a cancelled run still removes its
+// partial archive, and the cleanup command always runs on a live context.
+func TestCompressRemoteTarCleansUpAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	mgr := NewManager(zap.NewNop(), nil, transfer.NewRegistry(func(transfer.ProgressData) {}), nil)
+	var rmCtxErr error
+	mgr.remoteExec = func(c context.Context, sessionID, cmd string, timeout time.Duration, maxOut int) (string, error) {
+		if strings.HasPrefix(cmd, "tar ") {
+			return "", ctx.Err()
+		}
+		rmCtxErr = c.Err()
+		return "", nil
+	}
+	if err := mgr.compressRemoteTar(ctx, "test", "tar czf '/x/y.tar.gz' -C '/d' 's'", "/x/y.tar.gz"); err == nil {
+		t.Fatal("expected cancellation failure")
+	}
+	if rmCtxErr != nil {
+		t.Fatalf("cleanup ran on a dead context: %v", rmCtxErr)
 	}
 }

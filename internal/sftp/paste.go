@@ -54,9 +54,15 @@ type pasteJob struct {
 // pasteDestInvalid reports dst when a paste would drop an entry onto itself,
 // inside its own subtree (dir into own subdir), or copy a parent entry onto one
 // of its own descendants (dst under src — the walk would chase the output).
+// Both paths are canonicalized lexically first (".", repeated and trailing
+// separators) so equivalent spellings such as /tmp/./a and /tmp/a are
+// recognized as the same entry — a cut of one onto the other must never reach
+// the copy-and-delete fallback.
 func pasteDestInvalid(src, destDir, destName string) (string, bool) {
 	dst := joinRemotePath(destDir, destName)
-	if dst == src || strings.HasPrefix(src, dst+"/") || strings.HasPrefix(dst, src+"/") {
+	s := path.Clean(src)
+	d := path.Clean(dst)
+	if d == s || strings.HasPrefix(s, d+"/") || strings.HasPrefix(d, s+"/") {
 		return dst, true
 	}
 	return dst, false
@@ -83,6 +89,12 @@ func (sft *Manager) PasteRemotePaths(sessionID string, srcPaths []string, destNa
 	}
 	jobs := make([]pasteJob, 0, len(srcPaths))
 	for i, src := range srcPaths {
+		if src == "" {
+			return usererr.Coded("sftp.invalid_paste", "Invalid paste parameters")
+		}
+		// Canonical spelling: "a/./b", "a//b" and "a/b/" name the same remote
+		// entry; every guard and the cut cleanup compare canonical paths.
+		src = path.Clean(src)
 		name := path.Base(src)
 		if i < len(destNames) && destNames[i] != "" {
 			name = destNames[i]
@@ -136,14 +148,19 @@ func (sft *Manager) startPasteAsync(sessionID string, job pasteJob, cut, overwri
 		// server and the interactive terminal is never involved. The
 		// streaming SFTP copy below is the fallback when remote command
 		// execution is unavailable (or its tools reject the invocation).
-		err := sft.pasteRemoteCommand(sessionID, job, cut, overwrite)
+		// The command runs under the tracker context: cancellation stops the
+		// remote work and is never replayed over SFTP.
+		err := sft.pasteRemoteCommand(tracker.Context(), sessionID, job, cut, overwrite)
 		if errors.Is(err, errPasteCommandFallback) {
 			sft.logger.Warn("paste remote command unavailable; falling back to SFTP copy",
 				zap.String("src", job.src), zap.String("dst", job.dst), zap.Error(err))
 			err = sft.pasteTree(sessionID, job, overwrite, tracker)
-			if err == nil && cut {
-				// Remove the source only when its copy fully succeeded.
-				if rmErr := sft.DeleteFile(sessionID, job.src); rmErr != nil {
+			if err == nil && cut && !tracker.WasCancelled() {
+				// Remove the source only when its copy fully succeeded and
+				// the user did not cancel; directories are removed with their
+				// whole tree and symlinks are unlinked, never followed.
+				rmErr := sft.removePasteSource(sessionID, job.src)
+				if rmErr != nil {
 					sft.logger.Error("paste cut: delete source failed", zap.String("src", job.src), zap.Error(rmErr))
 					err = rmErr
 				}
@@ -203,29 +220,42 @@ func (sft *Manager) removeRemoteEntry(client *sftp.Client, p string) error {
 	return client.RemoveAll(p)
 }
 
+// removePasteSource deletes a cut source after its copy succeeded. Files and
+// symlinks are unlinked; directory trees are removed recursively.
+func (sft *Manager) removePasteSource(sessionID, src string) error {
+	client, err := sft.getSftpClient(sessionID)
+	if err != nil {
+		return err
+	}
+	return sft.removeRemoteEntry(client, src)
+}
+
 // copyDirReplace copies srcDir's whole tree to a staging sibling of dst and
 // moves it onto dst afterwards. A conflicting file or symlink at dst is
 // removed only after the full tree was copied.
 func (sft *Manager) copyDirReplace(client *sftp.Client, srcDir, dst string, tracker *transfer.Tracker) error {
-	staging := editStagingRemotePath(dst)
+	staging := stagingRemotePath(dst)
 	if staging == dst {
 		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
 	}
-	// Drop any staging leftover from an interrupted run before building.
+	// Defensive: anything sitting at this operation's unique staging name can
+	// only be foreign (e.g. a pre-planted symlink). Unlink it without
+	// following before building, so MkdirAll below cannot write through it.
 	if err := sft.removeRemoteEntry(client, staging); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if err := sft.copyRemoteDir(client, srcDir, staging, tracker); err != nil {
-		sft.removeStaging(client, staging)
+		// Recursive cleanup: the partial staging tree must not survive.
+		sft.removeStagingTree(client, staging)
 		return err
 	}
 	if _, statErr := client.Lstat(dst); statErr == nil {
 		if err := sft.removeRemoteEntry(client, dst); err != nil {
-			sft.removeStaging(client, staging)
+			sft.removeStagingTree(client, staging)
 			return err
 		}
 	} else if !os.IsNotExist(statErr) {
-		sft.removeStaging(client, staging)
+		sft.removeStagingTree(client, staging)
 		return statErr
 	}
 	if err := client.Rename(staging, dst); err != nil {
@@ -250,11 +280,18 @@ func (sft *Manager) copyRemoteDir(client *sftp.Client, srcDir, dstDir string, tr
 		if err := client.MkdirAll(dstDir); err != nil {
 			return err
 		}
-		if info, statErr := client.Stat(srcDir); statErr == nil {
-			if err := client.Chmod(dstDir, info.Mode().Perm()); err != nil {
-				sft.logger.Warn("paste chmod dir failed", zap.String("dst", dstDir), zap.Error(err))
+		// A read-only source mode (e.g. 0555) must not be applied before the
+		// children are copied — the fresh directory needs owner write
+		// permission while it is being populated. The source mode is applied
+		// after the copy completed. Pre-existing merge destinations keep
+		// their own mode (nothing is chmod'ed for them).
+		defer func() {
+			if info, statErr := client.Stat(srcDir); statErr == nil {
+				if err := client.Chmod(dstDir, info.Mode().Perm()); err != nil {
+					sft.logger.Warn("paste chmod dir failed", zap.String("dst", dstDir), zap.Error(err))
+				}
 			}
-		}
+		}()
 	} else {
 		return statErr
 	}
@@ -295,11 +332,12 @@ func (sft *Manager) copyRemoteFile(client *sftp.Client, src, dst string, perm os
 		return err
 	}
 	defer in.Close()
-	staging := editStagingRemotePath(dst)
+	staging := stagingRemotePath(dst)
 	if staging == dst {
 		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
 	}
-	out, err := client.Create(staging)
+	// Exclusive create: never follow a symlink pre-planted at the staging name.
+	out, err := client.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if err != nil {
 		return err
 	}

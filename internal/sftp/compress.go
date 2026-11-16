@@ -19,6 +19,9 @@ import (
 // tar; the file name only labels the result. On failure the partial archive
 // is removed. Runs asynchronously under one upload-typed tracker so the
 // transfer panel shows progress and the remote pane refreshes on completion.
+// Requires remote command execution and a server-side tar: on SFTP-only
+// servers the operation fails with the remote-exec-unavailable error instead
+// of streaming a local compression.
 func (sft *Manager) CompressRemotePaths(sessionID string, srcPaths []string, archivePath string) error {
 	if sessionID == "" || len(srcPaths) == 0 || archivePath == "" {
 		return usererr.Coded("sftp.invalid_compress", "Invalid compress parameters")
@@ -62,7 +65,9 @@ func (sft *Manager) CompressRemotePaths(sessionID string, srcPaths []string, arc
 		return err
 	}
 	go func() {
-		err := sft.compressRemoteTar(sessionID, cmd, archivePath)
+		// The command runs under the tracker context: cancellation closes the
+		// remote session and stops the tar run.
+		err := sft.compressRemoteTar(tracker.Context(), sessionID, cmd, archivePath)
 		sft.stopTracker(tracker, err)
 	}()
 	sft.notifyQueued(sessionID, 1)
@@ -70,11 +75,14 @@ func (sft *Manager) CompressRemotePaths(sessionID string, srcPaths []string, arc
 }
 
 // compressRemoteTar runs the remote tar command that builds the archive on
-// the server. On failure the partial archive is removed. The tracker stays
-// indeterminate: the command reports no byte progress.
-func (sft *Manager) compressRemoteTar(sessionID, cmd, archivePath string) error {
-	_, err := sft.runRemoteCommand(context.Background(), sessionID, cmd, 0, ssh.DefaultExecMaxOut)
+// the server. On failure (including cancellation via ctx) the partial archive
+// is removed. The tracker stays indeterminate: the command reports no byte
+// progress.
+func (sft *Manager) compressRemoteTar(ctx context.Context, sessionID, cmd, archivePath string) error {
+	_, err := sft.runRemoteCommand(ctx, sessionID, cmd, 0, ssh.DefaultExecMaxOut)
 	if err != nil {
+		// Cleanup runs even after cancellation: it only removes the partial
+		// archive this call created, on its own session.
 		cleanupCmd := "rm -f " + shellQuote(archivePath)
 		if _, rmErr := sft.runRemoteCommand(context.Background(), sessionID, cleanupCmd, 0, ssh.DefaultExecMaxOut); rmErr != nil {
 			sft.logger.Warn("compress: remove partial archive failed", zap.String("archive", archivePath), zap.Error(rmErr))

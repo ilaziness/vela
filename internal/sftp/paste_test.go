@@ -11,6 +11,12 @@ func TestPasteDestInvalid(t *testing.T) {
 		invalid  bool
 	}{
 		{"self", "/a/b", "/a", "b", true},
+		// Equivalent spellings of the same path are still a self-copy: without
+		// canonicalization a cut would delete the source after a failed rename.
+		{"self via dot segment", "/a/./b", "/a", "b", true},
+		{"self via double slash", "/a//b", "/a/", "b", true},
+		{"self via trailing slash", "/a/b/", "/a", "b", true},
+		{"self via redundant dots", "/a/x/../b", "/a", "b", true},
 		{"into own subdir", "/a/b", "/a/b", "sub", true},
 		{"parent onto descendant", "/a/b/sub", "/a", "b", true},
 		{"renamed duplicate", "/a/b", "/a", "b (1)", false},

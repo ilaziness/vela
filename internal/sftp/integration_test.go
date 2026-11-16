@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	gossh "golang.org/x/crypto/ssh"
 	"github.com/pkg/sftp"
 	"go.uber.org/zap"
+	gossh "golang.org/x/crypto/ssh"
 
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/usererr"
@@ -38,8 +38,8 @@ func dialTestSSH(t *testing.T) *gossh.Client {
 		t.Skip("integration env vars not set")
 	}
 	cfg := &gossh.ClientConfig{
-		User: user,
-		Auth: []gossh.AuthMethod{gossh.Password(pass)},
+		User:            user,
+		Auth:            []gossh.AuthMethod{gossh.Password(pass)},
 		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 		Timeout:         30 * time.Second,
 	}
@@ -989,23 +989,27 @@ func TestIntegrationPasteRemoteCommandPath(t *testing.T) {
 		t.Fatalf("cut file commands = %v", got)
 	}
 
-	// Copy dir onto a same-named dir: merge keeps destination-only entries.
+	// Copy dir onto a same-named dir: merge keeps destination-only entries and
+	// runs on the staged SFTP path — never a remote cp -a, which would broaden
+	// existing destination directory modes and write replacement bytes over
+	// existing destination files non-atomically.
 	if err := mgr.PasteRemotePaths("test", []string{path.Join(work, "mg-src")}, []string{"mg"}, path.Join(work, "dst"), false, true); err != nil {
 		t.Fatalf("copy dir merge: %v", err)
 	}
 	waitRemoteContent(t, client, path.Join(work, "dst", "mg", "one.txt"), "one\n", "merged source entry")
 	waitRemoteContent(t, client, path.Join(work, "dst", "mg", "zero.txt"), "zero\n", "destination-only entry kept")
-	if got := recorded(); len(got) == 0 || !strings.Contains(got[0], "cp -a -- ") {
-		t.Fatalf("merge commands = %v", got)
+	if got := recorded(); len(got) != 0 {
+		t.Fatalf("merge must run no remote commands, got %v", got)
 	}
 
-	// Cut dir onto the merged target: source tree disappears.
+	// Cut dir onto the merged target: the source tree disappears after the
+	// staged merge succeeded, deleted over SFTP (no rm command).
 	if err := mgr.PasteRemotePaths("test", []string{path.Join(work, "mg-src")}, []string{"mg"}, path.Join(work, "dst"), true, true); err != nil {
 		t.Fatalf("cut dir merge: %v", err)
 	}
 	waitRemote(t, client, path.Join(work, "mg-src"), false, "cut dir source removed")
-	if got := recorded(); len(got) == 0 || !strings.Contains(got[0], "rm -rf") {
-		t.Fatalf("cut dir commands = %v", got)
+	if got := recorded(); len(got) != 0 {
+		t.Fatalf("cut merge must run no remote commands, got %v", got)
 	}
 	if errs := col.errors(); len(errs) > 0 {
 		t.Fatalf("transfer errors: %v", errs)
@@ -1038,6 +1042,310 @@ func TestIntegrationPasteCommandFallbackToSFTP(t *testing.T) {
 	}
 	waitRemoteContent(t, client, path.Join(work, "dst", "b.txt"), "beta\n", "fallback file moved")
 	waitRemote(t, client, path.Join(work, "b.txt"), false, "fallback cut source removed")
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// ---- review round 2: merge staging, archive name decoding, extract staging ----
+
+// assertNoStagingLeftovers fails when any staged-swap artifact remains in dir.
+func assertNoStagingLeftovers(t *testing.T, client *sftp.Client, dir string) {
+	t.Helper()
+	entries, err := client.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "vela-edit") {
+			t.Fatalf("staging leftover %s in %s", e.Name(), dir)
+		}
+	}
+}
+
+// TestIntegrationPasteMergeModeSemantics: the staged SFTP merge must not
+// broaden existing destination directory modes (the old remote cp -a copied
+// source modes over destination subdirectories) and must keep dest-only
+// entries while replacing same-named files. Also covers a read-only (0555)
+// source tree being copied with its mode applied only after children, and a
+// cut of a whole directory tree on the fallback path.
+func TestIntegrationPasteMergeModeSemantics(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "paste-mode")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work+"/src/sub "+work+"/dst/mg/sub")
+	writeRemote(t, client, path.Join(work, "src", "sub", "new.txt"), "new\n")
+	writeRemote(t, client, path.Join(work, "src", "rep.txt"), "replacement\n")
+	writeRemote(t, client, path.Join(work, "dst", "mg", "sub", "old.txt"), "old\n")
+	writeRemote(t, client, path.Join(work, "dst", "mg", "rep.txt"), "original\n")
+	remoteRun(t, mgr, "chmod 700 "+work+"/dst/mg "+work+"/dst/mg/sub && chmod 555 "+work+"/src")
+	// Force the staged SFTP path even though exec works on this server.
+	mgr.remoteExec = func(ctx context.Context, sessionID, command string, timeout time.Duration, maxOut int) (string, error) {
+		return "", usererr.Coded("test.exec_unavailable", "exec unavailable")
+	}
+
+	if err := mgr.PasteRemotePaths("test", []string{path.Join(work, "src")}, []string{"mg"}, path.Join(work, "dst"), false, true); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "dst", "mg", "rep.txt"), "replacement\n", "merged file replaced")
+	waitRemoteContent(t, client, path.Join(work, "dst", "mg", "sub", "new.txt"), "new\n", "merged nested entry")
+	waitRemoteContent(t, client, path.Join(work, "dst", "mg", "sub", "old.txt"), "old\n", "destination-only entry kept")
+	for _, d := range []string{"mg", "mg/sub"} {
+		st, statErr := client.Stat(path.Join(work, "dst", d))
+		if statErr != nil {
+			t.Fatalf("stat %s: %v", d, statErr)
+		}
+		if perm := st.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("destination dir %s mode broadened to %o", d, perm)
+		}
+	}
+
+	// A 0555 source copies fine (mode applied after children) and keeps 0555.
+	if err := mgr.PasteRemotePaths("test", []string{path.Join(work, "src")}, []string{"fresh"}, path.Join(work, "dst"), false, false); err != nil {
+		t.Fatalf("copy 0555 dir: %v", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "dst", "fresh", "rep.txt"), "replacement\n", "0555 source copied")
+	st, statErr := client.Stat(path.Join(work, "dst", "fresh"))
+	if statErr != nil {
+		t.Fatalf("stat fresh: %v", statErr)
+	}
+	if perm := st.Mode().Perm(); perm != 0o555 {
+		t.Fatalf("fresh dir mode = %o, want 555", perm)
+	}
+
+	// Cut of a whole tree on the fallback path: source disappears recursively.
+	if err := mgr.PasteRemotePaths("test", []string{path.Join(work, "src")}, []string{"moved"}, path.Join(work, "dst"), true, false); err != nil {
+		t.Fatalf("cut dir: %v", err)
+	}
+	waitRemote(t, client, path.Join(work, "src"), false, "cut source tree removed")
+	waitRemoteContent(t, client, path.Join(work, "dst", "moved", "sub", "new.txt"), "new\n", "cut content arrived")
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// TestIntegrationExtractTarNoOverwriteKeepsExisting: with overwrite false the
+// remote tar keeps existing targets (-k) instead of silently replacing a file
+// that appeared after the conflict scan; the original survives the failed run.
+func TestIntegrationExtractTarNoOverwriteKeepsExisting(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-nw")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work+"/ex")
+	arc := path.Join(work, "a.tar.gz")
+	uploadBytes(t, client, arc, buildTarGz(t, map[string]string{"a.txt": "new\n"}))
+	writeRemote(t, client, path.Join(work, "ex", "a.txt"), "old\n")
+
+	err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, false)
+	if usererr.CodeOf(err) != "sftp.remote_command_failed" {
+		t.Fatalf("no-overwrite extract error = %v, want remote_command_failed", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "ex", "a.txt"), "old\n", "existing target preserved")
+
+	if err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, true); err != nil {
+		t.Fatalf("overwrite extract: %v", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "ex", "a.txt"), "new\n", "overwrite extract replaced")
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// TestIntegrationExtractSingleStreamStaging: a bare compressed stream
+// decompresses to a staging sibling and is renamed into place — a symlink
+// planted at the target is replaced, never written through, and with overwrite
+// false an existing target is left untouched.
+func TestIntegrationExtractSingleStreamStaging(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-single")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work)
+	writeRemote(t, client, path.Join(work, "plain.txt"), "data\n")
+	writeRemote(t, client, path.Join(work, "victim.txt"), "VICTIM\n")
+	remoteRun(t, mgr, "gzip -c "+work+"/plain.txt > "+work+"/f.txt.gz")
+	remoteRun(t, mgr, "ln -s "+work+"/victim.txt "+work+"/f.txt")
+
+	if err := mgr.ExtractRemoteArchive("test", path.Join(work, "f.txt.gz"), work, true); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "f.txt"), "data\n", "symlink entry replaced by decompressed file")
+	waitRemoteContent(t, client, path.Join(work, "victim.txt"), "VICTIM\n", "symlink target never written through")
+	assertNoStagingLeftovers(t, client, work)
+
+	writeRemote(t, client, path.Join(work, "g.txt"), "keep\n")
+	remoteRun(t, mgr, "gzip -c "+work+"/plain.txt > "+work+"/g.txt.gz")
+	err := mgr.extractSingleRemote(context.Background(), "test", formatGz, path.Join(work, "g.txt.gz"), work, "g.txt", false)
+	if usererr.CodeOf(err) != "sftp.remote_command_failed" {
+		t.Fatalf("no-overwrite single extract error = %v, want remote_command_failed", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "g.txt"), "keep\n", "existing target preserved on no-overwrite")
+	assertNoStagingLeftovers(t, client, work)
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// TestIntegrationExtractCorruptSingleKeepsOriginal: a failed decompression
+// removes its staging output and never touches the existing target.
+func TestIntegrationExtractCorruptSingleKeepsOriginal(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-corrupt")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work)
+	uploadBytes(t, client, path.Join(work, "bad.txt.gz"), []byte("this is not gzip data"))
+	writeRemote(t, client, path.Join(work, "bad.txt"), "original\n")
+
+	err := mgr.extractSingleRemote(context.Background(), "test", formatGz, path.Join(work, "bad.txt.gz"), work, "bad.txt", true)
+	if usererr.CodeOf(err) != "sftp.remote_command_failed" {
+		t.Fatalf("corrupt extract error = %v, want remote_command_failed", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "bad.txt"), "original\n", "original preserved after failed decompression")
+	assertNoStagingLeftovers(t, client, work)
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// TestIntegrationArchiveWeirdNamesRoundTrip: member names containing a
+// backslash, a newline or spaces survive compress -> list -> extract
+// unchanged (the listing is escape-quoted and decoded back).
+func TestIntegrationArchiveWeirdNamesRoundTrip(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-weird")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work)
+	names := []string{`c\d`, "a\nb", "sp ace.txt"}
+	var srcs []string
+	for i, name := range names {
+		p := path.Join(work, name)
+		writeRemote(t, client, p, "content-"+string(rune('0'+i))+"\n")
+		srcs = append(srcs, p)
+	}
+	arc := path.Join(work, "weird.tar.gz")
+	if err := mgr.CompressRemotePaths("test", srcs, arc); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	waitTarGzReady(t, client, arc)
+	ex := path.Join(work, "ex")
+	if err := mgr.ExtractRemoteArchive("test", arc, ex, false); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	for i, name := range names {
+		waitRemoteContent(t, client, path.Join(ex, name), "content-"+string(rune('0'+i))+"\n", "weird name round-trip: "+name)
+	}
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// TestIntegrationExtractDotRootMembers: archives whose members start with
+// "./" extract with the same paths the conflict check lists — tar counts the
+// "." as the stripped root component.
+func TestIntegrationExtractDotRootMembers(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-dot")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work+"/src")
+	arc := path.Join(work, "dot.tar.gz")
+	uploadBytes(t, client, arc, buildTarGz(t, map[string]string{"./src/a.txt": "dot\n", "./other.txt": "other\n"}))
+
+	// Pre-create the flattened targets: the conflict check must report exactly
+	// the paths extraction writes (the "." root is the stripped component).
+	writeRemote(t, client, path.Join(work, "src", "a.txt"), "old\n")
+	writeRemote(t, client, path.Join(work, "other.txt"), "old\n")
+	conflicts, err := mgr.ListArchiveConflicts("test", arc, work)
+	if err != nil {
+		t.Fatalf("conflicts: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, c := range conflicts {
+		seen[c] = true
+	}
+	if len(conflicts) != 2 || !seen["other.txt"] || !seen["src/a.txt"] {
+		t.Fatalf("conflict paths = %v, want other.txt and src/a.txt", conflicts)
+	}
+	if err := mgr.ExtractRemoteArchive("test", arc, work, true); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "src", "a.txt"), "dot\n", "dot-rooted member extracted to listed path")
+	waitRemoteContent(t, client, path.Join(work, "other.txt"), "other\n", "dot-rooted flat member extracted")
+	if errs := col.errors(); len(errs) > 0 {
+		t.Fatalf("transfer errors: %v", errs)
+	}
+}
+
+// TestIntegrationPasteCutDotSpellingRejected: a cut whose source is spelled
+// equivalently to the destination (dots, double slashes, trailing slash) is
+// rejected up front — before the old flow could delete the "source" after a
+// failed rename destroyed the destination.
+func TestIntegrationPasteCutDotSpellingRejected(t *testing.T) {
+	mgr, client, _ := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-equiv")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work+"/equiv")
+	writeRemote(t, client, path.Join(work, "equiv", "a.txt"), "content\n")
+
+	err := mgr.PasteRemotePaths("test", []string{path.Join(work, "equiv", ".", "a.txt")}, []string{"a.txt"}, path.Join(work, "equiv"), true, false)
+	if usererr.CodeOf(err) != "sftp.paste_into_self" {
+		t.Fatalf("equivalent-path cut error = %v, want paste_into_self", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "equiv", "a.txt"), "content\n", "source untouched by rejected cut")
+}
+
+// TestIntegrationExtractZipAppliesMode: extracted zip entries keep the
+// archived permission bits instead of the server default (e.g. 0600 stays
+// private).
+func TestIntegrationExtractZipAppliesMode(t *testing.T) {
+	mgr, client, col := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "ex-zipmode")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() { _ = client.RemoveAll(work) })
+	remoteRun(t, mgr, "mkdir -p "+work)
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	h := &zip.FileHeader{Name: "p.txt", Method: zip.Deflate}
+	h.SetMode(0o600)
+	w, err := zw.CreateHeader(h)
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	if _, err := w.Write([]byte("secret\n")); err != nil {
+		t.Fatalf("zip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	arc := path.Join(work, "perm.zip")
+	uploadBytes(t, client, arc, buf.Bytes())
+
+	if err := mgr.ExtractRemoteArchive("test", arc, work, false); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	waitRemoteContent(t, client, path.Join(work, "p.txt"), "secret\n", "zip entry extracted")
+	st, statErr := client.Stat(path.Join(work, "p.txt"))
+	if statErr != nil {
+		t.Fatalf("stat p.txt: %v", statErr)
+	}
+	if perm := st.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("zip entry mode = %o, want 600", perm)
+	}
+	assertNoStagingLeftovers(t, client, work)
 	if errs := col.errors(); len(errs) > 0 {
 		t.Fatalf("transfer errors: %v", errs)
 	}

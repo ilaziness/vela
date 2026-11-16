@@ -123,25 +123,43 @@ func compressCommand(archivePath string, srcPaths []string) (string, error) {
 
 // listTarCommand builds the remote listing invocation for a tar-family
 // archive. Output is one member name per line, directories with a trailing
-// slash (GNU tar, bsdtar and busybox tar all print names this way).
+// slash (GNU tar, bsdtar and busybox tar all print names this way). GNU tar
+// quotes control characters and backslashes in names (escape style) so every
+// member stays on one line; TAR_OPTIONS pins that style explicitly so the
+// listing is decoded with unescapeTarName. busybox tar lacks the option but
+// also never quotes: the environment variable is ignored and its raw names
+// pass through unchanged.
 func listTarCommand(f archiveFormat, archivePath string) string {
-	return fmt.Sprintf("tar t%sf %s", tarCompressFlag(f), shellQuote(archivePath))
+	return fmt.Sprintf("TAR_OPTIONS=--quoting-style=escape tar t%sf %s", tarCompressFlag(f), shellQuote(archivePath))
 }
 
 // extractTarCommand builds the remote extraction invocation. strip == 1 drops
 // one leading path component from every member (mirrors flattenEntries on the
-// streaming zip path) so the archive's common root folder is not recreated.
-func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int) string {
+// streaming zip path) so the archive's common root folder is not recreated;
+// note that tar counts a leading "./" as that first component. With overwrite
+// false, -k turns any member target that appeared after the conflict scan into
+// an error instead of silently replacing it (GNU and busybox tar both support
+// -k).
+func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int, overwrite bool) string {
 	cmd := fmt.Sprintf("tar x%sf %s -C %s", tarCompressFlag(f), shellQuote(archivePath), shellQuote(destDir))
 	if strip == 1 {
 		cmd += " --strip-components=1"
+	}
+	if !overwrite {
+		cmd += " -k"
 	}
 	return cmd
 }
 
 // extractSingleCommand builds the decompression of a bare compressed stream
-// (file.gz and friends) onto target, i.e. gunzip semantics on the server.
-func extractSingleCommand(f archiveFormat, archivePath, target string) string {
+// (file.gz and friends) on the server: the stream is decompressed into a
+// unique staging sibling first and moved onto target only when complete, so a
+// failed or truncated decompression never destroys an existing target. The
+// final rename replaces a symlink entry at target instead of writing through
+// it (rm -rf unlinks the link; the guarded branch refuses to touch an existing
+// target). With overwrite false, a target that appears after the conflict scan
+// is left untouched and the operation fails.
+func extractSingleCommand(f archiveFormat, archivePath, staging, target string, overwrite bool) string {
 	tool := "gzip"
 	switch f {
 	case formatBz2:
@@ -149,7 +167,16 @@ func extractSingleCommand(f archiveFormat, archivePath, target string) string {
 	case formatXz:
 		tool = "xz"
 	}
-	return fmt.Sprintf("%s -dc %s > %s", tool, shellQuote(archivePath), shellQuote(target))
+	// A decompression failure removes the partial staging file and fails the
+	// chain before anything touches target.
+	head := fmt.Sprintf("%s -dc %s > %s", tool, shellQuote(archivePath), shellQuote(staging)) +
+		" || { rm -f -- " + shellQuote(staging) + "; false; }"
+	qt, qst := shellQuote(target), shellQuote(staging)
+	if overwrite {
+		return head + fmt.Sprintf(" && rm -rf -- %s && mv -f -- %s %s", qt, qst, qt)
+	}
+	return head + fmt.Sprintf(" && if [ -e %s ] || [ -L %s ]; then rm -f -- %s; false; else mv -f -- %s %s; fi",
+		qt, qt, qst, qst, qt)
 }
 
 // singleStreamName returns the extracted file name for a bare compressed
@@ -165,13 +192,71 @@ func singleStreamName(archivePath string) string {
 	return ""
 }
 
+// unescapeTarName decodes GNU tar's "escape" listing quoting: backslash
+// sequences such as \n, \t, \\ and \NNN octal bytes stand for the real
+// characters, keeping every member on one output line. An unknown escape
+// keeps both characters verbatim (raw names from non-quoting tar variants
+// round-trip unchanged unless they literally contain escape sequences).
+func unescapeTarName(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '\\' {
+			b.WriteByte(c)
+			continue
+		}
+		i++
+		if i >= len(s) {
+			b.WriteByte('\\')
+			break
+		}
+		switch s[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case 'v':
+			b.WriteByte('\v')
+		case 'a':
+			b.WriteByte('\a')
+		case '\\':
+			b.WriteByte('\\')
+		case '0', '1', '2', '3', '4', '5', '6', '7':
+			v := int(s[i] - '0')
+			for n := 0; n < 2 && i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '7'; n++ {
+				i++
+				v = v*8 + int(s[i]-'0')
+			}
+			b.WriteByte(byte(v))
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
 // archiveEntrySafety normalizes one tar member name for validation and reports
 // whether the name is unsafe to extract via a remote tar. Unlike the streaming
 // zip path — which can skip a single bad entry — the command path extracts the
 // whole archive at once, so any unsafe member aborts the operation up front.
 // Absolute names, drive letters and ".." segments are unsafe (zip-slip).
+// "." components are preserved: tar counts a leading "./" as the first path
+// component (--strip-components=1 on "./src/a" yields "src/a"), so keeping the
+// raw structure lets flattenEntries and the extract command agree on the paths
+// actually written. A backslash is an ordinary POSIX filename character, never
+// a separator.
 func archiveEntrySafety(raw string) (name string, unsafe bool) {
-	raw = strings.ReplaceAll(raw, "\\", "/")
 	if strings.HasPrefix(raw, "/") {
 		return "", true
 	}
@@ -181,7 +266,7 @@ func archiveEntrySafety(raw string) (name string, unsafe bool) {
 	parts := strings.Split(raw, "/")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if part == "" || part == "." {
+		if part == "" {
 			continue
 		}
 		if part == ".." {

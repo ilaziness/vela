@@ -210,6 +210,14 @@ func (t *Tracker) WasCancelled() bool {
 	return t.cancelled
 }
 
+// Context returns the tracker's context. It is cancelled when the user cancels
+// the transfer; remote commands driven by a transfer should run under it so
+// cancellation actually stops the remote work instead of only marking the
+// tracker.
+func (t *Tracker) Context() context.Context {
+	return t.ctx
+}
+
 func (t *Tracker) WasInterrupted() bool {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()

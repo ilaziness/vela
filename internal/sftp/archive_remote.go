@@ -19,7 +19,8 @@ const archiveListTimeout = 5 * time.Minute
 // returns normalized member entries. Any unsafe member name aborts the whole
 // operation: the remote tar extracts everything at once and cannot skip a
 // single bad entry the way the streaming zip path does. tar t prints one
-// member name per line, directories with a trailing slash.
+// member name per line, directories with a trailing slash; GNU tar escape
+// quoting in the names is decoded first (see listTarCommand).
 func (sft *Manager) listTarEntries(sessionID string, f archiveFormat, archivePath string) ([]archiveEntry, error) {
 	out, err := sft.runRemoteCommand(context.Background(), sessionID, listTarCommand(f, archivePath), archiveListTimeout, archiveListMaxOut)
 	if err != nil {
@@ -34,12 +35,13 @@ func (sft *Manager) listTarEntries(sessionID string, f archiveFormat, archivePat
 		if line == "" {
 			continue
 		}
+		line = unescapeTarName(line)
 		isDir := strings.HasSuffix(line, "/")
 		name, unsafe := archiveEntrySafety(line)
 		if unsafe {
 			return nil, usererr.Coded("sftp.archive_unsafe_entries", "Archive %s contains unsafe entry paths", archivePath)
 		}
-		if name == "" {
+		if name == "" || name == "." {
 			// The archive root member ("./") maps onto destDir itself.
 			continue
 		}
@@ -80,20 +82,26 @@ func (sft *Manager) archiveEntries(sessionID string, client *sftp.Client, archiv
 
 // extractTarRemote extracts a tar-family archive with one remote command on
 // the server. stripped mirrors the flatten decision, so the archive's common
-// root folder is dropped exactly like the streaming zip path does.
-func (sft *Manager) extractTarRemote(sessionID string, f archiveFormat, archivePath, destDir string, stripped bool) error {
+// root folder is dropped exactly like the streaming zip path does (tar counts
+// a leading "./" as the stripped component). With overwrite false the command
+// keeps existing targets (-k) instead of replacing files that appeared after
+// the conflict scan. The command runs under ctx: cancellation closes the
+// remote session and stops the extraction.
+func (sft *Manager) extractTarRemote(ctx context.Context, sessionID string, f archiveFormat, archivePath, destDir string, stripped, overwrite bool) error {
 	strip := 0
 	if stripped {
 		strip = 1
 	}
-	_, err := sft.runRemoteCommand(context.Background(), sessionID, extractTarCommand(f, archivePath, destDir, strip), 0, ssh.DefaultExecMaxOut)
+	_, err := sft.runRemoteCommand(ctx, sessionID, extractTarCommand(f, archivePath, destDir, strip, overwrite), 0, ssh.DefaultExecMaxOut)
 	return err
 }
 
 // extractSingleRemote decompresses one bare compressed stream (file.gz and
-// friends) onto name below destDir — gunzip semantics, on the server.
-func (sft *Manager) extractSingleRemote(sessionID string, f archiveFormat, archivePath, destDir, name string) error {
+// friends) to name below destDir on the server, staged at a unique sibling and
+// renamed into place only when complete (see extractSingleCommand).
+func (sft *Manager) extractSingleRemote(ctx context.Context, sessionID string, f archiveFormat, archivePath, destDir, name string, overwrite bool) error {
 	target := joinRemotePath(destDir, name)
-	_, err := sft.runRemoteCommand(context.Background(), sessionID, extractSingleCommand(f, archivePath, target), 0, ssh.DefaultExecMaxOut)
+	staging := stagingRemotePath(target)
+	_, err := sft.runRemoteCommand(ctx, sessionID, extractSingleCommand(f, archivePath, staging, target, overwrite), 0, ssh.DefaultExecMaxOut)
 	return err
 }

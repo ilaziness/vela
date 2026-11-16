@@ -115,8 +115,9 @@ func flattenEntries(entries []archiveEntry) (flattened []archiveEntry, stripped 
 		root = k
 	}
 	// Only strip when the common root has children, so a lone "file.txt"
-	// entry is never mangled.
-	if len(entries) == 1 && !entries[0].isDir {
+	// entry is never mangled. A single nested entry ("src/a.txt") does have a
+	// root to strip — but a lone top-level entry without a "/" has none.
+	if len(entries) == 1 && !entries[0].isDir && !strings.Contains(entries[0].name, "/") {
 		return entries, false
 	}
 	out := make([]archiveEntry, 0, len(entries))
@@ -229,9 +230,9 @@ func (sft *Manager) ExtractRemoteArchive(sessionID string, archivePath, destDir 
 		case format == formatZip:
 			runErr = sft.extractEntries(client, flat, destDir, overwrite, tracker)
 		case isTarFamily(format):
-			runErr = sft.extractTarRemote(sessionID, format, archivePath, destDir, stripped)
+			runErr = sft.extractTarRemote(tracker.Context(), sessionID, format, archivePath, destDir, stripped, overwrite)
 		case isSingleStream(format):
-			runErr = sft.extractSingleRemote(sessionID, format, archivePath, destDir, flat[0].name)
+			runErr = sft.extractSingleRemote(tracker.Context(), sessionID, format, archivePath, destDir, flat[0].name, overwrite)
 		}
 		cleanup()
 		sft.stopTracker(tracker, runErr)
@@ -320,11 +321,12 @@ func (sft *Manager) extractFile(client *sftp.Client, zf *zip.File, target string
 		return err
 	}
 	defer src.Close()
-	staging := editStagingRemotePath(target)
+	staging := stagingRemotePath(target)
 	if staging == target {
 		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
 	}
-	out, err := client.Create(staging)
+	// Exclusive create: never follow a symlink pre-planted at the staging name.
+	out, err := client.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if err != nil {
 		return err
 	}
@@ -339,6 +341,14 @@ func (sft *Manager) extractFile(client *sftp.Client, zf *zip.File, target string
 	if closeErr != nil {
 		sft.removeStaging(client, staging)
 		return closeErr
+	}
+	// Apply the archived permission bits; the server default would otherwise
+	// broaden private entries (e.g. 0600 becomes 0644 under umask 022).
+	// Entries without any recorded mode keep the server default.
+	if perm := zf.FileInfo().Mode().Perm(); perm != 0 {
+		if chErr := client.Chmod(staging, perm); chErr != nil {
+			sft.logger.Warn("extract chmod file failed", zap.String("target", target), zap.Error(chErr))
+		}
 	}
 	if st, statErr := client.Lstat(target); statErr == nil && isRealDir(st) {
 		// File-over-directory type conflict: the existing tree is removed
