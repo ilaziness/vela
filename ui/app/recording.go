@@ -3,7 +3,6 @@ package app
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -86,29 +85,7 @@ func (c *Controller) recordingPath(sessID string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	name := time.Now().Format("2006-01-02T15-04-05") + "-" + sanitizeFileID(sessID) + ".gtr"
+	// Session ids are hex (utils.GenerateRandomID), safe in a filename.
+	name := time.Now().Format("2006-01-02T15-04-05") + "-" + sessID + ".gtr"
 	return filepath.Join(dir, name), nil
-}
-
-// sanitizeFileID reduces an arbitrary session id to filename-safe characters.
-// Session ids are already hex, but the helper keeps the recording path safe
-// if that ever changes.
-func sanitizeFileID(id string) string {
-	var b strings.Builder
-	for _, r := range id {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	out := b.String()
-	if len(out) > 12 {
-		out = out[len(out)-12:]
-	}
-	if out == "" {
-		out = "session"
-	}
-	return out
 }
