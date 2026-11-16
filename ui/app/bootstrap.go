@@ -9,6 +9,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/applog"
 	"github.com/ilaziness/vela/internal/bookmark"
+	"github.com/ilaziness/vela/internal/buildinfo"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/keybind"
@@ -20,6 +21,7 @@ import (
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
+	"github.com/ilaziness/vela/internal/updater"
 	"github.com/ilaziness/vela/ui/protocol"
 	serialui "github.com/ilaziness/vela/ui/protocol/serial"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -43,6 +45,7 @@ type Runtime struct {
 	Keybind   *keybind.Manager
 	Bookmarks *bookmark.Service
 	Tunnels   *tunnel.Manager
+	Updater   *updater.Manager
 }
 
 // Bootstrap constructs engines and the protocol registry.
@@ -139,6 +142,8 @@ func Bootstrap() (*Runtime, error) {
 		_ = db.Close()
 	})
 
+	upd := updater.NewManager(logger, buildinfo.Version, updater.NewGitHub())
+
 	return &Runtime{
 		Logger:    logger,
 		Store:     store,
@@ -155,6 +160,7 @@ func Bootstrap() (*Runtime, error) {
 		Keybind:   kb,
 		Bookmarks: bmSvc,
 		Tunnels:   tunnelMgr,
+		Updater:   upd,
 	}, nil
 }
 

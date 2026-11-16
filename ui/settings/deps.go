@@ -10,6 +10,7 @@ import (
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/ui/app"
+	"github.com/ilaziness/vela/ui/update"
 )
 
 // Deps are process-wide services the settings window needs.
@@ -23,4 +24,5 @@ type Deps struct {
 	Keybind *keybind.Manager
 	DB      *database.Database
 	IconPNG []byte
+	Update  *update.Deps
 }

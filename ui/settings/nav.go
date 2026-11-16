@@ -43,7 +43,7 @@ func Root(w *gui.Window, d *Deps) gui.View {
 	case navKeybindings:
 		body = panelKeybindings(w, d, st)
 	case navAbout:
-		body = panelAbout()
+		body = panelAbout(d, st)
 	default:
 		body = panelGeneral(d, st)
 	}

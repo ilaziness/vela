@@ -59,6 +59,8 @@ type State struct {
 	MCPServers []ai.MCPServerEntry
 	Skills     []ai.SkillInfo
 
+	UpdateChecking bool
+
 	// Frameless is the decoration mode captured at window creation;
 	// BarClicks feeds the title strip's double-click maximize.
 	Frameless bool

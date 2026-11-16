@@ -81,6 +81,10 @@ type State struct {
 	Frameless bool
 	BarClicks chrome.ClickTracker
 
+	// UpdatePrompted ensures the background update check pops the dialog
+	// at most once per process.
+	UpdatePrompted bool
+
 	tabSeq     int
 	defaultsOK bool
 }
