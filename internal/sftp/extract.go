@@ -96,17 +96,19 @@ func (sft *Manager) openRemoteArchive(client *sftp.Client, archivePath string) (
 
 // flattenEntries strips the single common top-level directory shared by all
 // entries, so "src/a.txt, src/sub/b.txt" extracts as "a.txt, sub/b.txt" —
-// no folder named after the archive or its root entry.
-func flattenEntries(entries []archiveEntry) []archiveEntry {
+// no folder named after the archive or its root entry. stripped reports
+// whether that root was actually dropped (the remote tar path turns it into
+// --strip-components=1).
+func flattenEntries(entries []archiveEntry) (flattened []archiveEntry, stripped bool) {
 	if len(entries) == 0 {
-		return entries
+		return entries, false
 	}
 	firsts := make(map[string]struct{}, 1)
 	for _, e := range entries {
 		firsts[strings.SplitN(e.name, "/", 2)[0]] = struct{}{}
 	}
 	if len(firsts) != 1 {
-		return entries
+		return entries, false
 	}
 	var root string
 	for k := range firsts {
@@ -115,7 +117,7 @@ func flattenEntries(entries []archiveEntry) []archiveEntry {
 	// Only strip when the common root has children, so a lone "file.txt"
 	// entry is never mangled.
 	if len(entries) == 1 && !entries[0].isDir {
-		return entries
+		return entries, false
 	}
 	out := make([]archiveEntry, 0, len(entries))
 	for _, e := range entries {
@@ -129,11 +131,13 @@ func flattenEntries(entries []archiveEntry) []archiveEntry {
 		}
 		out = append(out, archiveEntry{name: trimmed, isDir: e.isDir, size: e.size, file: e.file})
 	}
-	return out
+	return out, true
 }
 
 // ListArchiveConflicts returns the flattened target paths under destDir that
-// already exist, so the frontend can offer an overwrite confirm.
+// already exist, so the frontend can offer an overwrite confirm. Zip archives
+// are listed by streaming through SFTP; tar-family archives with a remote
+// tar t command on the server.
 func (sft *Manager) ListArchiveConflicts(sessionID, archivePath, destDir string) ([]string, error) {
 	if sessionID == "" || archivePath == "" || destDir == "" {
 		return nil, usererr.Coded("sftp.invalid_extract", "Invalid extract parameters")
@@ -142,19 +146,26 @@ func (sft *Manager) ListArchiveConflicts(sessionID, archivePath, destDir string)
 	if err != nil {
 		return nil, err
 	}
-	arc, err := sft.openRemoteArchive(client, archivePath)
+	entries, cleanup, err := sft.archiveEntries(sessionID, client, archivePath)
 	if err != nil {
 		return nil, err
 	}
-	defer arc.close()
+	defer cleanup()
+	flat, _ := flattenEntries(entries)
+	return sft.conflictList(client, flat, destDir)
+}
+
+// conflictList returns the flattened target paths under destDir that already
+// exist, counting every name once.
+func (sft *Manager) conflictList(client *sftp.Client, flat []archiveEntry, destDir string) ([]string, error) {
 	conflicts := make([]string, 0)
-	seen := make(map[string]struct{}, len(arc.entries))
-	for _, e := range flattenEntries(arc.entries) {
+	seen := make(map[string]struct{}, len(flat))
+	for _, e := range flat {
 		if _, ok := seen[e.name]; ok {
 			continue
 		}
 		seen[e.name] = struct{}{}
-		if _, statErr := client.Stat(joinRemotePath(destDir, e.name)); statErr == nil {
+		if _, statErr := client.Lstat(joinRemotePath(destDir, e.name)); statErr == nil {
 			conflicts = append(conflicts, e.name)
 		} else if !os.IsNotExist(statErr) {
 			return nil, statErr
@@ -163,9 +174,13 @@ func (sft *Manager) ListArchiveConflicts(sessionID, archivePath, destDir string)
 	return conflicts, nil
 }
 
-// ExtractRemoteArchive extracts a remote zip into destDir (current directory
-// semantics: the archive's common root folder is stripped). Runs asynchronously
-// under one upload-typed tracker; the remote pane refreshes on completion.
+// ExtractRemoteArchive extracts a remote archive into destDir (current
+// directory semantics: the archive's common root folder is stripped). Runs
+// asynchronously under one upload-typed tracker; the remote pane refreshes on
+// completion. Zip archives stream through SFTP with staged writes; tar-family
+// archives and bare compressed streams are extracted by a remote command on
+// the server — the data never leaves it and the interactive terminal is not
+// involved.
 func (sft *Manager) ExtractRemoteArchive(sessionID string, archivePath, destDir string, overwrite bool) error {
 	if sessionID == "" || archivePath == "" || destDir == "" {
 		return usererr.Coded("sftp.invalid_extract", "Invalid extract parameters")
@@ -174,14 +189,23 @@ func (sft *Manager) ExtractRemoteArchive(sessionID string, archivePath, destDir 
 	if err != nil {
 		return err
 	}
-	arc, err := sft.openRemoteArchive(client, archivePath)
+	format := detectArchiveFormat(archivePath)
+	entries, cleanup, err := sft.archiveEntries(sessionID, client, archivePath)
 	if err != nil {
 		return err
 	}
-	flat := flattenEntries(arc.entries)
+	flat, stripped := flattenEntries(entries)
 	if len(flat) == 0 {
-		arc.close()
+		cleanup()
 		return usererr.Coded("sftp.invalid_archive", "%s: no extractable entries", archivePath)
+	}
+	if format != formatZip {
+		// The remote tar/gzip write into destDir via -C / redirection, which
+		// does not create it; make sure it exists first.
+		if err := client.MkdirAll(destDir); err != nil {
+			cleanup()
+			return err
+		}
 	}
 	var total int64
 	for _, e := range flat {
@@ -189,41 +213,85 @@ func (sft *Manager) ExtractRemoteArchive(sessionID string, archivePath, destDir 
 			total += e.size
 		}
 	}
-	tracker, err := sft.newTracker(sessionID, transfer.TypeUpload, archivePath, destDir, total, transfer.NewOpts{Overwrite: overwrite})
+	if format != formatZip {
+		// tar t lists names only, so the uncompressed size is unknown;
+		// the tracker runs indeterminate until the command completes.
+		total = 0
+	}
+	tracker, err := sft.newTracker(sessionID, transfer.TypeUpload, archivePath, destDir, total, transfer.NewOpts{Overwrite: overwrite, RemoteOp: true})
 	if err != nil {
-		arc.close()
+		cleanup()
 		return err
 	}
 	go func() {
-		err := sft.extractEntries(client, arc, flat, destDir, overwrite, tracker)
-		arc.close()
-		sft.stopTracker(tracker, err)
+		var runErr error
+		switch {
+		case format == formatZip:
+			runErr = sft.extractEntries(client, flat, destDir, overwrite, tracker)
+		case isTarFamily(format):
+			runErr = sft.extractTarRemote(sessionID, format, archivePath, destDir, stripped)
+		case isSingleStream(format):
+			runErr = sft.extractSingleRemote(sessionID, format, archivePath, destDir, flat[0].name)
+		}
+		cleanup()
+		sft.stopTracker(tracker, runErr)
 	}()
 	sft.notifyQueued(sessionID, 1)
 	return nil
 }
 
+// extractParentsSafe reports whether every existing directory component of
+// rel below destDir is a real directory. A symlink anywhere in the parent
+// chain would redirect writes outside destDir; extraction refuses such paths.
+func extractParentsSafe(client *sftp.Client, destDir, rel string) bool {
+	dir := path.Dir(rel)
+	if dir == "." || dir == "/" || dir == "" {
+		return true
+	}
+	cur := destDir
+	for _, part := range strings.Split(dir, "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		cur = joinRemotePath(cur, part)
+		lst, err := client.Lstat(cur)
+		if err != nil {
+			// Missing components are created as real directories and deeper
+			// paths cannot exist yet.
+			return os.IsNotExist(err)
+		}
+		if !isRealDir(lst) {
+			return false
+		}
+	}
+	return true
+}
+
 // extractEntries writes every entry into destDir. Conflicts without overwrite
 // abort the extraction (they are pre-checked via ListArchiveConflicts; this is
-// the race backstop).
-func (sft *Manager) extractEntries(client *sftp.Client, arc *openArchive, entries []archiveEntry, destDir string, overwrite bool, tracker *transfer.Tracker) error {
+// the race backstop). File contents are staged and swapped onto the target
+// only after a complete write, so a failed extraction never destroys an
+// overwritten original; symlinked parents and symlink targets are replaced,
+// never followed.
+func (sft *Manager) extractEntries(client *sftp.Client, entries []archiveEntry, destDir string, overwrite bool, tracker *transfer.Tracker) error {
 	for _, e := range entries {
 		target := joinRemotePath(destDir, e.name)
-		if st, statErr := client.Stat(target); statErr == nil {
+		if !extractParentsSafe(client, destDir, e.name) {
+			return usererr.Coded("sftp.extract_symlink_path", "%s: entry path crosses a symbolic link", e.name)
+		}
+		if st, statErr := client.Lstat(target); statErr == nil {
 			if !overwrite {
 				return usererr.Coded("sftp.path_exists", "%s already exists", target)
 			}
-			if st.IsDir() != e.isDir {
-				// Type conflict: replace regardless of which side is which.
-				if err := client.RemoveAll(target); err != nil {
-					return err
-				}
-			} else if !e.isDir {
-				// zip entries cannot append; drop the stale file first.
+			if e.isDir && !isRealDir(st) {
+				// A symlink at the target is unlinked, never merged through;
+				// a file is replaced by a real directory below.
 				if err := client.Remove(target); err != nil {
 					return err
 				}
 			}
+			// File entries: extractFile stages the content and replaces the
+			// original only after the full write succeeded.
 		} else if !os.IsNotExist(statErr) {
 			return statErr
 		}
@@ -240,21 +308,23 @@ func (sft *Manager) extractEntries(client *sftp.Client, arc *openArchive, entrie
 	return nil
 }
 
-// extractFile streams one zip entry straight onto a new remote file, wrapping
-// the destination writes with the tracker for progress and cancellation.
+// extractFile streams one zip entry to a staging sibling and swaps it onto
+// target only after the full write succeeded, so a failed extraction never
+// destroys an overwritten original.
 func (sft *Manager) extractFile(client *sftp.Client, zf *zip.File, target string, tracker *transfer.Tracker) error {
 	if err := client.MkdirAll(path.Dir(target)); err != nil {
 		return err
-	}
-	if st, statErr := client.Stat(target); statErr == nil && st.IsDir() {
-		return usererr.Coded("sftp.remote_is_dir", "Remote path %s is a directory", target)
 	}
 	src, err := zf.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	out, err := client.Create(target)
+	staging := editStagingRemotePath(target)
+	if staging == target {
+		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
+	}
+	out, err := client.Create(staging)
 	if err != nil {
 		return err
 	}
@@ -263,7 +333,28 @@ func (sft *Manager) extractFile(client *sftp.Client, zf *zip.File, target string
 	_, copyErr := io.Copy(out, &transfer.Reader{Reader: src, Tracker: tracker})
 	closeErr := out.Close()
 	if copyErr != nil {
+		sft.removeStaging(client, staging)
 		return copyErr
 	}
-	return closeErr
+	if closeErr != nil {
+		sft.removeStaging(client, staging)
+		return closeErr
+	}
+	if st, statErr := client.Lstat(target); statErr == nil && isRealDir(st) {
+		// File-over-directory type conflict: the existing tree is removed
+		// only now, with the replacement content complete at staging.
+		if err := sft.removeRemoteEntry(client, target); err != nil {
+			sft.removeStaging(client, staging)
+			return err
+		}
+		if err := client.Rename(staging, target); err != nil {
+			sft.logger.Error("extract rename failed after removing original",
+				zap.String("staging", staging), zap.String("target", target), zap.Error(err))
+			return usererr.Wrap(err, "sftp.rename_original_removed",
+				"Original %s was removed but renaming %s into place failed; new contents remain at %s: %s",
+				target, staging, staging)
+		}
+		return nil
+	}
+	return sft.replaceStagedFile(client, staging, target)
 }

@@ -319,7 +319,7 @@ const TransferList: React.FC<TransferListProps> = ({
                             </Tooltip>
                           ) : (
                             <>
-                              {hasError && (
+                              {hasError && !transfer.remoteOp && (
                                 <Tooltip title={t("common.retry")}>
                                   <IconButton
                                     size="small"

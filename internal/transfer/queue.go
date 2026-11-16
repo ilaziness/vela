@@ -20,6 +20,10 @@ type QueueRecord struct {
 	// Overwrite is set for in-place edit transfers. Retry must replace the
 	// destination instead of resuming by size.
 	Overwrite bool
+	// RemoteOp marks remote-internal operations (paste / compress / extract)
+	// whose LocalFile and RemoteFile are both remote paths. Retrying them as
+	// a local<->remote transfer is refused.
+	RemoteOp bool
 }
 
 // QueueStore persists unfinished transfers across restarts.
@@ -48,5 +52,6 @@ func RecordToProgress(rec QueueRecord, sessionID string) ProgressData {
 		Rate:         0,
 		Done:         true,
 		Error:        errMsg,
+		RemoteOp:     rec.RemoteOp,
 	}
 }

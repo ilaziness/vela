@@ -71,13 +71,21 @@ type Manager struct {
 	onQueued  func(sessionID string, count int)
 	clients   sync.Map
 	owners    sync.Map // sessionID -> ownerKey
+	// remoteExec runs a command on a fresh non-interactive SSH session of
+	// sessionID's connection — never on the interactive terminal session.
+	// Defaults to ssh.Manager.Exec; tests inject their own transport.
+	remoteExec func(ctx context.Context, sessionID, command string, timeout time.Duration, maxOut int) (string, error)
 }
 
 func NewManager(logger *zap.Logger, sshMgr *ssh.Manager, transfers *transfer.Registry, queue transfer.QueueStore) *Manager {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Manager{logger: logger, ssh: sshMgr, transfers: transfers, queue: queue}
+	m := &Manager{logger: logger, ssh: sshMgr, transfers: transfers, queue: queue}
+	if sshMgr != nil {
+		m.remoteExec = sshMgr.Exec
+	}
+	return m
 }
 
 // SetOnQueued registers a callback after transfers are successfully enqueued.
@@ -190,6 +198,7 @@ func (sft *Manager) queueUpsertRunning(t *transfer.Tracker) {
 		TotalSize:    t.TotalSize(),
 		Status:       transfer.StatusRunning,
 		Overwrite:    t.Overwrite(),
+		RemoteOp:     t.RemoteOp(),
 	}); err != nil {
 		sft.logger.Warn("queue upsert failed", zap.String("id", t.ID()), zap.Error(err))
 	}
@@ -1055,6 +1064,12 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 	if rec == nil {
 		return usererr.Coded("sftp.transfer_not_found", "Transfer not found")
 	}
+	if rec.RemoteOp {
+		// Remote-internal operations (paste / compress / extract) have no
+		// local side; re-running them through the transfer paths would treat
+		// a remote path as a local file. Restart them from their own context.
+		return usererr.Coded("sftp.transfer_remote_op", "Remote file operations cannot be retried as transfers")
+	}
 	switch rec.Status {
 	case transfer.StatusFailed, transfer.StatusCancelled, transfer.StatusInterrupted:
 	default:
@@ -1071,7 +1086,7 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 		return err
 	}
 
-	opts := transfer.NewOpts{ID: rec.ID, OwnerKey: rec.OwnerKey, Overwrite: rec.Overwrite}
+	opts := transfer.NewOpts{ID: rec.ID, OwnerKey: rec.OwnerKey, Overwrite: rec.Overwrite, RemoteOp: rec.RemoteOp}
 	var startErr error
 	switch strings.ToLower(rec.TransferType) {
 	case transfer.TypeUpload:

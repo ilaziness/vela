@@ -524,16 +524,27 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   };
 
   // First free "name (n).ext" against the current listing, explorer-style.
-  const uniqueClipboardName = (name: string, taken: Set<string>): string => {
+  // ext overrides the suffix kept intact while deduping, so multi-dot
+  // suffixes like ".tar.gz" survive for later archive format detection.
+  const uniqueClipboardName = (name: string, taken: Set<string>, ext?: string): string => {
     if (!taken.has(name)) return name;
-    const dot = name.lastIndexOf(".");
-    const stem = dot > 0 ? name.slice(0, dot) : name;
-    const ext = dot > 0 ? name.slice(dot) : "";
+    let stem = name;
+    let suffix = "";
+    if (ext && name.endsWith(ext)) {
+      stem = name.slice(0, -ext.length);
+      suffix = ext;
+    } else {
+      const dot = name.lastIndexOf(".");
+      if (dot > 0) {
+        stem = name.slice(0, dot);
+        suffix = name.slice(dot);
+      }
+    }
     for (let i = 1; i < 1000; i++) {
-      const candidate = `${stem} (${i})${ext}`;
+      const candidate = `${stem} (${i})${suffix}`;
       if (!taken.has(candidate)) return candidate;
     }
-    return `${stem}_${Date.now()}${ext}`;
+    return `${stem}_${Date.now()}${suffix}`;
   };
 
   const handlePaste = async () => {
@@ -592,7 +603,11 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     handleCloseMenu();
     if (targets.length === 0) return;
     const taken = new Set(fileList.map((f) => f.name));
-    const archiveName = uniqueClipboardName(`${timestampArchiveBase()}.zip`, taken);
+    const archiveName = uniqueClipboardName(
+      `${timestampArchiveBase()}.tar.gz`,
+      taken,
+      ".tar.gz",
+    );
     const srcPaths = targets.map((f) => remoteJoin(currentPath, f.name));
     try {
       await SftpService.CompressRemotePaths(
@@ -949,7 +964,12 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
       ? menuActionTargets()[0]
       : null;
   const extractTarget =
-    editTarget && /\.zip$/i.test(editTarget.name) ? editTarget : null;
+    editTarget &&
+    /(\.zip|\.tar|\.tar\.gz|\.tar\.bz2|\.tar\.xz|\.tgz|\.taz|\.tbz2?|\.tbz|\.txz|\.gz|\.bz2|\.xz)$/i.test(
+      editTarget.name,
+    )
+      ? editTarget
+      : null;
 
   return (
     <Box
