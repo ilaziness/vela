@@ -131,16 +131,33 @@ func TestListExtractCommands(t *testing.T) {
 	}
 	// The no-overwrite path stages the archive in an operation-owned staging
 	// directory and promotes the flattened names under per-entry guards.
-	noOverwrite := extractTarNoOverwriteCommand(formatTarXz, "/a.tar.xz", "/d", 0, []string{"a.txt", "src/b.txt"})
+	noOverwrite := extractTarNoOverwriteCommand(formatTarXz, "/a.tar.xz", "/d", 0)
+	// The staging directory lives inside the destination (no write access to
+	// the destination's parent is required) and the promotion walks the
+	// staging tree itself: no inline name list can grow past the shell's
+	// per-argument size cap.
+	if !strings.HasPrefix(noOverwrite, "st='/d/.d.vela-extract-") {
+		t.Errorf("extractTarNoOverwriteCommand staging not inside destDir: %q", noOverwrite)
+	}
+	for _, banned := range []string{"for n in", "mv -f"} {
+		if strings.Contains(noOverwrite, banned) {
+			t.Errorf("extractTarNoOverwriteCommand contains banned %q in %q", banned, noOverwrite)
+		}
+	}
 	for _, want := range []string{
-		"tar xJf '/a.tar.xz' -C \"$st\"",
-		`for n in 'a.txt' 'src/b.txt'`,
+		`tar xJf '/a.tar.xz' -C "$st"`,
+		`rc=0; cd "$d" 2>/dev/null || touch -- "$fl"; find "$st" -mindepth 1 -exec sh -c '`,
+		`n=${s#"$st"/}; t="$d/$n"`,
 		`[ -e "$s" ] || [ -L "$s" ] || continue`,
-		`if [ -e "$t" ] || [ -L "$t" ]; then rc=1; break; fi`,
-		`if [ -L "$q" ]; then rc=1; break 2; fi`,
-		`mv -f -- "$s" "$t"`,
-		`rm -rf -- "$st"; exit "$rc"`,
-		`|| { rm -rf -- "$st"; false; }`,
+		`if [ -e "$t" ] || [ -L "$t" ]; then touch -- "$fl"; continue; fi`,
+		`if [ -L "$q" ]; then touch -- "$fl"; continue 2; fi`,
+		`mkdir -- "$q" 2>/dev/null`,
+		`m=$(stat -c %a -- "$s") && chmod -- "$m" "$t" || touch -- "$fl"`,
+		`g=$(readlink -- "$s") && ln -s -- "$g" "$t" || touch -- "$fl"`,
+		`ln -- "$s" "$t" 2>/dev/null && rm -rf -- "$s" || touch -- "$fl"`,
+		`sh "$st" "$fl" "$d" {} +`,
+		`rc=0; [ -e "$fl" ] && rc=1; rm -rf -- "$st" "$fl"; exit "$rc"; }`,
+		`|| { rm -rf -- "$st" "$fl"; false; }`,
 	} {
 		if !strings.Contains(noOverwrite, want) {
 			t.Errorf("extractTarNoOverwriteCommand missing %q in %q", want, noOverwrite)

@@ -302,6 +302,29 @@ func stagingRemotePath(final string) string {
 	return path.Join(dir, name)
 }
 
+// stagingDirRemotePath returns a unique operation-owned staging directory
+// INSIDE dir. Unlike stagingRemotePath — a sibling of the final entry, which
+// needs write access to that entry's parent directory — this staging directory
+// is created where the operation already writes: extracting into a writable
+// destination must not require write access to the destination's parent (e.g.
+// extracting into /home/alice when /home belongs to root and is not writable).
+func stagingDirRemotePath(dir string) string {
+	base := path.Base(dir)
+	if base == "/" || base == "." {
+		base = "root"
+	}
+	// Keep the staging name within typical filesystem name limits; the random
+	// token keeps truncated names unique.
+	if len(base) > 200 {
+		base = base[:200]
+	}
+	name := "." + base + ".vela-extract-" + stagingToken()
+	if dir == "." || dir == "" {
+		return name
+	}
+	return joinRemotePath(dir, name)
+}
+
 // stagingToken returns a short random hex token for staging names. The clock
 // fallback only matters where the entropy source is unavailable.
 func stagingToken() string {

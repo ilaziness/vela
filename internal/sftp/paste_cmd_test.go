@@ -186,3 +186,26 @@ func TestStagingRemotePathUnique(t *testing.T) {
 		t.Fatalf("staging base name too long: %d", n)
 	}
 }
+
+// TestStagingDirRemotePath: extraction staging lives INSIDE the destination
+// directory (write access to the destination's parent must never be required),
+// with the same uniqueness and name-limit guarantees as stagingRemotePath.
+func TestStagingDirRemotePath(t *testing.T) {
+	seen := make(map[string]bool)
+	for i := 0; i < 16; i++ {
+		got := stagingDirRemotePath("/root/dst")
+		if seen[got] {
+			t.Fatalf("stagingDirRemotePath returned a duplicate: %q", got)
+		}
+		seen[got] = true
+		if want := "/root/dst/.dst.vela-extract-"; !strings.HasPrefix(got, want) {
+			t.Fatalf("staging dir %q does not start with %q", got, want)
+		}
+	}
+	if got := stagingDirRemotePath("/"); !strings.HasPrefix(got, "/.root.vela-extract-") {
+		t.Fatalf("staging dir for / = %q", got)
+	}
+	if n := len(path.Base(stagingDirRemotePath("/d/" + strings.Repeat("b", 300)))); n > 240 {
+		t.Fatalf("staging dir base name too long: %d", n)
+	}
+}

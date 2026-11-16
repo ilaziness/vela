@@ -155,40 +155,64 @@ func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int) 
 // conflict protection: the archive is extracted into an operation-owned
 // staging directory first with normal last-member-wins semantics (repeated
 // members — e.g. from tar -r — keep the newest content), and only the final
-// extracted entries are promoted into destDir under per-entry no-overwrite
-// guards:
+// extracted entries are promoted into destDir under per-entry guards:
 //   - a target that exists (including as a symlink) fails the operation and is
 //     left untouched;
-//   - a flattened name already consumed by an earlier promoted directory is
-//     skipped (its content arrived with the directory);
+//   - promotion never overwrites: files and symlinks are installed with
+//     link(2)/symlink(2) semantics (creation fails on an existing name — the
+//     atomic reservation the mv -f move lacked), directories are claimed with
+//     mkdir(2), so a target created concurrently between check and promotion
+//     is a reported conflict rather than a silent replacement;
 //   - missing parent directories are created as real directories, refusing to
-//     write through a symlink in the parent chain (extractParentsSafe parity).
+//     write through a symlink in the parent chain (extractParentsSafe parity)
+//     and tolerating a parent another writer created concurrently;
+//   - directory entries keep the archive's directory mode on the directories
+//     they create (find visits a directory before its contents) and leave
+//     pre-existing target directories — including their mode — untouched.
 //
-// The staging tree is removed on every exit path. names are the flattened
-// entry names (see flattenEntries) in listing order.
-func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, strip int, names []string) string {
-	staging := stagingRemotePath(destDir)
-	qnames := make([]string, 0, len(names))
-	for _, n := range names {
-		qnames = append(qnames, shellQuote(n))
-	}
+// The staging tree lives INSIDE destDir (write access to destDir's parent must
+// not be required) and is removed on every exit path. The promotion loop walks
+// the staging tree itself instead of an inline name list: the command size
+// stays bounded for archives with thousands of members (the whole command is
+// one shell argument, capped at ~128KiB per argument on Linux).
+func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, strip int) string {
+	st := stagingDirRemotePath(destDir)
 	tarPart := fmt.Sprintf("tar x%sf %s -C \"$st\"", tarCompressFlag(f), shellQuote(archivePath))
 	if strip == 1 {
 		tarPart += " --strip-components=1"
 	}
-	promote := "rc=0; for n in " + strings.Join(qnames, " ") + "; do s=\"$st/$n\"; t=\"$d/$n\"; " +
+	// The inner shell runs one invocation per find batch ("{} +", so the
+	// argument count stays bounded too) and reports failures through a
+	// marker file: find's own exit status is not relied on across
+	// implementations. Paths are handled as "$1"-style arguments, so names
+	// with spaces, newlines or glob characters are safe.
+	promote := "rc=0; cd \"$d\" 2>/dev/null || touch -- \"$fl\"; find \"$st\" -mindepth 1 -exec sh -c '" +
+		"st=$1; fl=$2; d=$3; shift 3; " +
+		"for s in \"$@\"; do " +
+		"n=${s#\"$st\"/}; t=\"$d/$n\"; " +
 		"[ -e \"$s\" ] || [ -L \"$s\" ] || continue; " +
-		"if [ -d \"$s\" ] && [ ! -L \"$s\" ] && [ -d \"$t\" ] && [ ! -L \"$t\" ]; then continue; fi; " +
-		"if [ -e \"$t\" ] || [ -L \"$t\" ]; then rc=1; break; fi; " +
+		"if [ -d \"$s\" ] && [ ! -L \"$s\" ]; then " +
+		"if [ -d \"$t\" ] && [ ! -L \"$t\" ]; then continue; fi; " +
+		"if [ -e \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; continue; fi; " +
 		"q=\"$d\"; r=\"$n\"; while [ \"$r\" != \"${r%/*}\" ]; do c=\"${r%%/*}\"; r=\"${r#*/}\"; q=\"$q/$c\"; " +
-		"if [ -L \"$q\" ]; then rc=1; break 2; fi; " +
-		"if [ ! -d \"$q\" ] && ! mkdir -- \"$q\"; then rc=1; break 2; fi; done; " +
-		"if [ \"$rc\" -eq 0 ] && ! mv -f -- \"$s\" \"$t\"; then rc=1; break; fi; done; " +
-		"rm -rf -- \"$st\"; exit \"$rc\"; }"
-	return "st=" + shellQuote(staging) + " d=" + shellQuote(destDir) +
-		" && rm -rf -- \"$st\" && mkdir -- \"$st\" && " + tarPart +
+		"if [ -L \"$q\" ]; then touch -- \"$fl\"; continue 2; fi; " +
+		"if [ ! -d \"$q\" ]; then mkdir -- \"$q\" 2>/dev/null || { [ -d \"$q\" ] && [ ! -L \"$q\" ] || { touch -- \"$fl\"; continue 2; }; }; fi; done; " +
+		"if mkdir -- \"$t\" 2>/dev/null; then " +
+		"m=$(stat -c %a -- \"$s\") && chmod -- \"$m\" \"$t\" || touch -- \"$fl\"; " +
+		"elif [ ! -d \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; fi; " +
+		"continue; fi; " +
+		"if [ -e \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; continue; fi; " +
+		"q=\"$d\"; r=\"$n\"; while [ \"$r\" != \"${r%/*}\" ]; do c=\"${r%%/*}\"; r=\"${r#*/}\"; q=\"$q/$c\"; " +
+		"if [ -L \"$q\" ]; then touch -- \"$fl\"; continue 2; fi; " +
+		"if [ ! -d \"$q\" ]; then mkdir -- \"$q\" 2>/dev/null || { [ -d \"$q\" ] && [ ! -L \"$q\" ] || { touch -- \"$fl\"; continue 2; }; }; fi; done; " +
+		"if [ -L \"$s\" ]; then g=$(readlink -- \"$s\") && ln -s -- \"$g\" \"$t\" || touch -- \"$fl\"; " +
+		"else ln -- \"$s\" \"$t\" 2>/dev/null && rm -rf -- \"$s\" || touch -- \"$fl\"; fi; " +
+		"done' sh \"$st\" \"$fl\" \"$d\" {} + || touch -- \"$fl\"; " +
+		"rc=0; [ -e \"$fl\" ] && rc=1; rm -rf -- \"$st\" \"$fl\"; exit \"$rc\"; }"
+	return "st=" + shellQuote(st) + " fl=" + shellQuote(st+".fail") + " d=" + shellQuote(destDir) +
+		" && rm -rf -- \"$st\" \"$fl\" && mkdir -- \"$st\" && " + tarPart +
 		" && { " + promote +
-		" || { rm -rf -- \"$st\"; false; }"
+		" || { rm -rf -- \"$st\" \"$fl\"; false; }"
 }
 
 // extractSingleCommand builds the decompression of a bare compressed stream

@@ -1141,13 +1141,13 @@ func TestIntegrationExtractTarNoOverwriteKeepsExisting(t *testing.T) {
 	uploadBytes(t, client, arc, buildTarGz(t, map[string]string{"a.txt": "new\n"}))
 	writeRemote(t, client, path.Join(work, "ex", "a.txt"), "old\n")
 
-	err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, false, []string{"a.txt"})
+	err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, false)
 	if usererr.CodeOf(err) != "sftp.remote_command_failed" {
 		t.Fatalf("no-overwrite extract error = %v, want remote_command_failed", err)
 	}
 	waitRemoteContent(t, client, path.Join(work, "ex", "a.txt"), "old\n", "existing target preserved")
 
-	if err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, true, []string{"a.txt"}); err != nil {
+	if err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "ex"), false, true); err != nil {
 		t.Fatalf("overwrite extract: %v", err)
 	}
 	waitRemoteContent(t, client, path.Join(work, "ex", "a.txt"), "new\n", "overwrite extract replaced")

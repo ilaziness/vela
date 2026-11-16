@@ -233,11 +233,7 @@ func (sft *Manager) ExtractRemoteArchive(sessionID string, archivePath, destDir 
 		case format == formatZip:
 			runErr = sft.extractEntries(client, flat, destDir, overwrite, tracker)
 		case isTarFamily(format):
-			names := make([]string, 0, len(flat))
-			for _, e := range flat {
-				names = append(names, e.name)
-			}
-			runErr = sft.extractTarRemote(tracker.Context(), sessionID, format, archivePath, destDir, stripped, overwrite, names)
+			runErr = sft.extractTarRemote(tracker.Context(), sessionID, format, archivePath, destDir, stripped, overwrite)
 		case isSingleStream(format):
 			runErr = sft.extractSingleRemote(tracker.Context(), sessionID, format, archivePath, destDir, flat[0].name, overwrite)
 		}

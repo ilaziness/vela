@@ -71,6 +71,22 @@ func pasteDestInvalid(src, dst string, srcIsRealDir bool) bool {
 	return srcIsRealDir && strings.HasPrefix(d, s+"/")
 }
 
+// splitRemoteEntry splits p into the parent spelling and the verbatim
+// basename WITHOUT lexical cleaning: path.Dir cleans the result, collapsing
+// ".." before the server has resolved it (POSIX follows symlinks first and
+// then applies ".."), which would name a different directory than the server
+// traverses.
+func splitRemoteEntry(p string) (dir, base string) {
+	i := strings.LastIndexByte(p, '/')
+	if i < 0 {
+		return ".", p
+	}
+	if i == 0 {
+		return "/", p[1:]
+	}
+	return p[:i], p[i+1:]
+}
+
 // canonicalRemotePath resolves p to the server-canonical path of the entry it
 // names. The server follows symlinks and resolves ".." after them (POSIX),
 // which lexical cleaning cannot do. Falls back to canonicalizing the parent
@@ -81,10 +97,30 @@ func (sft *Manager) canonicalRemotePath(client *sftp.Client, p string) string {
 	if rp, err := client.RealPath(p); err == nil && rp != "" {
 		return path.Clean(rp)
 	}
-	if rp, err := client.RealPath(path.Dir(p)); err == nil && rp != "" {
-		return path.Join(rp, path.Base(p))
+	dir, base := splitRemoteEntry(p)
+	if rp, err := client.RealPath(dir); err == nil && rp != "" {
+		return joinRemotePath(rp, base)
 	}
 	return path.Clean(p)
+}
+
+// canonicalRemoteEntry identifies a remote ENTRY by the server-canonical path
+// of its parent directory plus its verbatim basename. The final component is
+// never followed: a symlink entry is identified by its own directory slot, not
+// by its target (which resolving the whole path would report — and which would
+// both misname the entry at the destination and hide its true ancestry). Only
+// the parent spelling is resolved, where the server follows symlinks and
+// applies ".." afterwards (POSIX) — lexical cleaning cannot do that. A spelling
+// whose base is "." or ".." names a directory rather than an entry and falls
+// back to the full canonical path (real-directory semantics).
+func (sft *Manager) canonicalRemoteEntry(client *sftp.Client, p string) (entry, name string) {
+	_, base := splitRemoteEntry(p)
+	if base == "." || base == ".." {
+		full := sft.canonicalRemotePath(client, p)
+		return full, path.Base(full)
+	}
+	dir, base := splitRemoteEntry(p)
+	return joinRemotePath(sft.canonicalRemotePath(client, dir), base), base
 }
 
 // PasteRemotePaths copies srcPaths into destDir within one session, one tracker
@@ -107,13 +143,12 @@ func (sft *Manager) PasteRemotePaths(sessionID string, srcPaths []string, destNa
 		return err
 	}
 	jobs := make([]pasteJob, 0, len(srcPaths))
+	// The destination directory is resolved once; operations and ancestry
+	// checks work on the server-canonical spelling and never on a lexical
+	// collapse of symlink-sensitive ".." components.
+	destCanon := sft.canonicalRemotePath(client, destDir)
 	for i, src := range srcPaths {
-		// Keep the original spelling for every remote operation: POSIX
-		// resolves ".." after following symlinks, so a lexical path.Clean
-		// could name a different file than the server moves or copies (a cut
-		// of /srv/link/../config must act on the server-resolved entry, not
-		// on /srv/config). Only trailing separators are stripped so entry
-		// semantics hold.
+		// Only trailing separators are stripped so entry semantics hold.
 		src = strings.TrimRight(src, "/")
 		if src == "" {
 			return usererr.Coded("sftp.invalid_paste", "Invalid paste parameters")
@@ -122,16 +157,20 @@ func (sft *Manager) PasteRemotePaths(sessionID string, srcPaths []string, destNa
 		if statErr != nil {
 			return usererr.Wrap(statErr, "sftp.remote_path", "Remote path %s: %s", src)
 		}
-		// The entry name and the identity/ancestry checks use the
-		// server-resolved canonical paths; a cut of one spelling onto another
-		// naming the same entry must never reach the copy-and-delete path.
-		srcCanon := sft.canonicalRemotePath(client, src)
-		name := path.Base(srcCanon)
+		// Entry identity: canonical parent directory plus verbatim basename
+		// (see canonicalRemoteEntry). Both the default destination name and
+		// the identity/ancestry checks use it: a symlink gets its own name at
+		// the destination (not its target's), and a cut of one spelling onto
+		// another naming the same entry never reaches the copy-and-delete
+		// path. Recursive work uses this canonical spelling too, so joining
+		// child names cannot collapse ".." into a different tree.
+		srcEntry, defName := sft.canonicalRemoteEntry(client, src)
+		name := defName
 		if i < len(destNames) && destNames[i] != "" {
 			name = destNames[i]
 		}
-		dst := joinRemotePath(destDir, name)
-		if pasteDestInvalid(srcCanon, sft.canonicalRemotePath(client, dst), isRealDir(info)) {
+		dst := joinRemotePath(destCanon, name)
+		if pasteDestInvalid(srcEntry, dst, isRealDir(info)) {
 			return usererr.Coded("sftp.paste_into_self", "Cannot paste %s into itself", src)
 		}
 		// Synchronous conflict guard: without overwrite an existing destination
@@ -146,12 +185,12 @@ func (sft *Manager) PasteRemotePaths(sessionID string, srcPaths []string, destNa
 		}
 		total := info.Size()
 		if isRealDir(info) {
-			total, err = sft.calcRemoteDirSize(sessionID, src)
+			total, err = sft.calcRemoteDirSize(sessionID, srcEntry)
 			if err != nil {
 				return usererr.Wrap(err, "sftp.remote_path", "Remote path %s: %s", src)
 			}
 		}
-		jobs = append(jobs, pasteJob{src: src, dst: dst, size: total})
+		jobs = append(jobs, pasteJob{src: srcEntry, dst: dst, size: total})
 	}
 	queued := 0
 	for _, job := range jobs {

@@ -85,18 +85,16 @@ func (sft *Manager) archiveEntries(sessionID string, client *sftp.Client, archiv
 // root folder is dropped exactly like the streaming zip path does (tar counts
 // a leading "./" as the stripped component). With overwrite false the archive
 // is materialized in a staging directory first and promoted under per-entry
-// no-overwrite guards (see extractTarNoOverwriteCommand); names are the
-// flattened entry names in listing order and only used on that path. The
-// command runs under ctx: cancellation closes the remote session and stops
-// the extraction.
-func (sft *Manager) extractTarRemote(ctx context.Context, sessionID string, f archiveFormat, archivePath, destDir string, stripped, overwrite bool, names []string) error {
+// no-overwrite guards (see extractTarNoOverwriteCommand). The command runs
+// under ctx: cancellation closes the remote session and stops the extraction.
+func (sft *Manager) extractTarRemote(ctx context.Context, sessionID string, f archiveFormat, archivePath, destDir string, stripped, overwrite bool) error {
 	strip := 0
 	if stripped {
 		strip = 1
 	}
 	cmd := extractTarCommand(f, archivePath, destDir, strip)
 	if !overwrite {
-		cmd = extractTarNoOverwriteCommand(f, archivePath, destDir, strip, names)
+		cmd = extractTarNoOverwriteCommand(f, archivePath, destDir, strip)
 	}
 	_, err := sft.runRemoteCommand(ctx, sessionID, cmd, 0, ssh.DefaultExecMaxOut)
 	return err
