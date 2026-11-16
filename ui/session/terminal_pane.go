@@ -28,15 +28,14 @@ func TerminalPane(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 		Sizing:  gui.FillFill,
 		Content: []gui.View{tm.View(w)},
 	}))
-	return terminalMenu(w, ctrl, tab, tm, body)
+	return terminalMenu(w, ctrl, tab.SessID, tm, body)
 }
 
 // terminalMenu wraps the terminal view in a right-click context menu.
 // Copy/Paste/Find dispatch through Term.RunAction so they honor the same
 // conditional-passthrough rules as the keyboard bindings; the record item
 // toggles a .gtr session recording via the controller.
-func terminalMenu(w *gui.Window, ctrl *app.Controller, tab *app.Tab, tm *term.Term, body gui.View) gui.View {
-	sessID := tab.SessID
+func terminalMenu(w *gui.Window, ctrl *app.Controller, sessID string, tm *term.Term, body gui.View) gui.View {
 	recordText := i18n.T("terminal.start_logging")
 	if tm.Recording() {
 		recordText = i18n.T("terminal.stop_logging")
