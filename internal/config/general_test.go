@@ -27,3 +27,9 @@ func TestGeneralConfigNormalize(t *testing.T) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 }
+
+func TestDefaultAutoCheckUpdateEnabled(t *testing.T) {
+	if !Default().General.AutoCheckUpdate {
+		t.Fatal("auto check update should default to enabled")
+	}
+}

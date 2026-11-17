@@ -46,12 +46,13 @@ type Config struct {
 }
 
 type GeneralConfig struct {
-	UserDataDir string `toml:"user_data_dir"`
-	Theme       string `toml:"theme"`
-	Language    string `toml:"language"`
-	Frameless   bool   `toml:"frameless"`
-	Font        string `toml:"font"`
-	FontSize    int    `toml:"font_size"`
+	UserDataDir     string `toml:"user_data_dir"`
+	Theme           string `toml:"theme"`
+	Language        string `toml:"language"`
+	Frameless       bool   `toml:"frameless"`
+	AutoCheckUpdate bool   `toml:"auto_check_update"`
+	Font            string `toml:"font"`
+	FontSize        int    `toml:"font_size"`
 }
 
 type TerminalConfig struct {
@@ -101,9 +102,10 @@ func Default() *Config {
 	execDir := system.GetExecutableDir()
 	return &Config{
 		General: GeneralConfig{
-			UserDataDir: filepath.Join(execDir, "data"),
-			Theme:       "dark",
-			FontSize:    14,
+			UserDataDir:     filepath.Join(execDir, "data"),
+			Theme:           "dark",
+			AutoCheckUpdate: true,
+			FontSize:        14,
 		},
 		Terminal: TerminalConfig{
 			Font:            strings.Join(defaultFontFamily, ","),

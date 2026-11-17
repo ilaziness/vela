@@ -187,6 +187,23 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
               }
             />
           </FormRow>
+          <FormRow label={t("settings.general.auto_check_update")}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(localConfig.AutoCheckUpdate)}
+                  onChange={(e) =>
+                    handleChange("AutoCheckUpdate", e.target.checked)
+                  }
+                />
+              }
+              label={
+                localConfig.AutoCheckUpdate
+                  ? t("common.enabled")
+                  : t("common.disabled")
+              }
+            />
+          </FormRow>
           <FormRow label={t("settings.general.font")}>
             <TextField
               fullWidth
