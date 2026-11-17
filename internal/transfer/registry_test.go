@@ -46,3 +46,34 @@ func TestTrackerStopRecordsErrorAndWait(t *testing.T) {
 		t.Fatalf("Wait()=%v, want %v", got, want)
 	}
 }
+
+func TestTrackerRemoteOpFlowsToProgressData(t *testing.T) {
+	var events []ProgressData
+	r := NewRegistry(func(d ProgressData) { events = append(events, d) })
+	tr, err := r.NewWith("sess", TypeUpload, "/remote/a", "/remote/b", 10, NewOpts{ID: "p1", RemoteOp: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tr.RemoteOp() {
+		t.Fatal("RemoteOp() = false, want true")
+	}
+	tr.Stop(nil)
+	var saw bool
+	for _, d := range events {
+		if d.ID == "p1" && d.RemoteOp {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatalf("no progress event carried RemoteOp: %+v", events)
+	}
+	// Regular transfers default to RemoteOp=false.
+	tr2, err := r.New("sess", TypeDownload, "l", "r", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr2.Stop(nil)
+	if tr2.RemoteOp() {
+		t.Fatal("plain transfer RemoteOp() = true, want false")
+	}
+}

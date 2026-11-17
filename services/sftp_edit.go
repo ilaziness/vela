@@ -39,6 +39,11 @@ type remoteEdit struct {
 	remote      string
 	local       string
 	baseline    time.Time
+	// syncedLocal is the local mtime from the last moment the local file was
+	// known to match the remote file (download completion / successful upload).
+	// Unlike baseline — which also advances when the user declines an upload —
+	// it only moves on a real sync, so declined edits stay "dirty".
+	syncedLocal time.Time
 	snapSize    int64
 	snapMod     string
 	downloading bool
@@ -90,14 +95,34 @@ func (b *editBook) begin(ed *remoteEdit) (beginAction, string) {
 		opened := cur.opened
 		local := cur.local
 		cancel := cur.cancel
+		snapSize := cur.snapSize
+		snapMod := cur.snapMod
+		synced := cur.syncedLocal
 		cur.mu.Unlock()
 		if downloading {
 			return beginDownloading, local
 		}
 		if opened {
-			return beginReopen, local
-		}
-		if cancel != nil {
+			// 远端文件自首次下载后发生了变化（服务器端被其他进程改写等），
+			// 且本地临时文件自最近一次同步（下载完成 / 上传成功）以来没有被
+			// 用户编辑过时，重新下载，避免再次"编辑"拿到的永远是最初的缓存副本。
+			// 本地有未保存修改（包括用户在上传确认中选择了"不上传"）时保持
+			// reopen，防止静默丢弃用户编辑。
+			remoteChanged := ed.snapSize != snapSize || ed.snapMod != snapMod
+			localClean := false
+			if st, err := os.Stat(local); err == nil && !st.ModTime().After(synced) {
+				localClean = true
+			}
+			if !remoteChanged || !localClean {
+				// 旧编辑条目继续持有会话（watchEdit 负责后续保存提醒），
+				// 不能在这里取消它的 ctx，否则监视循环会一起退出。
+				return beginReopen, local
+			}
+			if cancel != nil {
+				cancel()
+			}
+			// 落到下方：files[ed.remote] = ed，按全新编辑重新下载
+		} else if cancel != nil {
 			cancel()
 		}
 	}
@@ -350,6 +375,7 @@ func (s *SftpService) finishEditDownload(ctx context.Context, ed *remoteEdit, tr
 	}
 	ed.mu.Lock()
 	ed.baseline = st.ModTime()
+	ed.syncedLocal = st.ModTime()
 	ed.downloading = false
 	ed.opened = true
 	ed.mu.Unlock()
@@ -477,6 +503,13 @@ func (s *SftpService) uploadEdit(ed *remoteEdit) (time.Time, error) {
 	if err := tracker.Wait(); err != nil {
 		return time.Time{}, err
 	}
+	ed.mu.Lock()
+	// 上传成功：以上传开始前的本地 mtime 作为最近同步点。上传期间又有
+	// 保存时 mtime 更新，会保持"脏"，下次 begin 仍走 reopen。
+	if started.After(ed.syncedLocal) {
+		ed.syncedLocal = started
+	}
+	ed.mu.Unlock()
 	info, statErr := s.mgr.Stat(ed.sessionID, ed.remote)
 	if statErr != nil {
 		s.logger.Warn("stat remote after edit upload failed", zap.String("path", ed.remote), zap.Error(statErr))

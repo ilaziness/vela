@@ -2,7 +2,10 @@ package sftp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -71,13 +74,21 @@ type Manager struct {
 	onQueued  func(sessionID string, count int)
 	clients   sync.Map
 	owners    sync.Map // sessionID -> ownerKey
+	// remoteExec runs a command on a fresh non-interactive SSH session of
+	// sessionID's connection — never on the interactive terminal session.
+	// Defaults to ssh.Manager.Exec; tests inject their own transport.
+	remoteExec func(ctx context.Context, sessionID, command string, timeout time.Duration, maxOut int) (string, error)
 }
 
 func NewManager(logger *zap.Logger, sshMgr *ssh.Manager, transfers *transfer.Registry, queue transfer.QueueStore) *Manager {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Manager{logger: logger, ssh: sshMgr, transfers: transfers, queue: queue}
+	m := &Manager{logger: logger, ssh: sshMgr, transfers: transfers, queue: queue}
+	if sshMgr != nil {
+		m.remoteExec = sshMgr.Exec
+	}
+	return m
 }
 
 // SetOnQueued registers a callback after transfers are successfully enqueued.
@@ -190,6 +201,7 @@ func (sft *Manager) queueUpsertRunning(t *transfer.Tracker) {
 		TotalSize:    t.TotalSize(),
 		Status:       transfer.StatusRunning,
 		Overwrite:    t.Overwrite(),
+		RemoteOp:     t.RemoteOp(),
 	}); err != nil {
 		sft.logger.Warn("queue upsert failed", zap.String("id", t.ID()), zap.Error(err))
 	}
@@ -269,13 +281,63 @@ func (sft *Manager) uploadFile(sessionID string, localPathFile, remoteDir string
 
 const posixRenameExt = "posix-rename@openssh.com"
 
-func editStagingRemotePath(final string) string {
+// stagingRemotePath returns a hidden staging sibling of final where replacement
+// content is built before it is swapped in. The name carries a random token so
+// every operation owns a unique staging entry: cleanup only ever removes its
+// own staging and a pre-planted staging symlink can never be followed (the
+// staging file is also created exclusively), even when two operations race on
+// the same target.
+func stagingRemotePath(final string) string {
 	dir := path.Dir(final)
-	name := "." + path.Base(final) + ".vela-edit"
+	base := path.Base(final)
+	// Keep the staging name within typical filesystem name limits; the random
+	// token keeps truncated names unique.
+	if len(base) > 200 {
+		base = base[:200]
+	}
+	name := "." + base + ".vela-edit-" + stagingToken()
 	if dir == "." || dir == "" {
 		return name
 	}
 	return path.Join(dir, name)
+}
+
+// stagingDirRemotePath returns a unique operation-owned staging directory
+// INSIDE dir. Unlike stagingRemotePath — a sibling of the final entry, which
+// needs write access to that entry's parent directory — this staging directory
+// is created where the operation already writes: extracting into a writable
+// destination must not require write access to the destination's parent (e.g.
+// extracting into /home/alice when /home belongs to root and is not writable).
+func stagingDirRemotePath(dir string) string {
+	base := path.Base(dir)
+	if base == "/" || base == "." {
+		base = "root"
+	}
+	// Keep the staging name within typical filesystem name limits; the random
+	// token keeps truncated names unique.
+	if len(base) > 200 {
+		base = base[:200]
+	}
+	name := "." + base + ".vela-extract-" + stagingToken()
+	if dir == "." || dir == "" {
+		return name
+	}
+	// Append the generated basename WITHOUT lexical cleaning: path.Join would
+	// collapse ".." before the server follows symlinks (POSIX resolves ".."
+	// after following them), so a destination such as /srv/link/../out would
+	// get a staging directory in the wrong tree. Keep the caller's spelling
+	// intact — the server resolves both paths the same way.
+	return strings.TrimRight(dir, "/") + "/" + name
+}
+
+// stagingToken returns a short random hex token for staging names. The clock
+// fallback only matters where the entropy source is unavailable.
+func stagingToken() string {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // stagingReplacer is the subset of *sftp.Client used to swap in an edit upload.
@@ -296,14 +358,15 @@ func (sft *Manager) uploadFileReplace(client *sftp.Client, local *os.File, remot
 	if remoteFinal == "" {
 		return usererr.Coded("sftp.remote_path_empty", "Remote path is empty")
 	}
-	staging := editStagingRemotePath(remoteFinal)
+	staging := stagingRemotePath(remoteFinal)
 	if staging == remoteFinal {
 		return usererr.Coded("sftp.staging_equals_remote", "Edit staging path equals remote path")
 	}
 	if _, err := local.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	remoteFile, err := client.Create(staging)
+	// Exclusive create: never follow a symlink pre-planted at the staging name.
+	remoteFile, err := client.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if err != nil {
 		return err
 	}
@@ -386,9 +449,21 @@ func sftpOpUnsupported(err error) bool {
 	return errors.As(err, &st) && st.FxCode() == sftp.ErrSSHFxOpUnsupported
 }
 
+// removeStaging deletes a staging entry created by this operation (best
+// effort). Staging names are unique per operation, so this can only ever touch
+// the caller's own temp path.
 func (sft *Manager) removeStaging(client stagingReplacer, staging string) {
 	if err := client.Remove(staging); err != nil && !os.IsNotExist(err) {
 		sft.logger.Warn("delete remote edit temp failed", zap.String("path", staging), zap.Error(err))
+	}
+}
+
+// removeStagingTree removes a staging entry that may be a whole directory tree
+// (best effort). A failed staged copy can leave a partial tree behind, so
+// cleanup here must be recursive.
+func (sft *Manager) removeStagingTree(client *sftp.Client, staging string) {
+	if err := client.RemoveAll(staging); err != nil && !os.IsNotExist(err) {
+		sft.logger.Warn("delete remote staging tree failed", zap.String("path", staging), zap.Error(err))
 	}
 }
 
@@ -1055,6 +1130,12 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 	if rec == nil {
 		return usererr.Coded("sftp.transfer_not_found", "Transfer not found")
 	}
+	if rec.RemoteOp {
+		// Remote-internal operations (paste / compress / extract) have no
+		// local side; re-running them through the transfer paths would treat
+		// a remote path as a local file. Restart them from their own context.
+		return usererr.Coded("sftp.transfer_remote_op", "Remote file operations cannot be retried as transfers")
+	}
 	switch rec.Status {
 	case transfer.StatusFailed, transfer.StatusCancelled, transfer.StatusInterrupted:
 	default:
@@ -1071,7 +1152,7 @@ func (sft *Manager) RetryTransfer(sessionID, transferID string) error {
 		return err
 	}
 
-	opts := transfer.NewOpts{ID: rec.ID, OwnerKey: rec.OwnerKey, Overwrite: rec.Overwrite}
+	opts := transfer.NewOpts{ID: rec.ID, OwnerKey: rec.OwnerKey, Overwrite: rec.Overwrite, RemoteOp: rec.RemoteOp}
 	var startErr error
 	switch strings.ToLower(rec.TransferType) {
 	case transfer.TypeUpload:

@@ -62,6 +62,95 @@ func TestNextEditBaselineKeepsUploadStart(t *testing.T) {
 	}
 }
 
+func writeEditFile(t *testing.T, mtime time.Time) string {
+	t.Helper()
+	local := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(local, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(local, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	return local
+}
+
+func TestBeginReopenKeepsWatchCancel(t *testing.T) {
+	// Reopening an unchanged remote must not cancel the running watch ctx:
+	// watchEdit drives the save prompt for the kept edit.
+	base := time.Unix(1_700_000_000, 0)
+	local := writeEditFile(t, base)
+	book := newEditBook()
+	cancelled := false
+	cur := &remoteEdit{
+		sessionID: "s", remote: "/a", local: local,
+		snapSize: 1, snapMod: "m1", syncedLocal: base, opened: true,
+		cancel: func() { cancelled = true },
+	}
+	if action, _ := book.begin(cur); action != beginStarted {
+		t.Fatalf("first begin = %v", action)
+	}
+	neu := &remoteEdit{sessionID: "s", remote: "/a", local: local, snapSize: 1, snapMod: "m1"}
+	if action, gotLocal := book.begin(neu); action != beginReopen || gotLocal != local {
+		t.Fatalf("reopen begin = %v local=%s", action, gotLocal)
+	}
+	if cancelled {
+		t.Fatal("reopen cancelled the running watch")
+	}
+}
+
+func TestBeginReopenAfterDeclinedUploadKeepsLocal(t *testing.T) {
+	// The user edited locally and declined the upload prompt: the local file
+	// is newer than syncedLocal (dirty) although baseline advanced. Even when
+	// the remote changed meanwhile, re-edit must keep the local copy
+	// (beginReopen) and never redownload over unsaved edits.
+	base := time.Unix(1_700_000_000, 0)
+	edited := base.Add(5 * time.Minute)
+	local := writeEditFile(t, edited)
+	book := newEditBook()
+	cancelled := false
+	cur := &remoteEdit{
+		sessionID: "s", remote: "/a", local: local,
+		snapSize: 1, snapMod: "m1", syncedLocal: base, opened: true,
+		cancel: func() { cancelled = true },
+	}
+	if action, _ := book.begin(cur); action != beginStarted {
+		t.Fatalf("first begin = %v", action)
+	}
+	// Declined upload: baseline advances past the local edit, syncedLocal stays.
+	cur.mu.Lock()
+	cur.baseline = edited
+	cur.mu.Unlock()
+	neu := &remoteEdit{sessionID: "s", remote: "/a", local: local, snapSize: 2, snapMod: "m2"}
+	if action, _ := book.begin(neu); action != beginReopen {
+		t.Fatalf("declined edit must reopen, got %v", action)
+	}
+	if cancelled {
+		t.Fatal("declined edit was cancelled")
+	}
+}
+
+func TestBeginRedownloadsCleanLocalWhenRemoteChanged(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	local := writeEditFile(t, base)
+	book := newEditBook()
+	cancelled := false
+	cur := &remoteEdit{
+		sessionID: "s", remote: "/a", local: local,
+		snapSize: 1, snapMod: "m1", syncedLocal: base, opened: true,
+		cancel: func() { cancelled = true },
+	}
+	if action, _ := book.begin(cur); action != beginStarted {
+		t.Fatalf("first begin = %v", action)
+	}
+	neu := &remoteEdit{sessionID: "s", remote: "/a", local: local, snapSize: 2, snapMod: "m2"}
+	if action, _ := book.begin(neu); action != beginStarted {
+		t.Fatalf("clean local with remote change must redownload, got %v", action)
+	}
+	if !cancelled {
+		t.Fatal("stale edit watch was not cancelled before redownload")
+	}
+}
+
 func TestDialogDismissIsNo(t *testing.T) {
 	if choiceFromButton(false) != editNo || choiceFromButton(true) != editYes {
 		t.Fatal("button result did not map to a choice")

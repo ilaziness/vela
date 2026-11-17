@@ -28,6 +28,10 @@ type ProgressData struct {
 	Rate         float64 `json:"rate"`
 	Done         bool    `json:"done"`
 	Error        string  `json:"error"`
+	// RemoteOp marks remote-internal operations (paste / compress / extract)
+	// whose LocalFile and RemoteFile are both remote paths; they cannot be
+	// retried as a local<->remote transfer.
+	RemoteOp bool `json:"remoteOp"`
 }
 
 // NewOpts configures optional tracker fields.
@@ -35,6 +39,9 @@ type NewOpts struct {
 	ID        string
 	OwnerKey  string
 	Overwrite bool
+	// RemoteOp marks the tracker as a remote-internal operation
+	// (paste / compress / extract) instead of a local<->remote transfer.
+	RemoteOp bool
 }
 
 type Registry struct {
@@ -80,6 +87,7 @@ func (r *Registry) NewWith(sessionID, transferType, localFile, remoteFile string
 		remoteFile:   remoteFile,
 		total:        total,
 		overwrite:    opts.Overwrite,
+		remoteOp:     opts.RemoteOp,
 		done:         make(chan struct{}),
 		ctx:          ctx,
 		cancelFunc:   cancel,
@@ -175,6 +183,7 @@ type Tracker struct {
 	cancelled    bool
 	interrupted  bool
 	overwrite    bool
+	remoteOp     bool
 	err          error
 }
 
@@ -185,6 +194,7 @@ func (t *Tracker) LocalFile() string    { return t.localFile }
 func (t *Tracker) RemoteFile() string   { return t.remoteFile }
 func (t *Tracker) TotalSize() int64     { return t.total }
 func (t *Tracker) Overwrite() bool      { return t.overwrite }
+func (t *Tracker) RemoteOp() bool       { return t.remoteOp }
 
 // Wait blocks until Stop and returns the error recorded there.
 func (t *Tracker) Wait() error {
@@ -198,6 +208,14 @@ func (t *Tracker) WasCancelled() bool {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	return t.cancelled
+}
+
+// Context returns the tracker's context. It is cancelled when the user cancels
+// the transfer; remote commands driven by a transfer should run under it so
+// cancellation actually stops the remote work instead of only marking the
+// tracker.
+func (t *Tracker) Context() context.Context {
+	return t.ctx
 }
 
 func (t *Tracker) WasInterrupted() bool {
@@ -259,6 +277,7 @@ func (t *Tracker) data(rate float64, done bool, err error) ProgressData {
 		Transferred:  transferred,
 		Rate:         rate,
 		Done:         done,
+		RemoteOp:     t.remoteOp,
 	}
 	if err != nil {
 		p.Error = err.Error()

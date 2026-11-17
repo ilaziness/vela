@@ -29,11 +29,17 @@ import {
 } from "@mui/material";
 import {
   CloudDownload as DownloadIcon,
+  ContentCopy as CopyPathIcon,
+  ContentCut as CutIcon,
+  ContentPaste as PasteIcon,
   CreateNewFolder as CreateFolderIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
   DriveFileRenameOutline as RenameIcon,
+  FileCopy as CopyIcon,
   FolderOpen as FolderOpenIcon,
+  FolderZip as CompressIcon,
+  Unarchive as ExtractIcon,
   NoteAdd as CreateFileIcon,
   Security as ChmodIcon,
   Person as ChownIcon,
@@ -117,6 +123,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   } | null>(null);
 
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
+
+  // Remote clipboard for copy/cut/paste within this SFTP pane.
+  const [clipboard, setClipboard] = useState<{
+    srcDir: string;
+    names: string[];
+    cut: boolean;
+  } | null>(null);
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [filesToDelete, setFilesToDelete] = useState<FileInfo[]>([]);
@@ -487,6 +500,155 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
     }
   };
 
+  const handleCopyRemotePaths = async (targets: FileInfo[]) => {
+    handleCloseMenu();
+    if (targets.length === 0) return;
+    const paths = targets.map((f) => remoteJoin(currentPath, f.name));
+    try {
+      await navigator.clipboard.writeText(paths.join("\n"));
+    } catch (err: any) {
+      showMessageError(translateServiceError(err));
+      LogService.Error(`Failed to copy remote paths: ${err.message || err}`);
+    }
+  };
+
+  const handleClipboardStore = (cut: boolean) => {
+    const targets = menuActionTargets();
+    handleCloseMenu();
+    if (targets.length === 0) return;
+    setClipboard({
+      srcDir: currentPath,
+      names: targets.map((f) => f.name),
+      cut,
+    });
+  };
+
+  // First free "name (n).ext" against the current listing, explorer-style.
+  // ext overrides the suffix kept intact while deduping, so multi-dot
+  // suffixes like ".tar.gz" survive for later archive format detection.
+  const uniqueClipboardName = (name: string, taken: Set<string>, ext?: string): string => {
+    if (!taken.has(name)) return name;
+    let stem = name;
+    let suffix = "";
+    if (ext && name.endsWith(ext)) {
+      stem = name.slice(0, -ext.length);
+      suffix = ext;
+    } else {
+      const dot = name.lastIndexOf(".");
+      if (dot > 0) {
+        stem = name.slice(0, dot);
+        suffix = name.slice(dot);
+      }
+    }
+    for (let i = 1; i < 1000; i++) {
+      const candidate = `${stem} (${i})${suffix}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+    return `${stem}_${Date.now()}${suffix}`;
+  };
+
+  const handlePaste = async () => {
+    handleCloseBlankMenu();
+    handleCloseMenu();
+    if (!clipboard) return;
+    const srcPaths = clipboard.names.map((n) => remoteJoin(clipboard.srcDir, n));
+    const sameDir = clipboard.srcDir === currentPath;
+    if (sameDir && clipboard.cut) return;
+    try {
+      let destNames: string[] = [];
+      let overwrite = false;
+      if (sameDir) {
+        // In-place duplication: rename every entry to a free name.
+        const taken = new Set(fileList.map((f) => f.name));
+        destNames = clipboard.names.map((n) => uniqueClipboardName(n, taken));
+        for (const name of destNames) taken.add(name);
+      } else {
+        const conflicts = await SftpService.ListPasteConflicts(
+          linkID,
+          currentPath,
+          srcPaths,
+        );
+        if (conflicts.length > 0) {
+          overwrite = await askOverwrite(conflicts);
+          if (!overwrite) return;
+        }
+      }
+      await SftpService.PasteRemotePaths(
+        linkID,
+        srcPaths,
+        destNames,
+        currentPath,
+        clipboard.cut,
+        overwrite,
+      );
+      if (clipboard.cut) setClipboard(null);
+    } catch (err) {
+      showMessageError(translateServiceError(err));
+      LogService.Error(`Paste failed: ${err}`);
+    }
+  };
+
+  // Archive default name: local timestamp, precise to seconds (20261115080945).
+  const timestampArchiveBase = () => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return (
+      `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+      `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    );
+  };
+
+  const handleCompress = async () => {
+    const targets = menuActionTargets();
+    handleCloseMenu();
+    if (targets.length === 0) return;
+    const taken = new Set(fileList.map((f) => f.name));
+    const archiveName = uniqueClipboardName(
+      `${timestampArchiveBase()}.tar.gz`,
+      taken,
+      ".tar.gz",
+    );
+    const srcPaths = targets.map((f) => remoteJoin(currentPath, f.name));
+    try {
+      await SftpService.CompressRemotePaths(
+        linkID,
+        srcPaths,
+        remoteJoin(currentPath, archiveName),
+      );
+    } catch (err) {
+      showMessageError(translateServiceError(err));
+      LogService.Error(`Compress failed: ${err}`);
+    }
+  };
+
+  const handleExtract = async () => {
+    const targets = menuActionTargets();
+    handleCloseMenu();
+    if (targets.length !== 1 || targets[0].isDir) return;
+    const archivePath = remoteJoin(currentPath, targets[0].name);
+    try {
+      let overwrite = false;
+      const conflicts = await SftpService.ListArchiveConflicts(
+        linkID,
+        archivePath,
+        currentPath,
+      );
+      if (conflicts.length > 0) {
+        overwrite = await askOverwrite(conflicts);
+        if (!overwrite) return;
+      }
+      await SftpService.ExtractRemoteArchive(
+        linkID,
+        archivePath,
+        currentPath,
+        overwrite,
+      );
+    } catch (err) {
+      showMessageError(translateServiceError(err));
+      LogService.Error(`Extract failed: ${err}`);
+    }
+  };
+
   const handleDownload = async (targets: FileInfo[]) => {
     handleCloseMenu();
     if (targets.length === 0) return;
@@ -800,6 +962,13 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
   const editTarget =
     menuTargetCount === 1 && !menuActionTargets()[0].isDir
       ? menuActionTargets()[0]
+      : null;
+  const extractTarget =
+    editTarget &&
+    /(\.zip|\.tar|\.tar\.gz|\.tar\.bz2|\.tar\.xz|\.tgz|\.taz|\.tbz2?|\.tbz|\.txz|\.gz|\.bz2|\.xz)$/i.test(
+      editTarget.name,
+    )
+      ? editTarget
       : null;
 
   return (
@@ -1187,6 +1356,37 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             <ListItemText>{t("common.edit")}</ListItemText>
           </MenuItem>
         )}
+        <MenuItem onClick={() => void handleCopyRemotePaths(menuActionTargets())}>
+          <ListItemIcon>
+            <CopyPathIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>
+            {menuTargetCount > 1 ? tf("sftp.copy_paths_with_count", menuTargetCount) : t("sftp.copy_path")}
+          </ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleClipboardStore(false)}>
+          <ListItemIcon>
+            <CopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>{t("sftp.copy")}</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleClipboardStore(true)}>
+          <ListItemIcon>
+            <CutIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>{t("sftp.cut")}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => void handlePaste()}
+          disabled={
+            !clipboard || (clipboard.srcDir === currentPath && clipboard.cut)
+          }
+        >
+          <ListItemIcon>
+            <PasteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>{t("sftp.paste")}</ListItemText>
+        </MenuItem>
         <MenuItem onClick={() => void handleDownload(menuActionTargets())}>
           <ListItemIcon>
             <DownloadIcon fontSize="small" />
@@ -1208,6 +1408,22 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             {menuTargetCount > 1 ? tf("sftp.delete_with_count", menuTargetCount) : t("common.delete")}
           </ListItemText>
         </MenuItem>
+        <MenuItem onClick={() => void handleCompress()}>
+          <ListItemIcon>
+            <CompressIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>
+            {menuTargetCount > 1 ? tf("sftp.compress_with_count", menuTargetCount) : t("sftp.compress")}
+          </ListItemText>
+        </MenuItem>
+        {extractTarget && (
+          <MenuItem onClick={() => void handleExtract()}>
+            <ListItemIcon>
+              <ExtractIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>{t("sftp.extract")}</ListItemText>
+          </MenuItem>
+        )}
         {menuTargetCount <= 1 && (
           <MenuItem onClick={handleRenameClick}>
             <ListItemIcon>
@@ -1269,6 +1485,17 @@ const Sftp: React.FC<SftpProps> = ({ linkID, ownerKey, onReady }) => {
             : { top: blankContextMenu.mouseY, left: blankContextMenu.mouseX }
         }
       >
+        <MenuItem
+          onClick={() => void handlePaste()}
+          disabled={
+            !clipboard || (clipboard.srcDir === currentPath && clipboard.cut)
+          }
+        >
+          <ListItemIcon>
+            <PasteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>{t("sftp.paste")}</ListItemText>
+        </MenuItem>
         <MenuItem onClick={handleCreateFile}>
           <ListItemIcon>
             <CreateFileIcon fontSize="small" />

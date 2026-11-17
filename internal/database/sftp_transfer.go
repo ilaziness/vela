@@ -23,18 +23,11 @@ func NewSftpTransferRepository(db *sql.DB, logger *zap.Logger) *SftpTransferRepo
 	return &SftpTransferRepository{db: db, logger: logger}
 }
 
-func overwriteInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 func (r *SftpTransferRepository) Upsert(rec transfer.QueueRecord) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := r.db.Exec(`
-		INSERT INTO sftp_transfers (id, owner_key, transfer_type, local_file, remote_file, total_size, status, error, updated_at, overwrite)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO sftp_transfers (id, owner_key, transfer_type, local_file, remote_file, total_size, status, error, updated_at, overwrite, remote_op)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			owner_key=excluded.owner_key,
 			transfer_type=excluded.transfer_type,
@@ -44,8 +37,9 @@ func (r *SftpTransferRepository) Upsert(rec transfer.QueueRecord) error {
 			status=excluded.status,
 			error=excluded.error,
 			updated_at=excluded.updated_at,
-			overwrite=excluded.overwrite
-	`, rec.ID, rec.OwnerKey, rec.TransferType, rec.LocalFile, rec.RemoteFile, rec.TotalSize, rec.Status, rec.Error, now, overwriteInt(rec.Overwrite))
+			overwrite=excluded.overwrite,
+			remote_op=excluded.remote_op
+	`, rec.ID, rec.OwnerKey, rec.TransferType, rec.LocalFile, rec.RemoteFile, rec.TotalSize, rec.Status, rec.Error, now, boolInt(rec.Overwrite), boolInt(rec.RemoteOp))
 	if err != nil {
 		return fmt.Errorf("upsert sftp transfer: %w", err)
 	}
@@ -62,11 +56,11 @@ func (r *SftpTransferRepository) Delete(id string) error {
 
 func (r *SftpTransferRepository) Get(id string) (*transfer.QueueRecord, error) {
 	row := r.db.QueryRow(`
-		SELECT id, owner_key, transfer_type, local_file, remote_file, total_size, status, error, overwrite
+		SELECT id, owner_key, transfer_type, local_file, remote_file, total_size, status, error, overwrite, remote_op
 		FROM sftp_transfers WHERE id = ?`, id)
 	var rec transfer.QueueRecord
-	var overwrite int
-	err := row.Scan(&rec.ID, &rec.OwnerKey, &rec.TransferType, &rec.LocalFile, &rec.RemoteFile, &rec.TotalSize, &rec.Status, &rec.Error, &overwrite)
+	var overwrite, remoteOp int
+	err := row.Scan(&rec.ID, &rec.OwnerKey, &rec.TransferType, &rec.LocalFile, &rec.RemoteFile, &rec.TotalSize, &rec.Status, &rec.Error, &overwrite, &remoteOp)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -74,12 +68,13 @@ func (r *SftpTransferRepository) Get(id string) (*transfer.QueueRecord, error) {
 		return nil, fmt.Errorf("get sftp transfer: %w", err)
 	}
 	rec.Overwrite = overwrite != 0
+	rec.RemoteOp = remoteOp != 0
 	return &rec, nil
 }
 
 func (r *SftpTransferRepository) ListByOwner(ownerKey string) ([]transfer.QueueRecord, error) {
 	rows, err := r.db.Query(`
-		SELECT id, owner_key, transfer_type, local_file, remote_file, total_size, status, error, overwrite
+		SELECT id, owner_key, transfer_type, local_file, remote_file, total_size, status, error, overwrite, remote_op
 		FROM sftp_transfers WHERE owner_key = ? ORDER BY updated_at DESC`, ownerKey)
 	if err != nil {
 		return nil, fmt.Errorf("list sftp transfers: %w", err)
@@ -88,11 +83,12 @@ func (r *SftpTransferRepository) ListByOwner(ownerKey string) ([]transfer.QueueR
 	var out []transfer.QueueRecord
 	for rows.Next() {
 		var rec transfer.QueueRecord
-		var overwrite int
-		if err := rows.Scan(&rec.ID, &rec.OwnerKey, &rec.TransferType, &rec.LocalFile, &rec.RemoteFile, &rec.TotalSize, &rec.Status, &rec.Error, &overwrite); err != nil {
+		var overwrite, remoteOp int
+		if err := rows.Scan(&rec.ID, &rec.OwnerKey, &rec.TransferType, &rec.LocalFile, &rec.RemoteFile, &rec.TotalSize, &rec.Status, &rec.Error, &overwrite, &remoteOp); err != nil {
 			return nil, fmt.Errorf("scan sftp transfer: %w", err)
 		}
 		rec.Overwrite = overwrite != 0
+		rec.RemoteOp = remoteOp != 0
 		out = append(out, rec)
 	}
 	return out, rows.Err()
