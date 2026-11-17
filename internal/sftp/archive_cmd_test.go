@@ -130,7 +130,10 @@ func TestListExtractCommands(t *testing.T) {
 		t.Errorf("extractTarCommand xz plain = %q, want %q", got, want)
 	}
 	// The no-overwrite path stages the archive in an operation-owned staging
-	// directory and promotes the flattened names under per-entry guards.
+	// directory and promotes the flattened names under per-entry guards. The
+	// archived directory modes travel in staging-tree markers, never in a
+	// line-based list of member names (a newline in a name must not inject a
+	// chmod target), and the EXDEV copy fallback handles regular files only.
 	noOverwrite := extractTarNoOverwriteCommand(formatTarXz, "/a.tar.xz", "/d", 0)
 	// The staging directory lives inside the destination (no write access to
 	// the destination's parent is required) and the promotion walks the
@@ -141,31 +144,36 @@ func TestListExtractCommands(t *testing.T) {
 	if !strings.HasPrefix(noOverwrite, "o=$(pwd); st='/d/.d.vela-extract-") {
 		t.Errorf("extractTarNoOverwriteCommand staging not inside destDir: %q", noOverwrite)
 	}
-	for _, banned := range []string{"for n in", "mv -f"} {
+	for _, banned := range []string{"for n in", "mv -f", ">> \"$dl\"", "sort -rn", "while read -r"} {
 		if strings.Contains(noOverwrite, banned) {
 			t.Errorf("extractTarNoOverwriteCommand contains banned %q in %q", banned, noOverwrite)
 		}
 	}
 	for _, want := range []string{
 		`a='/a.tar.xz'`,
+		`mk='.vela-mode-`,
 		`case "$d" in /*) ;; *) d="$o/$d";; esac`,
-		`&& cd / && rm -rf -- "$st" "$fl" "$dl"`,
+		`&& cd / && rm -rf -- "$st" "$fl" && mkdir -- "$st"`,
 		`tar xJf "$a" -C "$st"`,
 		`rc=0; find "$st" -mindepth 1 -exec sh -c '`,
+		`case ${s##*/} in "$mk") continue;; esac`,
 		`n=${s#"$st"/}; t="$d/$n"`,
 		`[ -e "$s" ] || [ -L "$s" ] || continue`,
 		`if [ -e "$t" ] || [ -L "$t" ]; then touch -- "$fl"; continue; fi`,
 		`if [ -L "$q" ]; then touch -- "$fl"; continue 2; fi`,
 		`mkdir -- "$q" 2>/dev/null`,
-		`m=$(stat -c %a -- "$s") && chmod -- 700 "$t" && printf "%s %s\n" "$m" "$t" >> "$dl" || touch -- "$fl"`,
+		`m=$(stat -c %a -- "$s") && chmod -- 700 "$t" && chmod u+rwx -- "$s" && printf "%s" "$m" > "$s/$mk" || touch -- "$fl"`,
 		`g=$(readlink -- "$s" && printf x) && g=${g%x} && g=${g%?} && ln -s -- "$g" "$t" || touch -- "$fl"`,
 		`elif ln -- "$s" "$t" 2>/dev/null; then :;`,
-		`c=$(mktemp "${t%/*}/.vela-copy-XXXXXX") && cp -p -- "$s" "$c" && ln -- "$c" "$t" && rm -f -- "$c" || { rm -f -- "$c"; touch -- "$fl"; }`,
-		`sh "$st" "$fl" "$d" "$dl" {} +`,
-		`awk '{n=gsub(/\//,"/",$0); print n, $0}' "$dl" | sort -rn | while read -r _ m t; do chmod -- "$m" "$t" || touch -- "$fl"; done; fi`,
+		`elif [ -f "$s" ]; then c=$(mktemp "${t%/*}/.vela-copy-XXXXXX") && cp -p -- "$s" "$c" && ln -- "$c" "$t" && rm -f -- "$c" || { rm -f -- "$c"; touch -- "$fl"; };`,
+		`else touch -- "$fl"; fi;`,
+		`sh "$st" "$fl" "$d" "$mk" {} +`,
+		`find "$st" -depth -name "$mk" -exec sh -c '`,
+		`for f; do s=${f%/*}; n=${s#"$st"/}; t="$d/$n"; m=$(cat -- "$f"); rm -f -- "$f"; chmod -- "$m" "$t" || touch -- "$fl"; done`,
+		`sh "$st" "$d" "$fl" {} +`,
 		`rc=0; [ -e "$fl" ] && rc=1`,
-		`find "$st" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- "$st" "$fl" "$dl"; exit "$rc"; }`,
-		`|| { find "$st" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- "$st" "$fl" "$dl"; false; }`,
+		`find "$st" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- "$st" "$fl"; exit "$rc"; }`,
+		`|| { find "$st" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- "$st" "$fl"; false; }`,
 	} {
 		if !strings.Contains(noOverwrite, want) {
 			t.Errorf("extractTarNoOverwriteCommand missing %q in %q", want, noOverwrite)

@@ -170,11 +170,15 @@ func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int) 
 //     applied only AFTER all descendants are installed: a read-only archive
 //     directory (0555) would otherwise block its own children. New directories
 //     stay 0700 (owner-only) during population; pre-existing target directories
-//     — including their mode — are untouched;
+//     — including their mode — are untouched. The archived mode is carried by a
+//     unique marker inside the staging tree and restored with find -depth, so
+//     no newline-bearing member name can inject an extra chmod target;
 //   - a hard link that fails with EXDEV (a nested destination mount lives on a
-//     different filesystem) falls back to copying into an operation-owned file
-//     on the TARGET filesystem and claiming the final name with the same
-//     atomic no-overwrite link, so no existing file is ever replaced;
+//     different filesystem) falls back to copying REGULAR files only into an
+//     operation-owned file on the target filesystem and claiming the final
+//     name with the same atomic no-overwrite link. Special entries (FIFOs,
+//     devices, sockets) are rejected explicitly instead of being read by cp
+//     (reading a FIFO would block forever with no writer);
 //   - symlink targets are reproduced byte-for-byte (sentinel capture strips
 //     only readlink's own output delimiter, keeping trailing newlines that
 //     command substitution would otherwise remove);
@@ -192,6 +196,11 @@ func extractTarCommand(f archiveFormat, archivePath, destDir string, strip int) 
 // destination/archive spellings must keep their original meaning.
 func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, strip int) string {
 	st := stagingDirRemotePath(destDir)
+	// Unique marker name for directories this operation creates. The marker
+	// lives INSIDE the staging tree (never in the destination) and holds only
+	// the archived mode digits, so restoring modes needs no text list of member
+	// names: a name containing a newline can never inject a chmod target.
+	mk := ".vela-mode-" + stagingToken()
 	tarPart := fmt.Sprintf("tar x%sf \"$a\" -C \"$st\"", tarCompressFlag(f))
 	if strip == 1 {
 		tarPart += " --strip-components=1"
@@ -200,11 +209,11 @@ func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, 
 	// argument count stays bounded too) and reports failures through a
 	// marker file: find's own exit status is not relied on across
 	// implementations. Paths are handled as "$1"-style arguments, so names
-	// with spaces, newlines or glob characters are safe. dl records the
-	// directories this operation created together with their archived modes.
+	// with spaces, newlines or glob characters are safe.
 	promote := "rc=0; find \"$st\" -mindepth 1 -exec sh -c '" +
-		"st=$1; fl=$2; d=$3; dl=$4; shift 4; " +
+		"st=$1; fl=$2; d=$3; mk=$4; shift 4; " +
 		"for s in \"$@\"; do " +
+		"case ${s##*/} in \"$mk\") continue;; esac; " +
 		"n=${s#\"$st\"/}; t=\"$d/$n\"; " +
 		"[ -e \"$s\" ] || [ -L \"$s\" ] || continue; " +
 		"if [ -d \"$s\" ] && [ ! -L \"$s\" ]; then " +
@@ -214,7 +223,7 @@ func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, 
 		"if [ -L \"$q\" ]; then touch -- \"$fl\"; continue 2; fi; " +
 		"if [ ! -d \"$q\" ]; then mkdir -- \"$q\" 2>/dev/null || { [ -d \"$q\" ] && [ ! -L \"$q\" ] || { touch -- \"$fl\"; continue 2; }; }; fi; done; " +
 		"if mkdir -- \"$t\" 2>/dev/null; then " +
-		"m=$(stat -c %a -- \"$s\") && chmod -- 700 \"$t\" && printf \"%s %s\\n\" \"$m\" \"$t\" >> \"$dl\" || touch -- \"$fl\"; " +
+		"m=$(stat -c %a -- \"$s\") && chmod -- 700 \"$t\" && chmod u+rwx -- \"$s\" && printf \"%s\" \"$m\" > \"$s/$mk\" || touch -- \"$fl\"; " +
 		"elif [ ! -d \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; fi; " +
 		"continue; fi; " +
 		"if [ -e \"$t\" ] || [ -L \"$t\" ]; then touch -- \"$fl\"; continue; fi; " +
@@ -224,25 +233,30 @@ func extractTarNoOverwriteCommand(f archiveFormat, archivePath, destDir string, 
 		"if [ -L \"$s\" ]; then " +
 		"g=$(readlink -- \"$s\" && printf x) && g=${g%x} && g=${g%?} && ln -s -- \"$g\" \"$t\" || touch -- \"$fl\"; " +
 		"elif ln -- \"$s\" \"$t\" 2>/dev/null; then :; " +
-		"else c=$(mktemp \"${t%/*}/.vela-copy-XXXXXX\") && cp -p -- \"$s\" \"$c\" && ln -- \"$c\" \"$t\" && rm -f -- \"$c\" || { rm -f -- \"$c\"; touch -- \"$fl\"; }; fi; " +
-		"done' sh \"$st\" \"$fl\" \"$d\" \"$dl\" {} + || touch -- \"$fl\"; " +
-		// Restore archived directory modes bottom-up (deepest first) so a
-		// parent is never locked before its children are complete.
-		"if [ -s \"$dl\" ]; then awk '{n=gsub(/\\//,\"/\",$0); print n, $0}' \"$dl\" | sort -rn | while read -r _ m t; do chmod -- \"$m\" \"$t\" || touch -- \"$fl\"; done; fi; " +
+		// Only regular files are byte-copied across filesystems: cp -p on a
+		// FIFO would block forever waiting for a writer (no exec timeout).
+		"elif [ -f \"$s\" ]; then c=$(mktemp \"${t%/*}/.vela-copy-XXXXXX\") && cp -p -- \"$s\" \"$c\" && ln -- \"$c\" \"$t\" && rm -f -- \"$c\" || { rm -f -- \"$c\"; touch -- \"$fl\"; }; " +
+		"else touch -- \"$fl\"; fi; " +
+		"done' sh \"$st\" \"$fl\" \"$d\" \"$mk\" {} + || touch -- \"$fl\"; " +
+		// Restore archived directory modes bottom-up: find -depth visits a
+		// child before its parent, and the markers live in the staging tree,
+		// so no member name is ever parsed as a line of text.
+		"find \"$st\" -depth -name \"$mk\" -exec sh -c 'st=$1; d=$2; fl=$3; shift 3; " +
+		"for f; do s=${f%/*}; n=${s#\"$st\"/}; t=\"$d/$n\"; m=$(cat -- \"$f\"); rm -f -- \"$f\"; chmod -- \"$m\" \"$t\" || touch -- \"$fl\"; done' sh \"$st\" \"$d\" \"$fl\" {} + || touch -- \"$fl\"; " +
 		"rc=0; [ -e \"$fl\" ] && rc=1; " +
 		// Make read-only staged directories removable, then clean up.
-		"find \"$st\" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- \"$st\" \"$fl\" \"$dl\"; exit \"$rc\"; }"
+		"find \"$st\" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- \"$st\" \"$fl\"; exit \"$rc\"; }"
 	// Resolve every path against the initial cwd, then start find from a
 	// globally searchable directory (see the function comment).
 	head := "o=$(pwd); st=" + shellQuote(st) + " fl=" + shellQuote(st+".fail") +
-		" dl=" + shellQuote(st+".dirs") + " d=" + shellQuote(destDir) + " a=" + shellQuote(archivePath) +
+		" d=" + shellQuote(destDir) + " a=" + shellQuote(archivePath) + " mk=" + shellQuote(mk) +
 		" && case \"$st\" in /*) ;; *) st=\"$o/$st\";; esac" +
 		" && case \"$d\" in /*) ;; *) d=\"$o/$d\";; esac" +
 		" && case \"$a\" in /*) ;; *) a=\"$o/$a\";; esac" +
-		" && fl=\"$st.fail\" && dl=\"$st.dirs\" && cd /" +
-		" && rm -rf -- \"$st\" \"$fl\" \"$dl\" && mkdir -- \"$st\" && " + tarPart +
+		" && fl=\"$st.fail\" && cd /" +
+		" && rm -rf -- \"$st\" \"$fl\" && mkdir -- \"$st\" && " + tarPart +
 		" && { " + promote +
-		" || { find \"$st\" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- \"$st\" \"$fl\" \"$dl\"; false; }"
+		" || { find \"$st\" -type d -exec chmod u+rwx -- {} + 2>/dev/null; rm -rf -- \"$st\" \"$fl\"; false; }"
 	return head
 }
 

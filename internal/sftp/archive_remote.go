@@ -15,6 +15,12 @@ import (
 // decompresses the whole stream server-side).
 const archiveListTimeout = 5 * time.Minute
 
+// archiveExtractTimeout is a defensive bound for one extraction command: a
+// stalled special entry (e.g. a FIFO the copy fallback rejected) must never
+// leave an exec session hanging forever. It is deliberately generous — a
+// several-thousand-member archive extracts in seconds.
+const archiveExtractTimeout = 15 * time.Minute
+
 // listTarEntries runs the remote listing command for a tar-family archive and
 // returns normalized member entries. Any unsafe member name aborts the whole
 // operation: the remote tar extracts everything at once and cannot skip a
@@ -96,7 +102,7 @@ func (sft *Manager) extractTarRemote(ctx context.Context, sessionID string, f ar
 	if !overwrite {
 		cmd = extractTarNoOverwriteCommand(f, archivePath, destDir, strip)
 	}
-	_, err := sft.runRemoteCommand(ctx, sessionID, cmd, 0, ssh.DefaultExecMaxOut)
+	_, err := sft.runRemoteCommand(ctx, sessionID, cmd, archiveExtractTimeout, ssh.DefaultExecMaxOut)
 	return err
 }
 

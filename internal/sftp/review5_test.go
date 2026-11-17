@@ -40,6 +40,8 @@ func buildTarGzSpecs(t *testing.T, specs []tarSpec) []byte {
 			}
 		case tar.TypeSymlink:
 			hdr.Linkname = s.body
+		case tar.TypeFifo:
+			hdr.Size = 0
 		default:
 			hdr.Size = int64(len(s.body))
 		}
@@ -265,4 +267,98 @@ func TestIntegrationExtractSymlinkTargetTrailingNewline(t *testing.T) {
 		t.Fatalf("extracted link target = %q, %v; want %q", got, err, want)
 	}
 	waitRemoteLinkText(t, client, path.Join(dest, "link"), want, "trailing newline preserved")
+}
+
+// TestIntegrationExtractFifoCrossDevice (#0001 round 6): the EXDEV fallback
+// must byte-copy REGULAR files only. cp -p on a FIFO would block forever
+// waiting for a writer (the extract command previously ran without a timeout),
+// so an archived FIFO on a nested mount is rejected explicitly and cleaned up
+// instead of hanging.
+func TestIntegrationExtractFifoCrossDevice(t *testing.T) {
+	mgr, client, _ := newTestManager(t)
+	work := "/tmp/vela-extract-fifo"
+	mp := path.Join(work, "dest", "data")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() {
+		_, _ = mgr.runRemoteCommand(context.Background(), "test", "umount "+mp+" 2>/dev/null || true", 30*time.Second, 1<<20)
+		_ = client.RemoveAll(work)
+	})
+	remoteRun(t, mgr, "mkdir -p "+mp)
+	remoteRun(t, mgr, "mount -t tmpfs tmpfs "+mp)
+	arc := path.Join(work, "a.tar.gz")
+	uploadBytes(t, client, arc, buildTarGzSpecs(t, []tarSpec{
+		{"root/", 0o755, tar.TypeDir, ""},
+		{"root/data/", 0o755, tar.TypeDir, ""},
+		{"root/data/events.pipe", 0o644, tar.TypeFifo, ""},
+		{"root/ok.txt", 0o644, tar.TypeReg, "OK\n"},
+	}))
+
+	// The command must return promptly (well under the exec test timeout) with
+	// an error, not hang on the FIFO.
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, path.Join(work, "dest"), true, false)
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatalf("FIFO on a cross-device mount unexpectedly succeeded")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatalf("extraction hung on a cross-device FIFO (no exec timeout / cp -p blocked)")
+	}
+	if got := strings.TrimSpace(remoteRun(t, mgr, "ls -A "+mp)); got != "" {
+		t.Fatalf("mounted dest entries = %q, want empty (no partial FIFO/staging left)", got)
+	}
+	if got := strings.TrimSpace(remoteRun(t, mgr, "find "+work+" -name '.vela-*' -print")); got != "" {
+		t.Fatalf("operation-owned leftovers after FIFO rejection: %q", got)
+	}
+}
+
+// TestIntegrationExtractNewlineDirNoChmodInjection (#0002 round 6, security):
+// a directory name containing a newline used to be written into a line-based
+// mode list and parsed back with read/awk, injecting extra chmod targets
+// outside the destination. Modes now travel in staging-tree markers and names
+// never enter a line-oriented parser.
+func TestIntegrationExtractNewlineDirNoChmodInjection(t *testing.T) {
+	mgr, client, _ := newTestManager(t)
+	root := "/root/sftp-test"
+	work := path.Join(root, "extract-newline-dir")
+	_ = client.RemoveAll(work)
+	t.Cleanup(func() {
+		_, _ = mgr.runRemoteCommand(context.Background(), "test", "chmod 0700 /tmp/vela-inject-target 2>/dev/null || true", 30*time.Second, 1<<20)
+		_ = client.RemoveAll(work)
+	})
+	dest := path.Join(work, "dest")
+	remoteRun(t, mgr, "mkdir -p "+dest+" /tmp/vela-inject-target")
+	remoteRun(t, mgr, "chmod 0700 /tmp/vela-inject-target")
+	// A newline in the directory name would split the old "mode path" list;
+	// the forged second line asked chmod to widen this external directory.
+	evil := "evil\n0777 /tmp/vela-inject-target"
+	arc := path.Join(work, "a.tar.gz")
+	uploadBytes(t, client, arc, buildTarGzSpecs(t, []tarSpec{
+		{"root/", 0o755, tar.TypeDir, ""},
+		{"root/" + evil + "/", 0o750, tar.TypeDir, ""},
+		{"root/" + evil + "/a.txt", 0o644, tar.TypeReg, "SAFE\n"},
+	}))
+
+	if err := mgr.extractTarRemote(context.Background(), "test", formatTarGz, arc, dest, true, false); err != nil {
+		t.Fatalf("extract newline-bearing directory name: %v", err)
+	}
+	// The external directory's mode must be untouched (0700), not widened.
+	if got := strings.TrimSpace(remoteRun(t, mgr, "stat -c %a /tmp/vela-inject-target")); got != "700" {
+		t.Fatalf("external directory mode = %q, want 700 (no injected chmod)", got)
+	}
+	// The legitimate (if unusual) directory is still created with its archived
+	// mode, and no staging marker leaks into the destination.
+	if got := string(readRemote(t, client, path.Join(dest, evil, "a.txt"))); got != "SAFE\n" {
+		t.Fatalf("content under newline directory = %q", got)
+	}
+	dirMode := strings.TrimSpace(remoteRun(t, mgr, "stat -c %a "+shellQuote(path.Join(dest, evil))))
+	if dirMode != "750" {
+		t.Fatalf("newline directory mode = %q, want 750", dirMode)
+	}
+	if got := strings.TrimSpace(remoteRun(t, mgr, "find "+dest+" -name '.vela-*' -print")); got != "" {
+		t.Fatalf("staging markers leaked into destination: %q", got)
+	}
 }
