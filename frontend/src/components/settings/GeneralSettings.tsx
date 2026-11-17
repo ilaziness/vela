@@ -172,38 +172,6 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
               />
             </Box>
           </FormRow>
-          <FormRow label={t("settings.general.frameless")}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={Boolean(localConfig.Frameless)}
-                  onChange={(e) => handleChange("Frameless", e.target.checked)}
-                />
-              }
-              label={
-                localConfig.Frameless
-                  ? t("common.enabled")
-                  : t("common.disabled")
-              }
-            />
-          </FormRow>
-          <FormRow label={t("settings.general.auto_check_update")}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={Boolean(localConfig.AutoCheckUpdate)}
-                  onChange={(e) =>
-                    handleChange("AutoCheckUpdate", e.target.checked)
-                  }
-                />
-              }
-              label={
-                localConfig.AutoCheckUpdate
-                  ? t("common.enabled")
-                  : t("common.disabled")
-              }
-            />
-          </FormRow>
           <FormRow label={t("settings.general.font")}>
             <TextField
               fullWidth
@@ -234,6 +202,38 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
                 handleChange("FontSize", Number.isNaN(value) ? 0 : value);
               }}
               placeholder={t("settings.general.font_size_placeholder")}
+            />
+          </FormRow>
+          <FormRow label={t("settings.general.frameless")}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(localConfig.Frameless)}
+                  onChange={(e) => handleChange("Frameless", e.target.checked)}
+                />
+              }
+              label={
+                localConfig.Frameless
+                  ? t("common.enabled")
+                  : t("common.disabled")
+              }
+            />
+          </FormRow>
+          <FormRow label={t("settings.general.auto_check_update")}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={Boolean(localConfig.AutoCheckUpdate)}
+                  onChange={(e) =>
+                    handleChange("AutoCheckUpdate", e.target.checked)
+                  }
+                />
+              }
+              label={
+                localConfig.AutoCheckUpdate
+                  ? t("common.enabled")
+                  : t("common.disabled")
+              }
             />
           </FormRow>
         </Stack>
