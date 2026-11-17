@@ -14,6 +14,7 @@ const (
 	EventToolOutputAvailable = event.EventToolOutputAvailable
 	EventToolOutputError     = event.EventToolOutputError
 	EventToolOutputDenied    = event.EventToolOutputDenied
+	EventDone                = event.EventDone
 )
 
 // StreamEvent is a structured agent stream payload for the frontend.

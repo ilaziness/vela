@@ -1,8 +1,10 @@
 package app
 
 import (
+	"github.com/ilaziness/vela/internal/agent"
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/termio"
+	agentmodel "github.com/ilaziness/vela/ui/agent/model"
 	"github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/protocol"
 )
@@ -68,6 +70,28 @@ type State struct {
 	BusyOp         string // "connect" | "test" while Busy
 	SearchQuery    string
 	BookmarkGroups []*bookmark.Group
+	// AgentOpen shows the AI assistant side panel docked on the right edge.
+	AgentOpen bool
+	// AgentRatio is the terminal share of the stage/agent splitter (0..1);
+	// the agent pane is clamped to at most 60% of the stage width.
+	AgentRatio float32
+	// AgentSessionID selects the active AI chat session.
+	AgentSessionID string
+	// AgentSessions feeds the session picker list.
+	AgentSessions []*agent.AISession
+	// AgentChat is the live transcript model for AgentSessionID.
+	AgentChat *agentmodel.Chat
+	// AgentHistoryOpen shows the session-history sub-panel inside the
+	// assistant sidebar.
+	AgentHistoryOpen bool
+	// AgentDraft is the composer text.
+	AgentDraft string
+	// AgentSeenRev is the last transcript Rev the view auto-scrolled for.
+	AgentSeenRev int
+	// AgentExpanded tracks open ExpandPanel sections (reasoning, tool IO)
+	// keyed by "reasoning-<msgID>-<blockIdx>" / "tool-<callID>-in|out".
+	AgentExpanded map[string]bool
+
 	// SFTP holds per-session SFTP panel state, keyed by session id.
 	// Entries are created lazily when a panel opens and survive tab
 	// switches; they are dropped when the session dies.
@@ -101,6 +125,9 @@ func (s *State) EnsureDefaults(newDraft func() protocol.Draft) {
 	}
 	if s.SFTP == nil {
 		s.SFTP = make(map[string]*SFTPState)
+	}
+	if s.AgentExpanded == nil {
+		s.AgentExpanded = make(map[string]bool)
 	}
 }
 

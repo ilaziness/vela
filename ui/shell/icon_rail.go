@@ -55,6 +55,11 @@ func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 		}
 	})
 
+	agentBtn := railBtn("agent", gui.IconStar, i18n.T("ai.chat.user_assistant"), th, st.AgentOpen, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		ctrl.AgentToggle(ctx.Window)
+	})
+
 	backupBtn := railBtn(navBackup, gui.IconSync, i18n.T("header.backup_restore"), th, false, func(ctx gui.EventCtx) {
 		ctx.Consume()
 		if chrome.OnBackup != nil {
@@ -92,6 +97,7 @@ func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 				Content: []gui.View{
 					quickBtn,
 					bookmarksBtn,
+					agentBtn,
 					backupBtn,
 					toolsBtn,
 					settingsBtn,

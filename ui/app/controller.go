@@ -10,6 +10,7 @@ import (
 	"github.com/go-gui-org/go-term/term"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/agent"
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
@@ -61,6 +62,7 @@ type Controller struct {
 	vault       *secret.Vault
 	store       *config.Store
 	db          *database.Database
+	agent       *agent.Service
 
 	// perf holds per-session performance polling state, keyed by
 	// sessID. Owned by perf.go; started/stopped from the tool rail.

@@ -105,6 +105,7 @@ type Session struct {
 	stopOutputOnce sync.Once
 	manager        *Manager
 	label          string
+	endpoint       Endpoint
 	forwardAgent   bool
 	startupCmd     string
 	env            map[string]string
@@ -279,6 +280,12 @@ func (m *Manager) GetClient(sessionID string) (*cryptossh.Client, error) {
 	return sess.client, nil
 }
 
+// Endpoint returns the dial target (host/port/user) for this session.
+// Secret fields (Password, KeyPEM, ...) are populated; callers must not log them.
+func (s *Session) Endpoint() Endpoint {
+	return s.endpoint
+}
+
 func (m *Manager) HasSession(id string) bool {
 	_, ok := m.sessions.Load(id)
 	return ok
@@ -432,6 +439,7 @@ func newSession(m *Manager, clientKey string, client *cryptossh.Client, target E
 		stopOutput:     make(chan struct{}),
 		outputBuffSize: 1024 * 10,
 		label:          sessionLabel(target),
+		endpoint:       target,
 		forwardAgent:   target.ForwardAgent,
 		startupCmd:     target.StartupCmd,
 		env:            target.Env,

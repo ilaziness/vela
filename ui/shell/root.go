@@ -5,6 +5,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
+	agentui "github.com/ilaziness/vela/ui/agent"
 	"github.com/ilaziness/vela/ui/app"
 	chromeui "github.com/ilaziness/vela/ui/chrome"
 	"github.com/ilaziness/vela/ui/session"
@@ -91,7 +92,7 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 		}))
 	}
 
-	return gui.Column(flush(gui.ContainerCfg{
+	main := gui.Column(flush(gui.ContainerCfg{
 		Sizing: gui.FillFill,
 		Color:  th.ColorBackground,
 		Content: []gui.View{
@@ -99,4 +100,48 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 			body,
 		},
 	}))
+	if !st.AgentOpen {
+		return main
+	}
+	// Agent panel docks on the right edge and squeezes the whole stage
+	// (tab bar + terminal + tool rails). Ratio is the terminal share;
+	// clamped so the agent pane never exceeds 60% of the stage.
+	ratio := st.AgentRatio
+	if ratio <= 0 || ratio >= 1 {
+		ratio = 0.65
+	}
+	return gui.Splitter(gui.SplitterCfg{
+		ID:          "agent-split",
+		Orientation: gui.SplitterHorizontal,
+		Sizing:      gui.FillFill,
+		Ratio:       gui.SomeF(ratio),
+		First: gui.SplitterPaneCfg{
+			Content: []gui.View{main},
+			MinSize: 240,
+		},
+		Second: gui.SplitterPaneCfg{
+			Content: []gui.View{agentui.Panel(w, ctrl)},
+			MinSize: 280,
+		},
+		OnChange: func(r float32, _ gui.SplitterCollapsed, ctx gui.EventCtx) {
+			r = f32Clamp01(r)
+			if r < 0.4 {
+				r = 0.4
+			}
+			if r > 0.95 {
+				r = 0.95
+			}
+			gui.State[app.State](ctx.Window).AgentRatio = r
+		},
+	})
+}
+
+func f32Clamp01(v float32) float32 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }

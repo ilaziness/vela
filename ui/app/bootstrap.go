@@ -7,6 +7,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/agent"
 	"github.com/ilaziness/vela/internal/applog"
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/buildinfo"
@@ -37,6 +38,7 @@ type Runtime struct {
 	Serial    *serial.Manager
 	Registry  *protocol.Registry
 	Ctrl      *Controller
+	Agent     *agent.Service
 	HostKey   *sshui.HostKeyPrompter
 	Keyboard  *sshui.KeyboardPrompter
 	DB        *database.Database
@@ -135,10 +137,27 @@ func Bootstrap() (*Runtime, error) {
 		Store:       store,
 		DB:          db,
 	})
+	agentSvc := agent.New(agent.Deps{
+		Logger:      logger,
+		Store:       store,
+		SSH:         sshMgr,
+		Serial:      serialMgr,
+		Hub:         hub,
+		Vault:       vault,
+		SessionRepo: db.AISessionRepo,
+		Emit: func(c agent.AIStreamChunkData) {
+			ctrl.AgentEmit(c)
+		},
+	})
+	ctrl.SetAgent(agentSvc)
+	agentSvc.RecoverOrphanTurns()
+
 	ctrl.SetShutdown(func() {
 		sshMgr.CloseAll()
 		serialMgr.CloseAll()
 		hub.Clear()
+		agentSvc.FlushAndStop()
+		agentSvc.ShutdownMCP()
 		_ = db.Close()
 	})
 
@@ -161,6 +180,7 @@ func Bootstrap() (*Runtime, error) {
 		Bookmarks: bmSvc,
 		Tunnels:   tunnelMgr,
 		Updater:   upd,
+		Agent:     agentSvc,
 	}, nil
 }
 

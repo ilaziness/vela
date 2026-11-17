@@ -260,7 +260,7 @@ func (e *AIEngine) buildRunMiddleware(
 	promptLen int,
 	onCheckpoint func([]ChatMessage),
 ) (mw []genkitAI.Middleware, cleanup func(), err error) {
-	allowed := []string{tool.UpsertPlan, tool.WebSearch, middleware.SkillToolName}
+	allowed := []string{tool.UpsertPlan, middleware.SkillToolName}
 	mw = []genkitAI.Middleware{
 		toolStreamMiddleware{},
 		&middleware.ToolApproval{AllowedTools: allowed},

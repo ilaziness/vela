@@ -336,6 +336,9 @@ func saveAI(w *gui.Window, d *Deps) {
 				cfg.APIKey = ""
 				cfg.WebSearch.APIKey = ""
 				s.AI = cfg
+				if d.Ctrl != nil {
+					d.Ctrl.AgentReloadConfig()
+				}
 				toastOK(win, i18n.T("settings.ai.save_success"))
 			})
 		}()
