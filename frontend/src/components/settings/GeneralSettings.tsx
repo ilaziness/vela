@@ -33,6 +33,7 @@ import {
 
 interface GeneralSettingsProps {
   config: Config["General"];
+  onSaved?: (general: Config["General"]) => void;
 }
 
 const LANGUAGE_OPTIONS: AppLanguage[] = [
@@ -41,7 +42,7 @@ const LANGUAGE_OPTIONS: AppLanguage[] = [
   AppLanguage.ZhTW,
 ];
 
-const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
+const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config, onSaved }) => {
   const [localConfig, setLocalConfig] = useState(config);
   const [saving, setSaving] = useState(false);
   const [langSaving, setLangSaving] = useState(false);
@@ -110,13 +111,15 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
     setSaving(true);
     try {
       const font = sanitizeAppFont(localConfig.Font ?? "");
-      await ConfigService.SaveGeneralConfig({
+      const saved = {
         ...localConfig,
         UserDataDir: userDataDir,
         Font: font,
         FontSize: fontSize,
-      });
-      setLocalConfig((prev) => ({ ...prev, Font: font, FontSize: fontSize }));
+      };
+      await ConfigService.SaveGeneralConfig(saved);
+      setLocalConfig((prev) => ({ ...prev, ...saved }));
+      onSaved?.(saved);
       successMessage(t("settings.general.save_success"));
     } catch (error) {
       console.error("Failed to save general config:", error);

@@ -133,7 +133,14 @@ const Setting: React.FC = () => {
               }}
             >
               {activeTab === "general" && (
-                <GeneralSettings config={config.General} />
+                <GeneralSettings
+                  config={config.General}
+                  onSaved={(general) =>
+                    setConfig((prev) =>
+                      prev ? { ...prev, General: general } : prev,
+                    )
+                  }
+                />
               )}
 
               {activeTab === "terminal" && (

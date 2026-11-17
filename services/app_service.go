@@ -232,21 +232,14 @@ func (cs *AppService) InstallUpdate() error {
 	return nil
 }
 
-func (cs *AppService) autoUpdateCheckEnabled() bool {
-	return cs.store != nil && cs.store.Config != nil && cs.store.Config.General.AutoCheckUpdate
-}
-
 // startBackgroundUpdateCheck waits 10s for the frontend to initialize, then
 // silently checks for updates and emits EventNewVersion when a newer release exists.
 func (cs *AppService) startBackgroundUpdateCheck() {
+	if !cs.store.Config.General.AutoCheckUpdate {
+		return
+	}
 	system.SafeGo(func() {
-		if !cs.autoUpdateCheckEnabled() {
-			return
-		}
 		time.Sleep(10 * time.Second)
-		if !cs.autoUpdateCheckEnabled() {
-			return
-		}
 		cs.updateMu.Lock()
 		defer cs.updateMu.Unlock()
 
