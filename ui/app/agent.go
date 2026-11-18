@@ -315,6 +315,9 @@ func (c *Controller) AgentRespondApproval(approvalID string, approved bool, reas
 				st.AgentChat.SetToolStatus(toolCallID, agentmodel.ToolDenied)
 			}
 			if approved {
+				if toolCallID != "" {
+					st.AgentChat.SetToolStatus(toolCallID, agentmodel.ToolRunning)
+				}
 				// Live runs already stream into a running bubble; cold
 				// resume (approval answered after reload) starts one now.
 				st.AgentChat.BeginRun("")

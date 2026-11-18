@@ -123,6 +123,10 @@ func jumpToBottom(w *gui.Window) gui.View {
 	}))
 }
 
+// planToolName is the tool that carries the authoring plan snapshot. It is
+// rendered by planDock and kept out of the transcript bubbles.
+const planToolName = "upsert_plan"
+
 // planTask mirrors the upsert_plan payload (internal/ai/tool.PlanSnapshot).
 type planTask struct {
 	ID     string `json:"id"`
@@ -142,7 +146,7 @@ func latestPlan(chat *model.Chat) *planSnapshot {
 	var snap *planSnapshot
 	for _, m := range chat.Messages {
 		for _, b := range m.Blocks {
-			if b.Kind != model.BlockTool || b.Tool == nil || b.Tool.Name != "upsert_plan" || len(b.Tool.Input) == 0 {
+			if b.Kind != model.BlockTool || b.Tool == nil || b.Tool.Name != planToolName || len(b.Tool.Input) == 0 {
 				continue
 			}
 			var ps planSnapshot
@@ -287,7 +291,9 @@ func transcript(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.
 		msgs = append(msgs, hint(th, i18n.T("ai.chat.empty")))
 	default:
 		for _, m := range chat.Messages {
-			msgs = append(msgs, messageView(w, ctrl, st, chat, m))
+			if v := messageView(w, ctrl, st, chat, m); v != nil {
+				msgs = append(msgs, v)
+			}
 		}
 		// Approvals whose tool block is gone (edge cases) still surface
 		// inline at the end of the transcript.
@@ -356,6 +362,12 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 		if m.Status == model.MsgRunning {
 			blocks = append(blocks, orbRow(m))
 		}
+	}
+
+	if !isUser && len(blocks) == 0 {
+		// A turn whose only block is hidden (an upsert_plan call) has nothing
+		// to show here; the plan dock already carries it.
+		return nil
 	}
 
 	bubbleColor := th.ColorInterior
@@ -457,23 +469,47 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 }
 
 // orbRow is the streaming indicator at the bottom of a running assistant
-// bubble: a thinking orb while reasoning streams, a breathing orb while
-// waiting for the model otherwise.
+// bubble: a solving orb while reasoning streams, a breathing orb while
+// waiting for the model otherwise. Both labels are fixed English so the
+// indicator reads the same in every UI language.
+//
+// Composed here instead of ThinkingOrbLabel because that widget exposes no
+// size override: its orb is always the 20 pt preset, where the breathing
+// ring's dots fall below a pixel and the shape reads as a flat smear. The
+// box is pinned square (ThinkingOrb scales X and Y independently, so a
+// stretched box would squash the ring) and scaled up by a constant factor,
+// which thickens the marks without changing the aspect.
 func orbRow(m *model.Message) gui.View {
 	design := gui.ThinkingOrbBreathing
-	text := i18n.T("ai.chat.waiting")
+	text := "Working"
 	if n := len(m.Blocks); n > 0 && m.Blocks[n-1].Kind == model.BlockReasoning {
 		design = gui.ThinkingOrbSolving
-		text = i18n.T("ai.chat.thinking")
+		text = "Thinking"
 	}
-	return gui.ThinkingOrbLabel(gui.ThinkingOrbLabelCfg{
-		ID:        "agent-orb-" + m.ID,
-		Text:      text,
-		Design:    design,
-		Size:      gui.ThinkingOrbSmall,
-		TextStyle: gui.CurrentTheme().TextStyleSecondary,
-		Sizing:    gui.FillFit,
-	})
+	side := float32(gui.ThinkingOrbSmall.Length()) * 1.25
+	return gui.Row(layout.Flush(gui.ContainerCfg{
+		ID:      "agent-orb-" + m.ID,
+		Sizing:  gui.FillFit,
+		VAlign:  gui.VAlignMiddle,
+		Spacing: gui.SpacingSmall,
+		Content: []gui.View{
+			gui.ThinkingOrb(gui.ThinkingOrbCfg{
+				ID:     "agent-orb-icon-" + m.ID,
+				Design: design,
+				Size:   gui.ThinkingOrbSmall,
+				Sizing: gui.FixedFixed,
+				Width:  side,
+				Height: side,
+			}),
+			gui.Text(gui.TextCfg{
+				ID:        "agent-orb-text-" + m.ID,
+				Text:      text,
+				TextStyle: gui.CurrentTheme().TextStyleSecondary,
+				Sizing:    gui.FitFit,
+				Anim:      gui.TextAnimCfg{Kind: gui.TextAnimShimmer, Repeat: true},
+			}),
+		},
+	}))
 }
 
 // msgTime formats a unix timestamp: HH:MM today, else short date+time.
@@ -529,6 +565,13 @@ func blockView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.C
 			},
 		})
 	case model.BlockTool:
+		if b.Tool != nil && b.Tool.Name == planToolName && b.Tool.Status != model.ToolAwaiting {
+			// The plan dock above the composer already renders this tool's
+			// snapshot; repeating the raw call and its JSON in the bubble
+			// interrupts the conversation. An approval (unlikely for this
+			// tool) still falls through so its buttons stay reachable.
+			return nil
+		}
 		if b.Tool != nil && b.Tool.Status == model.ToolAwaiting {
 			if ap := findApproval(chat, b.Tool.ID); ap != nil {
 				return approvalCard(w, ctrl, ap)

@@ -472,22 +472,37 @@ func (t *Term) onAmendLayout(ctx gui.EventCtx) {
 // other change. Mouse events in the padding band do not reach the canvas.
 const gridPadding float32 = 4
 
+// windowFocused reports whether the window's keyboard focus is this pane.
+// Pane focus alone (SetFocused) only says this pane is the active one in a
+// split: an AI composer or a form field in the same window can own the real
+// keyboard focus, and the platform preedit with it. FocusID is an effective
+// ID, so a suffix match covers panes nested under an ID-bearing ancestor.
+func (t *Term) windowFocused(w *gui.Window) bool {
+	if w == nil {
+		return false
+	}
+	id := w.FocusID()
+	return id == t.focusID || strings.HasSuffix(id, ":"+t.focusID)
+}
+
 // View returns the go-gui view tree for this terminal. Usable as a
 // gui.Window SetView generator: w.SetView(t.View).
 func (t *Term) View(w *gui.Window) gui.View {
 	// Detect IME composition state changes and bump version to redraw.
-	// Composition state is window-global, but only the focused pane may
-	// render it — otherwise every Term in a split paints the same preedit
-	// strip at its own cursor. An unfocused pane must also *clear* state it
-	// cached before losing focus (focus can change mid-composition), so read
-	// zero values rather than returning early: the change detection below
-	// then clears the cache and repaints exactly once.
+	// Composition state is window-global, but only the pane holding the
+	// window's keyboard focus may render it — otherwise every Term in a split
+	// paints the same preedit strip at its own cursor, and a pane that lost
+	// focus to a sibling text field (e.g. an AI composer) keeps painting the
+	// text typed there. An unfocused pane must also *clear* state it cached
+	// before losing focus (focus can change mid-composition), so read zero
+	// values rather than returning early: the change detection below then
+	// clears the cache and repaints exactly once.
 	var (
 		composing  bool
 		compText   string
 		compCursor int
 	)
-	if t.focused.Load() && w != nil {
+	if t.focused.Load() && w != nil && t.windowFocused(w) {
 		composing = w.IMEComposing()
 		compText = w.IMECompText()
 		compCursor = w.IMECompCursor()

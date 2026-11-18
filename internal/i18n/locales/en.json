@@ -1168,7 +1168,6 @@
   "ai.session.time.hour_ago": "%d hr ago",
   "ai.session.time.day_ago": "%d days ago",
   "ai.chat.disabled_hint": "AI is not enabled — open Settings → AI assistant",
-  "ai.chat.waiting": "Waiting…",
   "ai.chat.thought": "Thought complete",
   "ai.chat.copy": "Copy",
   "ai.plan.pending": "Pending",

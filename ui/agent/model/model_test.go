@@ -73,11 +73,21 @@ func TestApplyDenied(t *testing.T) {
 	c.Apply(chunk(event.EventToolInputAvailable, func(d *agent.AIStreamChunkData) {
 		d.ToolCallID, d.ToolName = "c9", "run_ssh_command"
 	}))
-	c.Apply(chunk(event.EventToolOutputDenied, func(d *agent.AIStreamChunkData) {
-		d.ToolCallID, d.Reason = "c9", "user said no"
+	c.Apply(chunk(event.EventToolApprovalRequest, func(d *agent.AIStreamChunkData) {
+		d.ToolCallID, d.ToolName, d.ApprovalID = "c9", "run_ssh_command", "ap9"
 	}))
-	if tc := c.findTool("c9"); tc.Status != ToolDenied || tc.ErrorText != "user said no" {
+	c.Apply(chunk(event.EventToolOutputDenied, func(d *agent.AIStreamChunkData) {
+		d.ToolCallID, d.Reason = "c9", "user denied"
+	}))
+	// The denied status chip carries the outcome; the engine's reason is an
+	// internal token ("user denied" / "stopped"), so it must not become the
+	// card's error text (that renders with the error style).
+	if tc := c.findTool("c9"); tc.Status != ToolDenied || tc.ErrorText != "" {
 		t.Fatalf("tool=%+v", tc)
+	}
+	// The approval bound to that call is resolved with it.
+	if len(c.Approvals) != 0 {
+		t.Fatalf("approvals=%d", len(c.Approvals))
 	}
 }
 

@@ -1168,7 +1168,6 @@
   "ai.session.time.hour_ago": "%d 小时前",
   "ai.session.time.day_ago": "%d 天前",
   "ai.chat.disabled_hint": "AI 未启用——请前往设置 → AI 助手开启",
-  "ai.chat.waiting": "等待中…",
   "ai.chat.thought": "思考完成",
   "ai.chat.copy": "复制",
   "ai.plan.pending": "待处理",

@@ -52,6 +52,15 @@ func wrapToolCall(
 			emitDeps(deps, StreamEvent{Type: EventFinishStep})
 			return resp, err
 		}
+		// middleware.ToolApproval pauses a tool by raising a tool interrupt.
+		// That is a decision point, not an execution failure: the engine emits
+		// the approval request and, once answered, the denied output itself.
+		// Emitting an output error here paints a red error under the tool card
+		// while the approval is still pending.
+		if ok, _ := genkitAI.IsToolInterruptError(err); ok {
+			emitDeps(deps, StreamEvent{Type: EventFinishStep})
+			return resp, err
+		}
 		emitDeps(deps, StreamEvent{Type: EventToolOutputError, ToolCallID: callID, ToolName: name, ErrorText: err.Error()})
 		emitDeps(deps, StreamEvent{Type: EventFinishStep})
 		return resp, err

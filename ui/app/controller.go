@@ -327,6 +327,7 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	}
 
 	stream := termstream.New(sess)
+	var tm *term.Term
 	tm, err := term.NewWithStream(w, term.Cfg{
 		NoWindowHandler: true,
 		ScrollbackRows:  scrollback,
@@ -339,6 +340,21 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 		// t.cfg.RecordInput, so the setting must arrive here to take
 		// effect for manually started recordings too.
 		RecordInput: termCfg.RecordInput,
+		// The terminal draws on a canvas whose click handler consumes the
+		// press, which stops go-gui's press-to-focus walk before it reaches
+		// this pane's focusable container. Without this the pane never got
+		// the keyboard back once another widget (the AI composer, a filter
+		// field) owned focus: every keystroke kept landing there.
+		// SetFocus takes an effective ID, and the pane sits under the
+		// context-menu wrapper's scope, so resolve the leaf first.
+		OnClickFocus: func() {
+			if tm == nil {
+				return
+			}
+			if ids := w.ResolveID(tm.FocusID()); len(ids) > 0 {
+				w.SetFocus(ids[0])
+			}
+		},
 		OnExit: func() {
 			id := sess.ID()
 			w.QueueCommand(func(w *gui.Window) {

@@ -207,24 +207,32 @@ func (c *Chat) Apply(ch agent.AIStreamChunkData) {
 			ToolName:   ch.ToolName,
 			Input:      rawJSON(ch.Input),
 		})
+		// The engine emits the tool input events before the approval, so the
+		// block exists. Clearing ErrorText covers a re-request after a failed
+		// attempt. A block that is genuinely missing still reaches the user:
+		// the transcript renders unmatched approvals at its tail.
 		if t := c.findTool(ch.ToolCallID); t != nil {
 			t.Status = ToolAwaiting
+			t.ErrorText = ""
 		}
 	case event.EventToolOutputAvailable:
+		c.removeApprovalsByToolCall(ch.ToolCallID)
 		if t := c.findTool(ch.ToolCallID); t != nil {
 			t.Status = ToolSuccess
 			t.Output = rawJSON(ch.Output)
 			t.ErrorText = ""
 		}
 	case event.EventToolOutputError:
+		c.removeApprovalsByToolCall(ch.ToolCallID)
 		if t := c.findTool(ch.ToolCallID); t != nil {
 			t.Status = ToolError
 			t.ErrorText = ch.ErrorText
 		}
 	case event.EventToolOutputDenied:
+		c.removeApprovalsByToolCall(ch.ToolCallID)
 		if t := c.findTool(ch.ToolCallID); t != nil {
 			t.Status = ToolDenied
-			t.ErrorText = ch.Reason
+			t.ErrorText = ""
 		}
 	case event.EventDone:
 		c.EndRun(ch.Reason == "cancelled")
@@ -250,6 +258,26 @@ func (c *Chat) RemoveApproval(id string) {
 			c.Rev++
 			return
 		}
+	}
+}
+
+// removeApprovalsByToolCall drops the pending approval bound to a tool call
+// once that tool has a result or was denied. Its inline slot is the awaiting
+// tool block, so once the block moves on the leftover approval would render
+// as a stale card at the transcript tail.
+func (c *Chat) removeApprovalsByToolCall(callID string) {
+	if callID == "" || len(c.Approvals) == 0 {
+		return
+	}
+	kept := c.Approvals[:0]
+	for _, p := range c.Approvals {
+		if p.ToolCallID != callID {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) != len(c.Approvals) {
+		c.Approvals = kept
+		c.Rev++
 	}
 }
 
@@ -284,6 +312,9 @@ func (c *Chat) BeginRun(runID string) {
 // show a stopped marker instead of an endless "running" state.
 func (c *Chat) EndRun(cancelled bool) {
 	c.Running = false
+	// A finished run cannot still hold an approval; anything left here is a
+	// stale card that would render at the transcript tail.
+	c.Approvals = nil
 	if n := len(c.Messages); n > 0 {
 		m := c.Messages[n-1]
 		if m.Role == RoleAssistant && m.Status == MsgRunning {

@@ -1177,9 +1177,9 @@ func (s *Service) CancelSSHExec(sessionID string) error {
 	return nil
 }
 
-// CancelChat stops a specific send. If the run is already registered it is stopped
-// (soft-deny pending ToolApproval holds so Genkit can Resume; hard-cancel otherwise).
-// Otherwise runID is marked so Chat can refuse to start.
+// CancelChat stops a specific send. If the run is already registered it is
+// stopped through stopAgentRun (soft-deny the holds, then cancel). Otherwise
+// runID is marked so Chat can refuse to start.
 func (s *Service) CancelChat(sessionID, runID string) error {
 	sessionID = strings.TrimSpace(sessionID)
 	runID = strings.TrimSpace(runID)
@@ -1232,8 +1232,11 @@ func (s *Service) clearCancelledRun(runID string) {
 }
 
 // stopAgentRun is the shared stop path for CancelChat / StopGeneration / shutdown.
-// Pending ToolApproval holds get a soft-deny so Genkit WithResume can finish; the
-// run context is only cancelled when there is no hold (mid-stream text stop).
+// Pending ToolApproval holds always get a soft-deny first, so the engine still
+// emits the denied tool outputs and the UI can close those cards. A user stop
+// then cancels the run context as well: leaving it live let Genkit resume the
+// turn and stream more output, so the first Stop click only paused the approval.
+// Shutdown keeps the graceful order — FlushAndStop finalizes, then cancels.
 // userStop is true for the composer Stop button (mark the turn cancelled).
 func (s *Service) stopAgentRun(run *agentRun, userStop bool) {
 	if run == nil {
@@ -1257,7 +1260,7 @@ func (s *Service) stopAgentRun(run *agentRun, userStop bool) {
 	if execCancel != nil {
 		execCancel()
 	}
-	if !pending {
+	if userStop || !pending {
 		run.cancel()
 	}
 }
