@@ -90,6 +90,9 @@ func panelGeneral(d *Deps, st *State) gui.View {
 		switchRow("settings-frameless", i18n.T("settings.general.frameless"), st.General.Frameless, func(gui.EventCtx) {
 			st.General.Frameless = !st.General.Frameless
 		}),
+		switchRow("settings-auto-check-update", i18n.T("settings.general.auto_check_update"), st.General.AutoCheckUpdate, func(gui.EventCtx) {
+			st.General.AutoCheckUpdate = !st.General.AutoCheckUpdate
+		}),
 		saveBtn("settings-general-save", i18n.T("common.save"), st.Busy, func(ctx gui.EventCtx) {
 			ctx.Consume()
 			saveGeneral(ctx.Window, d)

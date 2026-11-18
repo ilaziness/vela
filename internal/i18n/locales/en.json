@@ -474,6 +474,7 @@
   "settings.ai.temperature_help": "0 means the provider default",
   "settings.ai.title": "AI Assistant",
   "settings.ai.unavailable": "Unavailable",
+  "settings.general.auto_check_update": "Automatically check for updates",
   "settings.general.font": "Font",
   "settings.general.font_placeholder": "Optional, leave empty for system font",
   "settings.general.font_size": "Font size",

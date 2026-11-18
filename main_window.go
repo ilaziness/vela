@@ -164,7 +164,7 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 }
 
 func startUpdateCheck(w *gui.Window, rt *app.Runtime, d *update.Deps) {
-	if d == nil || d.Manager == nil {
+	if d == nil || d.Manager == nil || !rt.Store.Config.General.AutoCheckUpdate {
 		return
 	}
 	go func() {
