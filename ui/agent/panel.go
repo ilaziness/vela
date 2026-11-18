@@ -831,8 +831,13 @@ func composer(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.Ch
 		Text:        st.AgentDraft,
 		Placeholder: placeholder,
 		Sizing:      gui.FillFit,
-		Height:      44,
-		Disabled:    !svcReady,
+		// A Fit-height Input takes its height from the text, so a stated
+		// Height is added on top of the content instead of floor-ing it.
+		// Min/Max bound the growth: the field stays one line tall when
+		// empty, grows with the draft, and scrolls once it hits the cap.
+		MinHeight: 44,
+		MaxHeight: 160,
+		Disabled:  !svcReady,
 		OnTextChanged: func(text string, ctx gui.EventCtx) {
 			gui.State[app.State](ctx.Window).AgentDraft = text
 		},
