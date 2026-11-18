@@ -88,6 +88,14 @@ type State struct {
 	AgentDraft string
 	// AgentSeenRev is the last transcript Rev the view auto-scrolled for.
 	AgentSeenRev int
+	// AgentScrollChat is the transcript the view has already positioned
+	// at its end; a different chat starts at the bottom on first paint.
+	AgentScrollChat *agentmodel.Chat
+	// AgentScrollPushed reports that the bottom pull for AgentScrollChat
+	// was issued at least once. A pull reads the height laid out on the
+	// previous frame, so the first one is not enough to confirm the
+	// position when a longer chat replaces a shorter one.
+	AgentScrollPushed bool
 	// AgentExpanded tracks open ExpandPanel sections (reasoning, tool IO)
 	// keyed by "reasoning-<msgID>-<blockIdx>" / "tool-<callID>-in|out".
 	AgentExpanded map[string]bool

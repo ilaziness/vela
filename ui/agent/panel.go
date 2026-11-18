@@ -25,22 +25,25 @@ func Panel(w *gui.Window, ctrl *app.Controller) gui.View {
 	chat := st.AgentChat
 
 	content := []gui.View{header(w, ctrl, st)}
-	transcriptView := transcript(w, ctrl, st, chat)
+	// The Stack wrapper is unconditional: it contributes a segment to
+	// the transcript's effective ID, and the scroll offset is keyed by
+	// that ID. Wrapping only while the jump button is visible would move
+	// the offset to a fresh key, so the transcript would flip between
+	// two scroll positions on every frame.
+	transcriptLayers := []gui.View{transcript(w, ctrl, st, chat)}
 	if v := jumpToBottom(w); v != nil {
-		transcriptView = gui.Stack(layout.Flush(gui.ContainerCfg{
-			ID:      "agent-transcript-stack",
-			Sizing:  gui.FillFill,
-			Content: []gui.View{transcriptView, v},
-		}))
+		transcriptLayers = append(transcriptLayers, v)
 	}
-	body := []gui.View{
-		transcriptView,
-		composer(w, ctrl, st, chat),
+	transcriptView := gui.Stack(layout.Flush(gui.ContainerCfg{
+		ID:      "agent-transcript-stack",
+		Sizing:  gui.FillFill,
+		Content: transcriptLayers,
+	}))
+	body := []gui.View{transcriptView}
+	if dock := planDock(w, st, chat); dock != nil {
+		body = append(body, dock)
 	}
-	if planDock(w, st, chat) != nil {
-		// insert dock between transcript and composer
-		body = []gui.View{body[0], planDock(w, st, chat), body[1]}
-	}
+	body = append(body, composer(w, ctrl, st, chat))
 	content = append(content, gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:      "agent-body",
 		Sizing:  gui.FillFill,
@@ -57,9 +60,9 @@ func Panel(w *gui.Window, ctrl *app.Controller) gui.View {
 	if st.AgentHistoryOpen {
 		layers = append(layers, historyOverlay(w, ctrl, st))
 	}
-	if len(layers) == 1 {
-		return main
-	}
+	// Unconditional for the same reason as the transcript's Stack: the
+	// history overlay adds a layer, and an ID-bearing ancestor appearing
+	// mid-run would re-key every scroll offset below it.
 	return gui.Stack(layout.Flush(gui.ContainerCfg{
 		ID:      "agent-panel-stack",
 		Sizing:  gui.FillFill,
@@ -67,31 +70,40 @@ func Panel(w *gui.Window, ctrl *app.Controller) gui.View {
 	}))
 }
 
-// jumpToBottom is the floating scroll-to-bottom button shown while the
-// transcript is scrolled away from the end.
 // transcriptScrollID resolves the transcript's effective scroll ID: its
 // ancestors carry IDs, so the leaf alone does not address the scrollable.
-func transcriptScrollID(w *gui.Window) string {
+// ok is false until a frame carrying the transcript has been laid out.
+func transcriptScrollID(w *gui.Window) (string, bool) {
 	if ids := w.ResolveID("agent-transcript"); len(ids) > 0 {
-		return ids[0]
+		return ids[0], true
 	}
-	return "agent-transcript"
+	return "", false
 }
 
+// jumpToBottom is the floating scroll-to-bottom button shown while the
+// transcript is scrolled away from the end. It is a Float rather than a
+// full-size Stack layer, so it only takes the pointer over the button
+// itself and leaves the transcript's hover and wheel handling intact.
 func jumpToBottom(w *gui.Window) gui.View {
-	sid := transcriptScrollID(w)
+	sid, ok := transcriptScrollID(w)
+	if !ok {
+		return nil
+	}
 	pct := w.ScrollVerticalPct(sid)
 	if pct <= 0.02 || pct >= 0.92 {
 		return nil
 	}
 	th := gui.CurrentTheme()
-	return gui.Row(layout.Flush(gui.ContainerCfg{
-		ID:      "agent-jump-bottom",
-		Sizing:  gui.FillFill,
-		VAlign:  gui.VAlignBottom,
-		Padding: gui.NewPadding(0, 12, 56, 0),
+	return gui.Column(layout.Flush(gui.ContainerCfg{
+		ID:           "agent-jump-bottom",
+		Sizing:       gui.FitFit,
+		Float:        true,
+		FloatAnchor:  gui.FloatBottomRight,
+		FloatTieOff:  gui.FloatBottomRight,
+		FloatOffsetX: -12,
+		FloatOffsetY: -12,
+		FloatZIndex:  10,
 		Content: []gui.View{
-			gui.Column(layout.Flush(gui.ContainerCfg{Sizing: gui.FillFill})),
 			gui.Button(gui.ButtonCfg{
 				ID:            "agent-jump-bottom-btn",
 				Variant:       gui.ButtonSecondary,
@@ -102,7 +114,9 @@ func jumpToBottom(w *gui.Window) gui.View {
 				},
 				OnClick: func(ctx gui.EventCtx) {
 					ctx.Consume()
-					ctx.Window.ScrollVerticalToPct(transcriptScrollID(ctx.Window), 1)
+					if sid, ok := transcriptScrollID(ctx.Window); ok {
+						ctx.Window.ScrollVerticalToPct(sid, 1)
+					}
 				},
 			}),
 		},
@@ -239,10 +253,28 @@ func planTaskRow(th gui.Theme, t planTask) gui.View {
 // transcript is the scrollable message list.
 func transcript(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.Chat) gui.View {
 	th := gui.CurrentTheme()
-	if chat != nil && chat.Rev != st.AgentSeenRev {
+	sid, laidOut := transcriptScrollID(w)
+	switch {
+	case chat != nil && st.AgentScrollChat != chat:
+		// A transcript shown for the first time (panel opened or session
+		// switched) starts at the end. The scroll ID only resolves after
+		// a laid-out frame, and every pull reads the height laid out on
+		// the previous frame — right after a load that is still the old
+		// content. So the first pull is never taken as final: the next
+		// frame says whether it landed, and a longer chat needs another.
+		if laidOut {
+			if st.AgentScrollPushed && w.ScrollVerticalPct(sid) > 0.99 {
+				st.AgentScrollChat = chat
+				st.AgentScrollPushed = false
+				st.AgentSeenRev = chat.Rev
+			} else {
+				w.ScrollVerticalToPct(sid, 1)
+				st.AgentScrollPushed = true
+			}
+		}
+	case chat != nil && chat.Rev != st.AgentSeenRev:
 		st.AgentSeenRev = chat.Rev
-		sid := transcriptScrollID(w)
-		if chat.Running || w.ScrollVerticalPct(sid) > 0.7 {
+		if laidOut && (chat.Running || w.ScrollVerticalPct(sid) > 0.7) {
 			w.ScrollVerticalToPct(sid, 1)
 		}
 	}
@@ -297,9 +329,14 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 
 	var blocks []gui.View
 	if isUser {
+		// The bubble spans the row, so the text itself carries the right
+		// alignment: go-gui only distributes Fill children, so a wrapping
+		// box cannot shrink back to its content.
+		style := th.TextStyleBody
+		style.Align = gui.TextAlignRight
 		blocks = append(blocks, gui.Text(gui.TextCfg{
 			Text:      m.Text(),
-			TextStyle: th.TextStyleBody,
+			TextStyle: style,
 			Mode:      gui.TextModeWrap,
 			Sizing:    gui.FillFit,
 		}))
@@ -388,7 +425,7 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 				TextStyle: th.TextStyleCaption,
 				Sizing:    gui.FitFit,
 			})),
-			aligned(bubble),
+			bubble,
 			meta,
 		},
 	}))
