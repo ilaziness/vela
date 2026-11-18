@@ -166,15 +166,19 @@ func historyPanel(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 				},
 			})),
 			gui.Column(layout.Flush(gui.ContainerCfg{
-				ID:           "agent-history-list",
-				Sizing:       gui.FillFill,
-				Scrollable:   true,
-				ScrollMode:   gui.ScrollVerticalOnly,
-				Clip:         true,
-				ClipContents: true,
-				Spacing:      gui.SpacingTight,
-				Padding:      gui.NewPadding(4, 8, 8, 8),
-				Content:      rows,
+				ID:         "agent-history-list",
+				Sizing:     gui.FillFill,
+				Scrollable: true,
+				ScrollMode: gui.ScrollVerticalOnly,
+				// No ClipContents: its stencil also masks the overlaid
+				// scrollbar, so the list scrolled with no bar. Clip still
+				// scissors the rows, and Radius is none here anyway.
+				Clip:    true,
+				Spacing: gui.SpacingTight,
+				// Right gutter keeps the row's delete button clear of
+				// the overlay scrollbar.
+				Padding: gui.NewPadding(4, 12, 8, 8),
+				Content: rows,
 			})),
 		},
 	}))

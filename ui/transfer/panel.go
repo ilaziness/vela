@@ -73,13 +73,17 @@ func TransferPanel(ctrl *app.Controller, tab *app.Tab) gui.View {
 	}
 
 	body := gui.Column(layout.Flush(gui.ContainerCfg{
-		ID:           "transfer-list",
-		Sizing:       gui.FillFill,
-		Scrollable:   true,
-		Clip:         true,
-		ClipContents: true,
-		Spacing:      gui.NoSpacing,
-		Content:      rows,
+		ID:         "transfer-list",
+		Sizing:     gui.FillFill,
+		Scrollable: true,
+		ScrollMode: gui.ScrollVerticalOnly,
+		// No ClipContents: its stencil masks the overlaid scrollbar too,
+		// so the list scrolled with no bar. Clip still scissors the rows.
+		Clip:    true,
+		Spacing: gui.NoSpacing,
+		// Right gutter keeps rows clear of the overlay scrollbar.
+		Padding: gui.NewPadding(0, 12, 0, 0),
+		Content: rows,
 	}))
 
 	return transferColumn(tab, header, body)

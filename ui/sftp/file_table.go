@@ -52,11 +52,12 @@ func remoteFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SF
 		rows = append(rows, emptyRow(th))
 	}
 	list := gui.Column(layout.Flush(gui.ContainerCfg{
-		ID:           "sftp-remote-list",
-		Sizing:       gui.FillFill,
-		Scrollable:   true,
-		Clip:         true,
-		ClipContents: true,
+		ID:         "sftp-remote-list",
+		Sizing:     gui.FillFill,
+		Scrollable: true,
+		// No ClipContents: its stencil masks the overlaid scrollbar too,
+		// so the list scrolled with no bar. Clip still scissors the rows.
+		Clip: true,
 		// Right gutter keeps rows clear of the overlay scrollbar.
 		Padding: gui.NewPadding(0, 12, 0, 0),
 		Spacing: gui.NoSpacing,
@@ -78,11 +79,12 @@ func localFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFT
 		rows = append(rows, emptyRow(th))
 	}
 	return gui.Column(layout.Flush(gui.ContainerCfg{
-		ID:           "sftp-local-list",
-		Sizing:       gui.FillFill,
-		Scrollable:   true,
-		Clip:         true,
-		ClipContents: true,
+		ID:         "sftp-local-list",
+		Sizing:     gui.FillFill,
+		Scrollable: true,
+		// No ClipContents: its stencil masks the overlaid scrollbar too,
+		// so the list scrolled with no bar. Clip still scissors the rows.
+		Clip: true,
 		// Right gutter keeps rows clear of the overlay scrollbar.
 		Padding: gui.NewPadding(0, 12, 0, 0),
 		Spacing: gui.NoSpacing,

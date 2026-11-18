@@ -182,7 +182,6 @@ func planDock(w *gui.Window, st *app.State, chat *model.Chat) gui.View {
 		VAlign:  gui.VAlignMiddle,
 		Spacing: gui.SpacingTight,
 		Content: []gui.View{
-			gui.Text(gui.TextCfg{Text: disclosureGlyph(open), TextStyle: th.TextStyleIconSmall, Sizing: gui.FitFit}),
 			gui.Text(gui.TextCfg{Text: gui.IconListBullet, TextStyle: th.TextStyleIconSmall, Sizing: gui.FitFit}),
 			gui.Text(gui.TextCfg{
 				Text:      layout.Ellipsize(title, 200, func(s string) float32 { return w.TextWidth(s, th.TextStyleLabel) }),
@@ -201,14 +200,17 @@ func planDock(w *gui.Window, st *app.State, chat *model.Chat) gui.View {
 	return gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:      "agent-plan-dock",
 		Sizing:  gui.FillFit,
-		Spacing: gui.SpacingTight,
-		Padding: gui.NewPadding(4, 10, 4, 10),
+		Padding: gui.NewPadding(2, 6, 2, 6),
 		Color:   th.ColorInterior,
 		Content: []gui.View{
 			gui.ExpandPanel(gui.ExpandPanelCfg{
-				ID:      "agent-plan-expand",
-				Head:    head,
-				Open:    open,
+				ID:   "agent-plan-expand",
+				Head: head,
+				Open: open,
+				// ExpandPanel's theme default is PadAll(PadMedium) (14),
+				// which stacks on the dock's own padding and leaves the
+				// collapsed row looking like an empty box.
+				Padding: gui.NewPadding(4, 4, 4, 4),
 				Sizing:  gui.FillFit,
 				Content: gui.Column(layout.Flush(gui.ContainerCfg{Sizing: gui.FillFit, Spacing: gui.SpacingTight, Content: tasks})),
 				OnToggle: func(ctx gui.EventCtx) {
@@ -305,15 +307,17 @@ func transcript(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.
 	}
 
 	return gui.Column(layout.Flush(gui.ContainerCfg{
-		ID:           "agent-transcript",
-		Sizing:       gui.FillFill,
-		Scrollable:   true,
-		ScrollMode:   gui.ScrollVerticalOnly,
-		Clip:         true,
-		ClipContents: true,
-		Spacing:      gui.SpacingMedium,
-		Padding:      gui.NewPadding(8, 12, 8, 8),
-		Content:      msgs,
+		ID:         "agent-transcript",
+		Sizing:     gui.FillFill,
+		Scrollable: true,
+		ScrollMode: gui.ScrollVerticalOnly,
+		Clip:       true,
+		Spacing:    gui.SpacingMedium,
+		// Right pad is the gutter the overlaid scrollbar draws in.
+		// ClipContents must stay off: its stencil bracket masks the
+		// scrollbar too, hiding it. Clip alone scissors the content.
+		Padding: gui.NewPadding(8, 12, 8, 8),
+		Content: msgs,
 	}))
 }
 
@@ -541,7 +545,6 @@ func blockView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.C
 			VAlign:  gui.VAlignMiddle,
 			Spacing: gui.SpacingTight,
 			Content: []gui.View{
-				gui.Text(gui.TextCfg{Text: disclosureGlyph(open), TextStyle: th.TextStyleIconSmall, Sizing: gui.FitFit}),
 				gui.Text(gui.TextCfg{
 					Text:      label,
 					TextStyle: th.TextStyleSecondary,
@@ -595,13 +598,6 @@ func blockView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.C
 	}
 }
 
-func disclosureGlyph(open bool) string {
-	if open {
-		return gui.IconDropDown
-	}
-	return gui.IconDropRight
-}
-
 // toolCard renders one tool invocation: name, status, args, output.
 func toolCard(st *app.State, t *model.ToolCall) gui.View {
 	th := gui.CurrentTheme()
@@ -641,7 +637,6 @@ func toolCard(st *app.State, t *model.ToolCall) gui.View {
 			VAlign:  gui.VAlignMiddle,
 			Spacing: gui.SpacingTight,
 			Content: []gui.View{
-				gui.Text(gui.TextCfg{Text: disclosureGlyph(open), TextStyle: th.TextStyleIconSmall, Sizing: gui.FitFit}),
 				gui.Text(gui.TextCfg{Text: i18n.T("ai.chat.tool_output"), TextStyle: th.TextStyleSecondary, Sizing: gui.FillFit}),
 			},
 		}))
