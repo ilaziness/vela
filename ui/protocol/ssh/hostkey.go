@@ -10,7 +10,10 @@ import (
 	"github.com/ilaziness/vela/internal/ssh"
 )
 
-// HostKeyPrompter shows a native confirm dialog and answers the manager.
+// hostKeyDialogMaxWidth leaves room for the unbroken SHA256 fingerprint line.
+const hostKeyDialogMaxWidth float32 = 480
+
+// HostKeyPrompter shows an in-app confirm dialog and answers the manager.
 type HostKeyPrompter struct {
 	mu  sync.Mutex
 	win *gui.Window
@@ -51,20 +54,22 @@ func (p *HostKeyPrompter) Prompt(hp ssh.HostKeyPrompt) error {
 	body := i18n.Tf("shell.ssh.host_key_body",
 		hp.Host, hp.Address, hp.KeyType, hp.Fingerprint)
 	title := i18n.T("shell.ssh.trust_host_key")
-	level := gui.AlertWarning
 	if hp.Mismatch {
 		title = i18n.T("shell.ssh.host_key_changed")
-		level = gui.AlertCritical
 		body = body + "\n\n" + i18n.Tf("shell.ssh.host_key_previous", hp.OldFingerprint)
 	}
 
 	win.QueueCommand(func(w *gui.Window) {
-		w.NativeConfirmDialog(gui.NativeConfirmDialogCfg{
-			Title: title,
-			Body:  body,
-			Level: level,
-			OnDone: func(res gui.NativeAlertResult, _ *gui.Window) {
-				_ = mgr.SetHostKeyDecision(hp.Host, res.Status == gui.DialogOK)
+		w.Dialog(gui.DialogCfg{
+			DialogType: gui.DialogConfirm,
+			Title:      title,
+			Body:       body,
+			MaxWidth:   gui.SomeF(hostKeyDialogMaxWidth),
+			OnOkYes: func(win *gui.Window) {
+				_ = mgr.SetHostKeyDecision(hp.Host, true)
+			},
+			OnCancelNo: func(win *gui.Window) {
+				_ = mgr.SetHostKeyDecision(hp.Host, false)
 			},
 		})
 	})
