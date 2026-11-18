@@ -7,7 +7,9 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 	"github.com/go-gui-org/go-gui/gui/backend"
+	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/buildinfo"
 	"github.com/ilaziness/vela/internal/updater"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/fonts"
@@ -28,6 +30,15 @@ func main() {
 		log.Fatal(err)
 	}
 	updater.CleanupLeftovers(rt.Logger)
+
+	// Non-release builds run go-gui's dev-mode frame audit: duplicate or
+	// unscoped IDs, unknown focus IDs (DebugUnknownFocus), stale stamps.
+	// Findings go to stderr once per finding per window.
+	if !buildinfo.IsRelease() {
+		gui.Debug(true)
+		rt.Logger.Debug("go-gui debug audit enabled",
+			zap.Bool("enabled", gui.DebugEnabled()))
+	}
 
 	guiApp := gui.NewApp()
 	rt.App = guiApp

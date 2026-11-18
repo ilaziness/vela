@@ -54,7 +54,7 @@ func newWithPTY(w *gui.Window, cfg Cfg, pty ptyIO) (*Term, error) {
 		cursorEpoch: time.Now(),
 		blinkDone:   make(chan struct{}),
 		readDone:    make(chan struct{}),
-		focusID:     "term-" + strconv.FormatUint(seqID, 10),
+		focusID:     "term-pane:" + strconv.FormatUint(seqID, 10),
 		canvasID:    "term-canvas-" + strconv.FormatUint(seqID, 10),
 		capture:     openCapture(seqID),
 	}
@@ -548,24 +548,22 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// through Window.IMECompText, and the commit arrives in onChar.
 		colCfg.AcceptsTextInput = true
 		// SetView → clearViewStateLocked clears the window's
-		// focus ID. Reassert after every full layout rebuild so
-		// keystrokes reach onChar/onKeyDown without requiring a
-		// prior click. Skip while a modal dialog is up: go-gui routes
-		// keys to the dialog layer, and re-asserting here would steal
-		// focus back to the terminal, breaking Tab/Esc/Enter in the
-		// dialog. DialogDismiss restores focus to this pane on close.
-		//
-		// Only assert when the ID is not already ours: SetFocus takes the
-		// window lock and re-activates the platform input context, and View()
-		// runs on every layout rebuild — i.e. every keystroke. Re-asserting
-		// unconditionally is what surfaced go-gui#157, where SetFocus was not
-		// idempotent and cleared the IME preedit mid-composition.
+		// focus ID. Reclaim it after a full layout rebuild, but only when
+		// nobody owns focus: a non-empty foreign ID means the user moved to
+		// a sibling widget in the same window (an AI composer, a form
+		// field, ...), and stealing it back on every rebuild would make
+		// those widgets impossible to type into. Clicking this pane focuses
+		// it again through go-gui's mouse-down focus handling.
+		// Skip while a modal dialog is up: go-gui routes keys to the dialog
+		// layer, and re-asserting here would steal focus back to the
+		// terminal, breaking Tab/Esc/Enter in the dialog.
+		// DialogDismiss restores focus to this pane on close.
 		//
 		// A go-gui context-menu popup ("<menu>:popup") is the same kind of
 		// transient focus owner as a dialog: it takes focus on open for
 		// keyboard navigation, and reclaiming it here would close the menu
 		// on the next rebuild.
-		if !w.DialogIsVisible() && w.FocusID() != t.focusID && !contextMenuFocused(w) {
+		if !w.DialogIsVisible() && w.FocusID() == "" && !contextMenuFocused(w) {
 			w.SetFocus(t.focusID)
 		}
 	}

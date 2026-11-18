@@ -8,6 +8,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 	"go.uber.org/zap"
 
+	"github.com/ilaziness/vela/internal/buildinfo"
 	"github.com/ilaziness/vela/internal/tools"
 	"github.com/ilaziness/vela/internal/vaultcheck"
 	"github.com/ilaziness/vela/ui/app"
@@ -95,6 +96,21 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 			}
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
 				st := gui.State[app.State](w)
+				if !buildinfo.IsRelease() && (e.Type == gui.EventChar || e.Type == gui.EventKeyDown) {
+					fields := []zap.Field{
+						zap.Int("eventType", int(e.Type)),
+						zap.String("focus", w.FocusID()),
+					}
+					if t := st.Active(); t != nil && t.Kind == app.TabSession {
+						if tm := rt.Ctrl.TermFor(t.SessID); tm != nil {
+							fields = append(fields,
+								zap.String("termLeaf", tm.FocusID()),
+								zap.Strings("termResolved", w.ResolveID(tm.FocusID())),
+							)
+						}
+					}
+					rt.Logger.Debug("key event routing", fields...)
+				}
 				rt.Ctrl.HandleWindowEvent(e, st)
 			}
 

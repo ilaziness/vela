@@ -485,7 +485,12 @@ type Term struct {
 	focused atomic.Bool
 
 	// focusID is a unique per-Term focus ID so multiple terminals
-	// in the same window don't compete for the same focus slot.
+	// in the same window don't compete for the same focus slot. It contains
+	// go-gui's scope separator (":") on purpose: an ID with a separator is
+	// treated as already absolute, so an embedder that nests the Term under
+	// ID-bearing ancestors (context menus, splitters, tab panels) does not
+	// re-scope it. go-gui's SetFocus takes the *effective* ID, and the Term
+	// can only know its leaf spelling, so the leaf must not be re-scoped.
 	focusID string
 
 	// winFocused tracks whether the *window* has focus. It is fed only by the
