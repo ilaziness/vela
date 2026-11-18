@@ -46,6 +46,7 @@ func newWindowDeps(rt *app.Runtime, guiApp *gui.App) *windowDeps {
 			App:     guiApp,
 			Store:   rt.Store,
 			Ctrl:    rt.Ctrl,
+			Agent:   rt.Agent,
 			SSH:     rt.SSH,
 			Vault:   rt.Vault,
 			Keys:    rt.Keys,

@@ -179,52 +179,27 @@ func iconBtn(id, glyph, tip string, th gui.Theme, active bool, onClick func(gui.
 	return tipBtn(id, glyph, tip, th, toolBtn, gui.ButtonGhost, active, false, onClick)
 }
 
-// tipBtn is a fixed-size icon button with a hover tip, built on
-// gui.Interactive like session.toolBtn. WithTooltip wraps its content
-// in a default-padded column, which breaks the flush bars' vertical
-// alignment, so the tip floats via layout.Tip on hover instead.
+// tipBtn is a fixed-size icon button with a hover tip; the shared
+// layout.IconTipButton does the Interactive+Button+Tooltip wiring.
+// Buttons larger than 26px take the medium icon, matching the old rule.
 func tipBtn(id, glyph, tip string, th gui.Theme, size float32, variant gui.ButtonVariant, active, disabled bool, onClick func(gui.EventCtx)) gui.View {
-	cellID := "tipbtn-" + id
-	return gui.Interactive(cellID, func(is gui.InteractionState) gui.View {
-		bg := gui.Color{}
-		if active {
-			bg = th.ColorActive
-		}
-		iconStyle := th.TextStyleIconSmall
-		if size > 26 {
-			iconStyle = th.TextStyleIconMedium
-		}
-		content := []gui.View{
-			gui.Button(gui.ButtonCfg{
-				ID:            cellID + "-hit",
-				Variant:       variant,
-				Sizing:        gui.FillFill,
-				Padding:       gui.PaddingNone,
-				Color:         bg,
-				Radius:        gui.RadiusSmall,
-				Disabled:      disabled,
-				FocusDisabled: true,
-				HAlign:        gui.Some(gui.HAlignCenter),
-				VAlign:        gui.Some(gui.VAlignMiddle),
-				Content: []gui.View{
-					gui.Text(gui.TextCfg{Text: glyph, TextStyle: iconStyle}),
-				},
-				OnClick: onClick,
-			}),
-		}
-		if is.Hovered && tip != "" {
-			content = append(content, layout.Tip(cellID+"-tip", tip,
-				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
-		}
-		return gui.Column(layout.Flush(gui.ContainerCfg{
-			ID:      cellID,
-			Sizing:  gui.FixedFixed,
-			Width:   size,
-			Height:  size,
-			Radius:  gui.RadiusSmall,
-			HAlign:  gui.HAlignCenter,
-			VAlign:  gui.VAlignMiddle,
-			Content: content,
-		}))
+	icon := th.TextStyleIconSmall
+	if size > 26 {
+		icon = th.TextStyleIconMedium
+	}
+	return layout.IconTipButton(layout.IconTipButtonCfg{
+		ID:        "tipbtn-" + id,
+		Glyph:     glyph,
+		Tip:       tip,
+		Th:        th,
+		OnClick:   onClick,
+		Variant:   variant,
+		Active:    active,
+		Disabled:  disabled,
+		Size:      size,
+		Icon:      icon,
+		Padding:   gui.PaddingNone,
+		Radius:    gui.RadiusSmall,
+		Placement: layout.TipBelow,
 	})
 }

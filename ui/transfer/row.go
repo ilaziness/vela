@@ -73,10 +73,10 @@ func transferRow(ctrl *app.Controller, tab *app.Tab, p transfer.ProgressData, id
 				Spacing: gui.SpacingTight,
 				Content: []gui.View{
 					gui.Text(gui.TextCfg{Text: transferTypeIcon(p.TransferType), TextStyle: iconStyle, Sizing: gui.FitFit}),
-					tipCell(fmt.Sprintf("transfer-t%d-name", idx), transferNameTip(p), name, th.TextStyleBody),
+					layout.TipText(fmt.Sprintf("transfer-t%d-name", idx), transferNameTip(p), name, th.TextStyleBody),
 				},
 			})),
-			tipCell(fmt.Sprintf("transfer-t%d-path", idx), fullPath, pathText, th.TextStyleSecondary),
+			layout.TipText(fmt.Sprintf("transfer-t%d-path", idx), fullPath, pathText, th.TextStyleSecondary),
 			gui.ProgressBar(gui.ProgressBarCfg{
 				ID:         fmt.Sprintf("transfer-t%d-bar", idx),
 				Percent:    pct,
@@ -118,28 +118,6 @@ func transferRow(ctrl *app.Controller, tab *app.Tab, p transfer.ProgressData, id
 	}))
 }
 
-// tipCell renders ellipsized text and floats tip on hover. The
-// Interactive root must carry the same ID or the hover state never
-// turns true (gui.Interactive contract).
-func tipCell(id, tip, display string, style gui.TextStyle) gui.View {
-	return gui.Interactive(id, func(is gui.InteractionState) gui.View {
-		content := []gui.View{
-			gui.Text(gui.TextCfg{Text: display, TextStyle: style, Sizing: gui.FillFit, Clip: true}),
-		}
-		if is.Hovered {
-			content = append(content, layout.Tip(id+"-tip", tip,
-				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
-		}
-		return gui.Row(layout.Flush(gui.ContainerCfg{
-			ID:      id,
-			Sizing:  gui.FillFit,
-			VAlign:  gui.VAlignMiddle,
-			Clip:    true,
-			Content: content,
-		}))
-	})
-}
-
 // miniBtn wraps a button with a hover tooltip, same Interactive
 // contract as tipCell.
 func miniBtn(id, label, tip string, onClick func(gui.EventCtx)) gui.View {
@@ -154,7 +132,7 @@ func miniBtn(id, label, tip string, onClick func(gui.EventCtx)) gui.View {
 			}),
 		}
 		if is.Hovered && tip != "" {
-			content = append(content, layout.Tip(id+"-tip", tip,
+			content = append(content, layout.Tooltip(id+"-tip", tip,
 				gui.FloatBottomCenter, gui.FloatTopCenter, 0, 4))
 		}
 		return gui.Row(layout.Flush(gui.ContainerCfg{

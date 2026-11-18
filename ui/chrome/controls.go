@@ -86,7 +86,7 @@ func control(id, icon, label string, th gui.Theme, hover gui.Color, onClick func
 // the window's top edge, so the tip opens downward like a native
 // caption tooltip.
 func tipBelow(id, text string) gui.View {
-	return layout.Tip(id, text, gui.FloatBottomCenter, gui.FloatTopCenter, -3, -3)
+	return layout.Tooltip(id, text, gui.FloatBottomCenter, gui.FloatTopCenter, -3, -3)
 }
 
 func maximizeIcon(w *gui.Window) string {

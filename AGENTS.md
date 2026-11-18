@@ -137,7 +137,7 @@
 - Connect/Test：后台 goroutine + `Window.QueueCommand` 回写。
 - 能力缺口：以公开 API 为准；做不到则告知限制并接受现状，不 fork 改库。
 - 禁止使用emoji文字代替`go-gui`图标，图标需要使用`go-gui`库的`Feather`图标。
-- UI组件能通用的尽量创建组件公用，不要不同地方写逻辑语言的重复UI组件
+- UI组件能通用的尽量创建公共组件使用，不要在不同地方写逻辑重复的UI组件
 
 ---
 

@@ -91,45 +91,18 @@ func toolBtn(
 	active bool,
 	onClick func(gui.EventCtx),
 ) gui.View {
-	cellID := "tool-" + id
-	return gui.Interactive(cellID, func(is gui.InteractionState) gui.View {
-		bg := gui.Color{}
-		if active {
-			bg = th.ColorActive
-		}
-		views := []gui.View{
-			gui.Button(gui.ButtonCfg{
-				ID:            cellID + "-hit",
-				Variant:       gui.ButtonGhost,
-				Sizing:        gui.FillFill,
-				Padding:       gui.PaddingXSmall,
-				Color:         bg,
-				Radius:        gui.RadiusSmall,
-				HAlign:        gui.Some(gui.HAlignCenter),
-				VAlign:        gui.Some(gui.VAlignMiddle),
-				FocusDisabled: true,
-				Content: []gui.View{
-					gui.Text(gui.TextCfg{
-						Text:      glyph,
-						TextStyle: th.TextStyleIconLarge,
-					}),
-				},
-				OnClick: onClick,
-			}),
-		}
-		if is.Hovered && tip != "" {
-			views = append(views, layout.Tip(cellID+"-tip", tip,
-				gui.FloatMiddleRight, gui.FloatMiddleLeft, 8, 0))
-		}
-		return gui.Column(layout.Flush(gui.ContainerCfg{
-			ID:      cellID,
-			Sizing:  gui.FixedFixed,
-			Width:   toolBtnSize,
-			Height:  toolBtnSize,
-			Radius:  gui.RadiusSmall,
-			HAlign:  gui.HAlignCenter,
-			VAlign:  gui.VAlignMiddle,
-			Content: views,
-		}))
+	return layout.IconTipButton(layout.IconTipButtonCfg{
+		ID:        "tool-" + id,
+		Glyph:     glyph,
+		Tip:       tip,
+		Th:        th,
+		OnClick:   onClick,
+		Variant:   gui.ButtonGhost,
+		Active:    active,
+		Size:      toolBtnSize,
+		Icon:      th.TextStyleIconLarge,
+		Padding:   gui.PaddingXSmall,
+		Radius:    gui.RadiusSmall,
+		Placement: layout.TipRight,
 	})
 }

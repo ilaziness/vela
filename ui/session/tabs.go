@@ -226,8 +226,8 @@ func tabAddBtn(th gui.Theme, ctrl *app.Controller) gui.View {
 	})
 }
 
-// tabTip uses the shared layout.Tip bubble (theme colors/shadow), not
+// tabTip uses the shared layout.Tooltip bubble (theme colors/shadow), not
 // WithTooltip's padded wrapper.
 func tabTip(id, text string) gui.View {
-	return layout.Tip(id, text, gui.FloatBottomCenter, gui.FloatTopCenter, -3, -3)
+	return layout.Tooltip(id, text, gui.FloatBottomCenter, gui.FloatTopCenter, -3, -3)
 }

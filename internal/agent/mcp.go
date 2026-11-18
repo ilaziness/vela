@@ -101,6 +101,15 @@ func (s *Service) SetSkillEnabled(name string, enabled bool) error {
 	return engine.PublishSkills()
 }
 
+// ReloadSkills rescans skills/ from disk and republishes them into the tool catalog.
+func (s *Service) ReloadSkills() error {
+	engine, _, err := s.ensureEngineDir()
+	if err != nil {
+		return err
+	}
+	return engine.PublishSkills()
+}
+
 // HydrateCatalog loads builtin + skills into the memory catalog without connecting MCP.
 func (s *Service) HydrateCatalog() {
 	engine, _, err := s.ensureEngineDir()

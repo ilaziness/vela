@@ -245,7 +245,7 @@ func sameDirPath(a, b string) bool {
 }
 
 func aiMCPBody(d *Deps, st *State) gui.View {
-	rows := []gui.View{}
+	rows := []gui.View{aiMCPActions(d)}
 	if len(st.MCPServers) == 0 {
 		rows = append(rows, gui.Label(i18n.T("settings.ai.mcp_empty"), gui.CurrentTheme().TextStyleSecondary))
 	}
@@ -276,7 +276,7 @@ func aiMCPBody(d *Deps, st *State) gui.View {
 }
 
 func aiSkillsBody(d *Deps, st *State) gui.View {
-	rows := []gui.View{}
+	rows := []gui.View{aiSkillsActions(d)}
 	if len(st.Skills) == 0 {
 		rows = append(rows, gui.Label(i18n.T("settings.ai.skills_empty"), gui.CurrentTheme().TextStyleSecondary))
 	}
@@ -290,20 +290,137 @@ func aiSkillsBody(d *Deps, st *State) gui.View {
 		} else {
 			label += " — " + i18n.T("settings.ai.skill_off")
 		}
-		rows = append(rows, switchRow("settings-skill-"+name, label, enabled, func(ctx gui.EventCtx) {
+		th := gui.CurrentTheme()
+		toggle := func(ctx gui.EventCtx) {
+			ctx.Consume()
 			next := !enabled
 			if err := ai.SetSkillEnabled(d.Store.UserDataDir(), name, next); err != nil {
 				toastErr(ctx.Window, err)
 				return
 			}
 			refreshLists(gui.State[State](ctx.Window), d)
-		}))
+		}
+		rows = append(rows, gui.Row(layout.Flush(gui.ContainerCfg{
+			Sizing:  gui.FillFit,
+			Spacing: gui.SpacingSmall,
+			VAlign:  gui.VAlignMiddle,
+			Content: []gui.View{
+				gui.Switch(gui.SwitchCfg{
+					ID:       "settings-skill-" + name,
+					Selected: enabled,
+					OnClick:  toggle,
+				}),
+				layout.IconTipButton(layout.IconTipButtonCfg{
+					ID:        "settings-skill-open-" + name,
+					Glyph:     gui.IconFolder,
+					Tip:       i18n.T("settings.ai.open_skill_dir"),
+					Th:        th,
+					Variant:   gui.ButtonGhost,
+					Icon:      th.TextStyleIconSmall,
+					Padding:   gui.PaddingNone,
+					Placement: layout.TipBelow,
+					OnClick: func(ctx gui.EventCtx) {
+						ctx.Consume()
+						if err := d.Agent.OpenSkillDir(name); err != nil {
+							toastErr(ctx.Window, err)
+						}
+					},
+				}),
+				gui.Row(layout.Flush(gui.ContainerCfg{
+					Sizing:  gui.FillFit,
+					OnClick: toggle,
+					Content: []gui.View{
+						gui.Text(gui.TextCfg{
+							Text:      label,
+							TextStyle: th.TextStyleLabel,
+							Sizing:    gui.FillFit,
+						}),
+					},
+				})),
+			},
+		})))
 	}
 	return gui.Column(layout.Flush(gui.ContainerCfg{
 		Sizing:  gui.FillFit,
 		Spacing: gui.SpacingSmall,
 		Content: rows,
 	}))
+}
+
+func aiLinkRow(btns ...gui.View) gui.View {
+	return gui.Row(layout.Flush(gui.ContainerCfg{
+		Sizing:  gui.FillFit,
+		Spacing: gui.SpacingSmall,
+		Content: btns,
+	}))
+}
+
+func aiMCPActions(d *Deps) gui.View {
+	return aiLinkRow(
+		gui.Button(gui.ButtonCfg{
+			ID:      "settings-ai-mcp-open-config",
+			Variant: gui.ButtonGhost,
+			Label:   i18n.T("settings.ai.open_config"),
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				if err := d.Agent.OpenMCPConfig(); err != nil {
+					toastErr(ctx.Window, err)
+				}
+			},
+		}),
+		gui.Button(gui.ButtonCfg{
+			ID:      "settings-ai-mcp-refresh",
+			Variant: gui.ButtonGhost,
+			Label:   i18n.T("common.refresh"),
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				w := ctx.Window
+				refreshLists(gui.State[State](w), d)
+				go func() {
+					_, err := d.Agent.ReloadMCPServers()
+					w.QueueCommand(func(win *gui.Window) {
+						if err != nil {
+							toastErr(win, err)
+						}
+					})
+				}()
+			},
+		}),
+	)
+}
+
+func aiSkillsActions(d *Deps) gui.View {
+	return aiLinkRow(
+		gui.Button(gui.ButtonCfg{
+			ID:      "settings-ai-skills-open-dir",
+			Variant: gui.ButtonGhost,
+			Label:   i18n.T("settings.ai.open_dir"),
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				if err := d.Agent.OpenSkillsDir(); err != nil {
+					toastErr(ctx.Window, err)
+				}
+			},
+		}),
+		gui.Button(gui.ButtonCfg{
+			ID:      "settings-ai-skills-refresh",
+			Variant: gui.ButtonGhost,
+			Label:   i18n.T("common.refresh"),
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				w := ctx.Window
+				refreshLists(gui.State[State](w), d)
+				go func() {
+					err := d.Agent.ReloadSkills()
+					w.QueueCommand(func(win *gui.Window) {
+						if err != nil {
+							toastErr(win, err)
+						}
+					})
+				}()
+			},
+		}),
+	)
 }
 
 func saveAI(w *gui.Window, d *Deps) {
