@@ -4,6 +4,8 @@ package applog
 import (
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
@@ -13,7 +15,35 @@ import (
 	"github.com/ilaziness/vela/internal/buildinfo"
 )
 
-// New creates the application logger (file + console in non-release).
+var (
+	global   atomic.Pointer[zap.Logger]
+	globalMu sync.Mutex
+)
+
+// SetDefault installs l as the process-wide logger returned by L.
+func SetDefault(l *zap.Logger) {
+	if l == nil {
+		l = zap.NewNop()
+	}
+	global.Store(l)
+}
+
+// L returns the process-wide logger, lazily creating it via New on first
+// call so packages can log without an injected *zap.Logger.
+func L() *zap.Logger {
+	if l := global.Load(); l != nil {
+		return l
+	}
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	if l := global.Load(); l != nil {
+		return l
+	}
+	return New()
+}
+
+// New creates the application logger (file + console in non-release) and
+// installs it as the process-wide logger returned by L.
 func New() *zap.Logger {
 	level := zap.NewAtomicLevelAt(zap.DebugLevel)
 	if buildinfo.IsRelease() {
@@ -21,13 +51,15 @@ func New() *zap.Logger {
 	}
 	logger, err := newLogger("logs/vela.log", level)
 	if err != nil {
-		return zap.NewNop()
+		logger = zap.NewNop()
+	} else {
+		logger.Info("Logger initialized",
+			zap.String("mode", buildinfo.Mode),
+			zap.String("logPath", "logs/vela.log"),
+			zap.String("logLevel", level.String()),
+		)
 	}
-	logger.Info("Logger initialized",
-		zap.String("mode", buildinfo.Mode),
-		zap.String("logPath", "logs/vela.log"),
-		zap.String("logLevel", level.String()),
-	)
+	SetDefault(logger)
 	return logger
 }
 

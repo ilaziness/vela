@@ -20,6 +20,7 @@
 
 ```shell
 ├── main.go                 # 应用入口（go-gui + embed logo）
+├── main_window.go          # 主窗口装配
 ├── assets/                 # 应用图标等静态资源（appicon.png）
 ├── ui/                     # 桌面 UI（禁止 import Wails；壳层不绑死某协议）
 │   ├── app/                # 组合根、State、Controller
@@ -32,21 +33,49 @@
 │   ├── protocol/           # 协议插件接口 + Registry
 │   │   ├── ssh/            # SSH 表单 / Connector / HostKey / Keyboard
 │   │   └── serial/         # 串口表单 / Connector
-│   └── bookmarks/          # 书签树占位
+│   ├── bookmarks/          # 书签树 / 编辑器 / 侧栏
+│   ├── agent/              # AI Agent 面板（含 model/）
+│   ├── backup/             # 备份 / 恢复窗口
+│   ├── chrome/             # 自绘标题栏与窗口控制
+│   ├── sftp/               # SFTP 文件面板
+│   ├── tools/              # 工具箱（codec/net/ops/text/time）
+│   ├── transfer/           # 文件传输队列面板
+│   ├── tunnel/             # 端口转发面板
+│   └── update/             # 应用更新对话框
 ├── internal/               # 引擎与基础设施（禁止 import ui）
 │   ├── termio/             # Protocol + Session + Hub
 │   ├── termstream/         # termio.Session → go-term Stream
-│   ├── ssh/                # 连接、会话、proxy resolve、usererr map
+│   ├── termws/             # 终端 WebSocket 服务
+│   ├── termcharset/        # 终端字符集处理
+│   ├── ssh/                # 连接、会话、agent forward、proxy resolve、usererr map
 │   ├── serial/             # 串口引擎
-│   ├── sftp/ / tunnel/     # SFTP / 端口转发
-│   ├── bookmark/           # 书签业务（含 ValidateProxy）
+│   ├── sshconfig/          # ~/.ssh/config 解析 / 写入
+│   ├── sshkey/             # SSH 密钥生成与管理
+│   ├── sftp/ / tunnel/     # SFTP / 端口转发管理器
+│   ├── transfer/           # 传输队列引擎
+│   ├── zmodem/             # ZMODEM 检测与收发
+│   ├── bookmark/           # 书签业务（含 ValidateProxy、OpenSSH 导入）
+│   ├── agent/              # AI Agent 服务（MCP、持久化）
+│   ├── ai/                 # Genkit 引擎、历史、checkpoint、event/
+│   ├── command/            # 命令片段 / 行捕获
+│   ├── keybind/            # 快捷键目录与管理器
+│   ├── sync/               # 配置同步（store/：S3 / WebDAV / 自建）
+│   ├── updater/            # 应用更新（GitHub release、下载、重启）
+│   ├── tools/              # 内置工具集（转换、CIDR、cron、JWT 等）
+│   ├── localfs/            # 本地文件系统辅助
+│   ├── httpproxy/          # 系统代理探测（平台分文件）
+│   ├── system/             # 系统集成（打开路径等）
+│   ├── vaultcheck/         # Vault 状态校验
 │   ├── applog/             # 进程日志
-│   ├── config/             # TOML + BootstrapLanguage
+│   ├── config/             # TOML + BootstrapLanguage + local_state
+│   ├── database/           # SQLite 持久化与迁移
+│   ├── secret/             # 密钥 / Vault（Argon2id + AES-GCM）
 │   ├── i18n/               # leaf：embed 三语；禁止 import config
-│   ├── usererr/ / secret/ / database / ai / …
+│   ├── usererr/ / utils/ / buildinfo/   # 错误码 / 小工具 / ldflags 版本
 ├── third_party/go-term/    # go-term 仅此例外：必须本地补丁（NewWithStream 等）
 ├── build/                  # 图标与平台打包资源（appicon*、windows/icon.ico）
-├── data/                   # 内置默认数据
+├── data/commands/          # 内置默认命令片段
+├── testdata/               # 测试数据
 ├── sync-backend/           # 同步服务端（独立 go.mod）
 ├── Makefile
 └── go.mod
@@ -82,7 +111,9 @@
 
 ### 1. 日志
 
-- Go 使用注入的 `*zap.Logger`，不要新增包级 `Logger`。
+- 全局日志：`internal/applog` 提供进程级共享 logger，`applog.L()` 返回全局 `*zap.Logger`（`applog.New()` 创建时即安装为全局实例；`L()` 首次调用会懒初始化）。新增需要打日志的代码直接用 `applog.L()`，**不要**再为此新增 `*zap.Logger` 参数注入。
+- 已有 `*zap.Logger` 注入签名的调用链保持不变，不做批量替换。
+- 不要新增包级 `Logger` 变量（`applog.L()` 是唯一共享入口）。
 - 错误要落日志，不要只展示在 UI。
 - 开发过程中需要增加一些合理的debug日志来辅助开发调试，错误类的根据具体情况添加warn或者error级别的日志
 
@@ -141,3 +172,4 @@ go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe .
 - go-gui：[README](https://github.com/go-gui-org/go-gui) / [llms.txt](https://raw.githubusercontent.com/go-gui-org/go-gui/main/llms.txt)
 - go-term：[Embedding wiki](https://github.com/go-gui-org/go-term/wiki/Embedding)
 - genkit：[get started](https://genkit.dev/docs/go/get-started)
+

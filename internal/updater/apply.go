@@ -35,7 +35,7 @@ func RunApplyMode(args []string) (bool, error) {
 	if len(args) < 2 || args[0] != applyArg {
 		return false, nil
 	}
-	return true, applyManifestFile(args[1], applog.New())
+	return true, applyManifestFile(args[1], applog.L())
 }
 
 func applyManifestFile(path string, logger *zap.Logger) error {
