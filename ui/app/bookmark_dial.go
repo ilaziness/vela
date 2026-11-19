@@ -87,16 +87,13 @@ func (c *Controller) ConnectBookmark(w *gui.Window, id string) {
 	if id == "" {
 		return
 	}
-	targetID := ""
-	if tab := gui.State[State](w).Active(); tab != nil && tab.Kind == TabConnect {
-		targetID = tab.ID
-	}
-	c.beginBookmarkConnect(w, targetID, id)
+	target := dialPaneTarget(gui.State[State](w))
+	c.beginBookmarkConnect(w, target, id)
 }
 
 // beginBookmarkConnect is the shared vault gate + dial entry for bookmarks.
-// targetTabID is the tab the session should land in ("" appends a new one).
-func (c *Controller) beginBookmarkConnect(w *gui.Window, targetTabID, id string) {
+// target is the pane slot the session should land in.
+func (c *Controller) beginBookmarkConnect(w *gui.Window, target paneRef, id string) {
 	if id == "" {
 		return
 	}
@@ -114,10 +111,7 @@ func (c *Controller) beginBookmarkConnect(w *gui.Window, targetTabID, id string)
 	}
 	st.Busy = true
 	st.BusyOp = "connect"
-	if tab := st.TabByID(targetTabID); tab != nil {
-		tab.Status = TabStatusConnecting
-		tab.ConnErr = ""
-	}
+	markDialTarget(st, target)
 
 	clearBusy := func(win *gui.Window) {
 		s := gui.State[State](win)
@@ -130,11 +124,11 @@ func (c *Controller) beginBookmarkConnect(w *gui.Window, targetTabID, id string)
 		UserDataDir: store.UserDataDir(),
 		Reason:      i18n.T("password.encrypt_decrypt_required"),
 		OnUnlocked: func(win *gui.Window) {
-			go c.runConnectBookmark(win, targetTabID, id)
+			go c.runConnectBookmark(win, target, id)
 		},
 		OnFail: func(win *gui.Window, err error) {
 			clearBusy(win)
-			c.dialFailed(win, targetTabID, err)
+			c.dialFailed(win, target, err)
 			win.Toast(gui.ToastCfg{
 				Body:     errText(err),
 				Severity: gui.ToastError,
@@ -143,7 +137,7 @@ func (c *Controller) beginBookmarkConnect(w *gui.Window, targetTabID, id string)
 		},
 		OnCancel: func(win *gui.Window) {
 			clearBusy(win)
-			c.dialFailed(win, targetTabID, nil)
+			c.dialFailed(win, target, nil)
 		},
 	}
 	if vaultcheck.HasEncryptedSecrets(store, db) {
@@ -154,14 +148,14 @@ func (c *Controller) beginBookmarkConnect(w *gui.Window, targetTabID, id string)
 	vaultprompt.Unlock(w, cfg)
 }
 
-func (c *Controller) runConnectBookmark(w *gui.Window, targetTabID, id string) {
+func (c *Controller) runConnectBookmark(w *gui.Window, target paneRef, id string) {
 	sess, label, err := c.connectBookmarkSync(id)
 	w.QueueCommand(func(win *gui.Window) {
 		st := gui.State[State](win)
 		st.Busy = false
 		st.BusyOp = ""
 		if err != nil {
-			c.dialFailed(win, targetTabID, err)
+			c.dialFailed(win, target, err)
 			win.Toast(gui.ToastCfg{
 				Body:     errText(err),
 				Severity: gui.ToastError,
@@ -170,8 +164,8 @@ func (c *Controller) runConnectBookmark(w *gui.Window, targetTabID, id string) {
 			return
 		}
 		req := reconnectReq{bookmarkID: id, label: label}
-		if err := c.attachSession(win, st, sess, targetTabID, req); err != nil {
-			c.dialFailed(win, targetTabID, err)
+		if err := c.attachSession(win, st, sess, target, req); err != nil {
+			c.dialFailed(win, target, err)
 			win.Toast(gui.ToastCfg{
 				Body:     errText(err),
 				Severity: gui.ToastError,

@@ -1,64 +1,112 @@
 package session
 
 import (
+	"fmt"
+
 	"github.com/go-gui-org/go-gui/gui"
-	"github.com/go-gui-org/go-term/term"
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/ui/app"
-	"github.com/ilaziness/vela/ui/layout"
 )
 
-// TerminalPane embeds the go-term view flush in the main pane, or the
-// reconnect pane when the session behind the tab has dropped.
+// paneMinSize keeps a split pane usable; below it the Splitter refuses
+// to shrink further.
+const paneMinSize float32 = 120
+
+// TerminalPane embeds the go-term views of a session tab's panes,
+// arranged by the tab's layout, or the reconnect view for a dropped
+// pane.
 func TerminalPane(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 	if tab == nil || tab.Kind != app.TabSession {
 		return gui.Label(i18n.T("shell.session.none"), gui.CurrentTheme().TextStyleBody)
 	}
-	if tab.SessID == "" {
-		// The session ended but the tab was kept: offer a reconnect.
-		return ReconnectPane(w, ctrl, tab)
+	tab.EnsurePanes()
+	switch tab.Layout {
+	case app.LayoutSplitH:
+		return panePair(w, ctrl, tab, gui.SplitterHorizontal)
+	case app.LayoutSplitV:
+		return panePair(w, ctrl, tab, gui.SplitterVertical)
+	case app.LayoutGrid2x2:
+		return paneGrid(w, ctrl, tab)
+	default:
+		return paneCell(w, ctrl, tab, 0)
 	}
-	tm := ctrl.TermFor(tab.SessID)
-	if tm == nil {
-		// SessID without a term is a broken invariant, not a disconnect.
-		return gui.Label(i18n.T("shell.session.term_not_ready"), gui.CurrentTheme().TextStyleBody)
-	}
-	body := gui.Column(layout.Flush(gui.ContainerCfg{
-		Sizing:  gui.FillFill,
-		Content: []gui.View{tm.View(w)},
-	}))
-	return terminalMenu(w, ctrl, tab.SessID, tm, body)
 }
 
-// terminalMenu wraps the terminal view in a right-click context menu.
-// Copy/Paste/Find dispatch through Term.RunAction so they honor the same
-// conditional-passthrough rules as the keyboard bindings; the record item
-// toggles a .gtr session recording via the controller.
-func terminalMenu(w *gui.Window, ctrl *app.Controller, sessID string, tm *term.Term, body gui.View) gui.View {
-	recordText := i18n.T("terminal.start_logging")
-	if tm.Recording() {
-		recordText = i18n.T("terminal.stop_logging")
-	}
-	return gui.ContextMenu(w, gui.ContextMenuCfg{
-		ID:      "term-ctx-" + sessID,
-		Sizing:  gui.FillFill,
-		Padding: gui.PaddingNone,
-		Items: []gui.MenuItemCfg{
-			{ID: "copy", Text: i18n.T("common.copy"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				tm.RunAction(term.ActionCopy, ctx.Window)
-			}},
-			{ID: "paste", Text: i18n.T("terminal.paste"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				tm.RunAction(term.ActionPaste, ctx.Window)
-			}},
-			{ID: "find", Text: i18n.T("terminal.find"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				tm.RunAction(term.ActionFind, ctx.Window)
-			}},
-			gui.MenuSeparator(),
-			{ID: "record", Text: recordText, Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				ctrl.ToggleSessionRecording(ctx.Window, sessID)
-			}},
+// panePair renders a two-slot layout: SplitH is left|right, SplitV is
+// top|bottom.
+func panePair(w *gui.Window, ctrl *app.Controller, tab *app.Tab, orient gui.SplitterOrientation) gui.View {
+	return gui.Splitter(paneSplitCfg(w, ctrl, tab, "pair", orient, 0, 1, 0, tab.RatioMain))
+}
+
+// paneGrid renders the 2x2 layout: an outer left|right split at
+// RatioMain, each half split top|bottom at RatioSub. Pane order is
+// row-major: 0=TL, 1=TR, 2=BL, 3=BR — so the left half holds 0 and 2.
+func paneGrid(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
+	th := gui.CurrentTheme()
+	tabID := tab.ID
+	left := gui.Splitter(paneSplitCfg(w, ctrl, tab, "gl", gui.SplitterVertical, 0, 2, 1, tab.RatioSub))
+	right := gui.Splitter(paneSplitCfg(w, ctrl, tab, "gr", gui.SplitterVertical, 1, 3, 1, tab.RatioSub))
+	return gui.Splitter(gui.SplitterCfg{
+		ID:          "pane-grid-" + tabID,
+		Orientation: gui.SplitterHorizontal,
+		Sizing:      gui.FillFill,
+		First:       gui.SplitterPaneCfg{Content: []gui.View{left}, MinSize: paneMinSize},
+		Second:      gui.SplitterPaneCfg{Content: []gui.View{right}, MinSize: paneMinSize},
+		Ratio:       gui.SomeF(tab.RatioMain),
+		HandleSize:  gui.SomeF(1),
+		ColorHandle: th.ColorBorder,
+		ColorGrip:   gui.ColorTransparent,
+		OnChange: func(r float32, _ gui.SplitterCollapsed, ctx gui.EventCtx) {
+			writePaneRatio(ctx, tabID, 0, r)
 		},
-		Content: []gui.View{body},
 	})
+}
+
+// paneSplitCfg builds one divider. which 0 writes RatioMain, 1 writes
+// RatioSub; the lookup goes through State because the Tab pointer from
+// View-build time may dangle after st.Tabs reallocates.
+func paneSplitCfg(w *gui.Window, ctrl *app.Controller, tab *app.Tab, tag string, orient gui.SplitterOrientation, first, second, which int, ratio float32) gui.SplitterCfg {
+	th := gui.CurrentTheme()
+	tabID := tab.ID
+	return gui.SplitterCfg{
+		ID:          fmt.Sprintf("pane-%s-%s", tag, tabID),
+		Orientation: orient,
+		Sizing:      gui.FillFill,
+		First:       gui.SplitterPaneCfg{Content: []gui.View{paneCell(w, ctrl, tab, first)}, MinSize: paneMinSize},
+		Second:      gui.SplitterPaneCfg{Content: []gui.View{paneCell(w, ctrl, tab, second)}, MinSize: paneMinSize},
+		Ratio:       gui.SomeF(ratio),
+		HandleSize:  gui.SomeF(1),
+		ColorHandle: th.ColorBorder,
+		ColorGrip:   gui.ColorTransparent,
+		OnChange: func(r float32, _ gui.SplitterCollapsed, ctx gui.EventCtx) {
+			writePaneRatio(ctx, tabID, which, r)
+		},
+	}
+}
+
+// writePaneRatio stores a dragged divider ratio back into the tab,
+// clamped so neither pane collapses.
+func writePaneRatio(ctx gui.EventCtx, tabID string, which int, r float32) {
+	if r < 0.05 {
+		r = 0.05
+	}
+	if r > 0.95 {
+		r = 0.95
+	}
+	t := gui.State[app.State](ctx.Window).TabByID(tabID)
+	if t == nil {
+		return
+	}
+	if which == 0 {
+		t.RatioMain = r
+	} else {
+		t.RatioSub = r
+	}
+}
+
+// paneCellID is the stable per-slot element id shared by the context
+// menu wrapper and the drag-drop rect registry.
+func paneCellID(tabID string, idx int) string {
+	return fmt.Sprintf("pane-cell-%s-%d", tabID, idx)
 }

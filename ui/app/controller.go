@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -50,6 +51,9 @@ type Controller struct {
 	// dial again after a drop. Keyed by tab id; secrets stay in memory
 	// only and are dropped when the tab closes.
 	reconnect map[string]reconnectReq
+	// paneLoc maps a live sessID to its (tab, pane) slot so click-to-
+	// focus and disconnect handling resolve panes in O(1).
+	paneLoc map[string]paneRef
 	// closing suppresses disconnect handling while the app tears down:
 	// Term.Close fires OnExit like any other exit.
 	closing bool
@@ -109,6 +113,7 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		termCfg:   config.Default().Terminal,
 		termTheme: defaultTermTheme(),
 		reconnect: make(map[string]reconnectReq),
+		paneLoc:   make(map[string]paneRef),
 		transfers: make(map[string][]transfer.ProgressData),
 		edits:     newEditBook(),
 	}
@@ -203,20 +208,42 @@ func (c *Controller) Busy() (bool, string) {
 	return st.Busy, st.BusyOp
 }
 
-// dialFailed restores a tab's dot after a failed dial or attach, and logs
-// the cause. A session tab goes back to red so its reconnect button works
-// again; a connect form goes back to grey.
-func (c *Controller) dialFailed(w *gui.Window, tabID string, err error) {
+// dialFailed restores the dial target after a failed dial or attach,
+// and logs the cause. A pane that had a reconnect request goes back to
+// red so its reconnect button works again; a fresh slot goes back to
+// grey so it can be dialed again.
+func (c *Controller) dialFailed(w *gui.Window, target paneRef, err error) {
 	if err != nil {
-		c.logger.Warn("dial failed", zap.String("tab", tabID), zap.Error(err))
+		c.logger.Warn("dial failed", zap.String("target", paneKey(target.tabID, target.pane)), zap.Error(err))
 	}
-	tab := gui.State[State](w).TabByID(tabID)
+	st := gui.State[State](w)
+	if target.pane >= 0 {
+		tab := st.TabByID(target.tabID)
+		if tab == nil {
+			return
+		}
+		tab.EnsurePanes()
+		if target.pane >= len(tab.Panes) {
+			return
+		}
+		c.restorePaneAfterDial(tab, target.pane, err)
+		tab.SyncActive()
+		return
+	}
+	tab := st.TabByID(target.tabID)
 	if tab == nil {
 		return
 	}
 	if tab.Kind == TabSession {
-		tab.Status = TabStatusDisconnected
-		tab.ConnErr = errText(err)
+		tab.EnsurePanes()
+		for i := range tab.Panes {
+			if tab.Panes[i].Status == TabStatusConnecting {
+				tab.Panes[i].Status = TabStatusDisconnected
+				tab.Panes[i].ConnErr = errText(err)
+				break
+			}
+		}
+		tab.SyncActive()
 		return
 	}
 	tab.Status = TabStatusIdle
@@ -246,16 +273,13 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	st.Busy = true
 	st.BusyOp = op
 
-	// Capture the target tab now: by the time the dial returns the user
-	// may have switched tabs, and the session must land where it was
-	// started from.
-	targetID := ""
+	// Capture the dial target now: by the time the dial returns the
+	// user may have switched tabs, and the session must land where it
+	// was started from.
+	target := paneRef{pane: -1}
 	if !testOnly {
-		if tab := st.Active(); tab != nil && tab.Kind == TabConnect {
-			targetID = tab.ID
-			tab.Status = TabStatusConnecting
-			tab.ConnErr = ""
-		}
+		target = dialPaneTarget(st)
+		markDialTarget(st, target)
 	}
 
 	go func() {
@@ -284,7 +308,7 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 				st := gui.State[State](w)
 				st.Busy = false
 				st.BusyOp = ""
-				c.dialFailed(w, targetID, err)
+				c.dialFailed(w, target, err)
 				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 			})
 			return
@@ -294,8 +318,8 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 			st := gui.State[State](w)
 			st.Busy = false
 			st.BusyOp = ""
-			if err := c.attachSession(w, st, sess, targetID, req); err != nil {
-				c.dialFailed(w, targetID, err)
+			if err := c.attachSession(w, st, sess, target, req); err != nil {
+				c.dialFailed(w, target, err)
 				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				_ = sess.Close()
 				c.hub.Unregister(sess.ID())
@@ -310,10 +334,15 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	}()
 }
 
-// attachSession wires sess into a go-term pane and binds it to a tab.
-// targetTabID is the tab captured when the dial started ("" to append a
-// new one); req is how the tab can dial again after a drop.
-func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session, targetTabID string, req reconnectReq) error {
+// attachSession wires sess into a go-term pane and binds it to the
+// pane slot captured when the dial started; req is how the pane can
+// dial again after a drop.
+func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session, target paneRef, req reconnectReq) error {
+	tab, idx, err := c.resolvePaneTarget(st, target)
+	if err != nil {
+		return err
+	}
+	tabID := tab.ID
 	c.mu.Lock()
 	termCfg := c.termCfg
 	termTheme := c.termTheme
@@ -328,7 +357,7 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 
 	stream := termstream.New(sess)
 	var tm *term.Term
-	tm, err := term.NewWithStream(w, term.Cfg{
+	tm, err = term.NewWithStream(w, term.Cfg{
 		NoWindowHandler: true,
 		ScrollbackRows:  scrollback,
 		TextStyle:       fonts.TermStyle(termCfg),
@@ -351,6 +380,7 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 			if tm == nil {
 				return
 			}
+			c.activatePaneForSess(w, sess.ID())
 			if ids := w.ResolveID(tm.FocusID()); len(ids) > 0 {
 				w.SetFocus(ids[0])
 			}
@@ -372,42 +402,48 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	c.terms[sess.ID()] = tm
 	c.mu.Unlock()
 
-	tab := st.TabByID(targetTabID)
-	if tab == nil {
-		st.tabSeq++
-		st.Tabs = append(st.Tabs, Tab{ID: "tab-sess-" + itoa(st.tabSeq)})
-		tab = &st.Tabs[len(st.Tabs)-1]
+	// The tab slice may have shifted while the Term was built;
+	// re-resolve before writing the pane.
+	tab = st.TabByID(tabID)
+	if tab == nil || idx >= len(tab.Panes) || tab.Panes[idx].SessID != "" {
+		c.mu.Lock()
+		delete(c.terms, sess.ID())
+		c.mu.Unlock()
+		_ = tm.Close()
+		c.hub.Unregister(sess.ID())
+		return errors.New(i18n.T("pane.target_gone"))
 	}
-	// Replace the connect form in place, or revive a dropped session tab
-	// that is dialing again.
+	label := req.label
+	if label == "" {
+		label = sess.Label()
+	}
+	tab.Panes[idx] = Pane{
+		SessID:     sess.ID(),
+		Status:     TabStatusConnected,
+		Label:      label,
+		Protocol:   sess.Protocol(),
+		BookmarkID: req.bookmarkID,
+		OwnerKey:   c.sftpOwnerKey(req),
+	}
 	tab.Kind = TabSession
-	tab.Title = req.label
-	if tab.Title == "" {
-		tab.Title = sess.Label()
-	}
-	tab.Protocol = sess.Protocol()
-	if tab.SessID != "" {
-		delete(st.SFTP, tab.SessID)
-	}
-	tab.SessID = sess.ID()
 	tab.Draft = protocol.Draft{}
-	tab.Status = TabStatusConnected
-	tab.ConnErr = ""
+	tab.ActivePane = idx
 	tab.SFTPOpen = false
-	tab.OwnerKey = c.sftpOwnerKey(req)
-	tab.BookmarkID = req.bookmarkID
 	st.ActiveTab = tab.ID
+	tab.SyncActive()
 
 	c.mu.Lock()
-	c.reconnect[tab.ID] = req
+	c.reconnect[paneKey(tabID, idx)] = req
+	c.paneLoc[sess.ID()] = paneRef{tabID: tabID, pane: idx}
 	c.mu.Unlock()
 
 	c.focusActiveTerm(st)
 	return nil
 }
 
-// markDisconnected detaches a dead session but keeps its tab, so the
-// pane can offer a reconnect. Called on the UI thread via QueueCommand.
+// markDisconnected detaches a dead session but keeps its pane slot, so
+// it can offer a reconnect. Only the pane that died is affected; the
+// tab's other panes keep running. Called on the UI thread.
 func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 	c.mu.Lock()
 	closing := c.closing
@@ -416,27 +452,40 @@ func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 		return
 	}
 	st := gui.State[State](w)
-	tab := st.TabBySessID(sessID)
-	if tab == nil {
+	tabID, idx, ok := st.PaneOf(sessID)
+	if !ok {
 		// The tab was closed by the user before the exit landed.
 		return
 	}
-	// Only the active tab owns the focus; a background drop must not
-	// steal it from the terminal the user is typing in.
-	if st.ActiveTab == tab.ID {
-		// The focused Term is leaving the tree; clear focus first so
-		// go-gui does not reassign it to the first remaining focusable.
-		w.ClearFocus()
+	tab := st.TabByID(tabID)
+	if tab == nil {
+		return
 	}
-	tab.SessID = ""
-	tab.Status = TabStatusDisconnected
-	tab.ConnErr = ""
-	// A dead session has nothing to monitor; the user reopens the
-	// panel after reconnecting.
-	tab.PerfOpen = false
-	tab.SFTPOpen = false
-	tab.TransferOpen = false
-	tab.TunnelOpen = false
+	tab.EnsurePanes()
+	if idx >= len(tab.Panes) || tab.Panes[idx].SessID != sessID {
+		return
+	}
+	wasActive := tab.ActivePane == idx
+	wasActiveTab := st.ActiveTab == tab.ID
+	c.mu.Lock()
+	delete(c.paneLoc, sessID)
+	c.mu.Unlock()
+	p := &tab.Panes[idx]
+	p.SessID = ""
+	p.Status = TabStatusDisconnected
+	p.ConnErr = ""
+	p.Protocol = ""
+	p.BookmarkID = ""
+	p.OwnerKey = ""
+	// Label stays: it feeds the tab title while the pane is down.
+	if wasActive {
+		// A dead session has nothing to monitor; the user reopens the
+		// panel after reconnecting.
+		tab.PerfOpen = false
+		tab.SFTPOpen = false
+		tab.TransferOpen = false
+		tab.TunnelOpen = false
+	}
 	delete(st.SFTP, sessID)
 	// The SSH session is already dead: discard unsaved edits and
 	// close the SFTP client without prompting.
@@ -446,10 +495,15 @@ func (c *Controller) markDisconnected(w *gui.Window, sessID string) {
 	// The reconnect gets a fresh sessID, so this snapshot could never
 	// be read again; retryable rows survive in the transfer queue.
 	c.DropTransfers(sessID)
-	// If the SFTP panel held focus its ID dies with the session;
-	// clear first so go-gui's fixup does not park focus on the first
-	// tab stop (the quick-connect refresh button).
-	w.ClearFocus()
+	if wasActive && wasActiveTab {
+		// The focused Term is leaving the tree; clear focus first so
+		// go-gui does not reassign it to the first remaining focusable.
+		w.ClearFocus()
+	}
+	tab.SyncActive()
+	if wasActive {
+		w.ClearFocus()
+	}
 	c.focusActiveTerm(st)
 }
 
@@ -460,124 +514,85 @@ func (c *Controller) TermFor(sessID string) *term.Term {
 	return c.terms[sessID]
 }
 
-// CloseTab closes a UI tab and its session if any. When the session
-// has unsaved remote edits the user is asked once before teardown.
+// CloseTab closes a UI tab and every session its panes hold. When a
+// session has unsaved remote edits the user is asked once per session
+// before teardown.
 func (c *Controller) CloseTab(w *gui.Window, tabID string) {
 	st := gui.State[State](w)
-	var sessID string
-	for _, t := range st.Tabs {
-		if t.ID == tabID {
-			sessID = t.SessID
-			break
+	tab := st.TabByID(tabID)
+	if tab == nil {
+		return
+	}
+	tab.EnsurePanes()
+	var sessIDs []string
+	for i := range tab.Panes {
+		if tab.Panes[i].SessID != "" {
+			sessIDs = append(sessIDs, tab.Panes[i].SessID)
 		}
 	}
-	if sessID != "" && c.UnsavedEditCount(sessID) > 0 {
+	c.confirmCloseSessions(w, sessIDs, 0, func() {
+		c.closeTabNow(w, tabID)
+	})
+}
+
+// confirmCloseSessions chains the unsaved-edit prompt across every
+// session the tab owns, then runs done on the UI thread.
+func (c *Controller) confirmCloseSessions(w *gui.Window, sessIDs []string, i int, done func()) {
+	if i >= len(sessIDs) {
+		done()
+		return
+	}
+	sessID := sessIDs[i]
+	if c.UnsavedEditCount(sessID) > 0 {
 		c.requestCloseSession(w, sessID, func() {
-			c.closeTabNow(w, tabID, sessID)
+			c.confirmCloseSessions(w, sessIDs, i+1, done)
 		})
 		return
 	}
-	c.closeTabNow(w, tabID, sessID)
+	c.confirmCloseSessions(w, sessIDs, i+1, done)
 }
 
 // closeTabNow performs the tab removal and session teardown. Runs on
 // the UI thread, possibly deferred by an edit-confirm dialog.
-func (c *Controller) closeTabNow(w *gui.Window, tabID, sessID string) {
+func (c *Controller) closeTabNow(w *gui.Window, tabID string) {
 	st := gui.State[State](w)
 	// Drop focus before the close chip leaves the tree; otherwise go-gui
 	// reassigns to the first remaining focusable (icon rail → blue ring).
 	w.ClearFocus()
+	tab := st.TabByID(tabID)
+	var sessIDs []string
+	paneCount := 0
+	if tab != nil {
+		tab.EnsurePanes()
+		paneCount = len(tab.Panes)
+		for i := range tab.Panes {
+			if tab.Panes[i].SessID != "" {
+				sessIDs = append(sessIDs, tab.Panes[i].SessID)
+			}
+		}
+	}
 	st.RemoveTab(tabID)
-	if sessID != "" {
+	// Forget how each pane dialed: the saved drafts may hold passwords.
+	c.mu.Lock()
+	for i := 0; i < paneCount; i++ {
+		delete(c.reconnect, paneKey(tabID, i))
+	}
+	for _, sessID := range sessIDs {
+		delete(c.paneLoc, sessID)
+	}
+	c.mu.Unlock()
+	for _, sessID := range sessIDs {
 		delete(st.SFTP, sessID)
 		// Close the SFTP client too: without this the session's file
 		// channel would leak after the tab is gone. Edit uploads were
 		// already resolved by requestCloseSession when needed.
 		c.closeSFTPSession(sessID)
-	}
-	// Forget how the tab dialed: the saved draft may hold a password.
-	c.mu.Lock()
-	delete(c.reconnect, tabID)
-	c.mu.Unlock()
-	if sessID != "" {
 		c.tearDownSession(sessID)
 		c.DropPerf(sessID)
 		c.DropTransfers(sessID)
 	}
-	if len(st.Tabs) == 0 {
-		var newDraft func() protocol.Draft
-		if e, ok := c.registry.Get(termio.ProtocolSSH); ok && e.NewDraft != nil {
-			newDraft = e.NewDraft
-		}
-		st.OpenConnectTab(newDraft)
-	}
+	c.ensureConnectTab(st)
 	c.focusActiveTerm(st)
-}
-
-// ReconnectTab dials a dropped session tab again. Runs on the UI thread;
-// the dial itself happens on a goroutine.
-func (c *Controller) ReconnectTab(w *gui.Window, tabID string) {
-	if w == nil {
-		return
-	}
-	st := gui.State[State](w)
-	tab := st.TabByID(tabID)
-	if tab == nil || tab.Status == TabStatusConnecting || st.Busy {
-		return
-	}
-	c.mu.Lock()
-	req, ok := c.reconnect[tabID]
-	c.mu.Unlock()
-	if !ok {
-		return
-	}
-	if req.bookmarkID != "" {
-		// The bookmark path re-checks the vault and owns Busy itself.
-		c.beginBookmarkConnect(w, tabID, req.bookmarkID)
-		return
-	}
-	entry, ok := c.registry.Get(req.draft.Protocol)
-	if !ok || !entry.Enabled || entry.Connect == nil {
-		tab.Status = TabStatusDisconnected
-		tab.ConnErr = i18n.T("shell.connect.protocol_unavailable")
-		return
-	}
-	st.Busy = true
-	st.BusyOp = "connect"
-	tab.Status = TabStatusConnecting
-	tab.ConnErr = ""
-
-	go func() {
-		sess, err := entry.Connect.Connect(context.Background(), req.draft)
-		w.QueueCommand(func(w *gui.Window) {
-			s := gui.State[State](w)
-			s.Busy = false
-			s.BusyOp = ""
-			if err != nil {
-				c.dialFailed(w, tabID, err)
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
-				return
-			}
-			if s.TabByID(tabID) == nil {
-				// The tab was closed mid-dial; drop the fresh session.
-				_ = sess.Close()
-				c.hub.Unregister(sess.ID())
-				return
-			}
-			if err := c.attachSession(w, s, sess, tabID, req); err != nil {
-				_ = sess.Close()
-				c.hub.Unregister(sess.ID())
-				c.dialFailed(w, tabID, err)
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
-				return
-			}
-			w.Toast(gui.ToastCfg{
-				Body:     i18n.Tf("shell.connect.connected", sess.Label()),
-				Severity: gui.ToastSuccess,
-				Duration: 3 * time.Second,
-			})
-		})
-	}()
 }
 
 func (c *Controller) tearDownSession(sessID string) {
@@ -617,6 +632,17 @@ func (c *Controller) focusActiveTerm(st *State) {
 		}
 		tm.SetFocused(id == active)
 	}
+	// SetFocused only re-asserts go-gui focus when its flag flips; when
+	// the active term was already flagged (re-clicking the active tab,
+	// or focus stolen by a sidebar field) resolve and set the effective
+	// ID explicitly so keystrokes cannot stay parked elsewhere.
+	if active != "" && c.win != nil {
+		if tm := c.terms[active]; tm != nil {
+			if ids := c.win.ResolveID(tm.FocusID()); len(ids) > 0 {
+				c.win.SetFocus(ids[0])
+			}
+		}
+	}
 }
 
 // HandleWindowEvent routes events to the focused terminal. While the
@@ -642,6 +668,7 @@ func (c *Controller) Shutdown() {
 	}
 	// Drop saved dial requests so no password outlives the window.
 	c.reconnect = make(map[string]reconnectReq)
+	c.paneLoc = make(map[string]paneRef)
 	c.closing = true
 	c.mu.Unlock()
 	// SFTP clients and edit watchers go down before the SSH sessions

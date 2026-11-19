@@ -1176,5 +1176,14 @@
   "ai.chat.copy": "複製",
   "ai.plan.pending": "待處理",
   "ai.plan.running": "進行中",
-  "ai.chat.jump_bottom": "捲動到底部"
+  "ai.chat.jump_bottom": "捲動到底部",
+  "pane.split_h": "左右分割",
+  "pane.split_v": "上下分割",
+  "pane.grid": "四宮格",
+  "pane.even": "均分窗格",
+  "pane.close": "關閉窗格",
+  "pane.single": "單屏",
+  "pane.empty_title": "閒置窗格",
+  "pane.empty_hint": "點擊啟用後可連線；也可將工作階段標籤拖到此處",
+  "pane.target_gone": "目標窗格已不可用"
 }

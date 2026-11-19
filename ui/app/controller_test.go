@@ -113,7 +113,7 @@ func TestDialFailedRestoresDot(t *testing.T) {
 			w := newTestWindow(t, st)
 			c := &Controller{logger: zap.NewNop()}
 
-			c.dialFailed(w, "t1", err)
+			c.dialFailed(w, paneRef{tabID: "t1", pane: -1}, err)
 
 			tab := st.TabByID("t1")
 			if tab.Status != tc.wantStatus {
@@ -131,7 +131,7 @@ func TestDialFailedUnknownTab(t *testing.T) {
 	w := newTestWindow(t, st)
 	c := &Controller{logger: zap.NewNop()}
 
-	c.dialFailed(w, "", errors.New("boom"))
+	c.dialFailed(w, paneRef{pane: -1}, errors.New("boom"))
 
 	if tab := st.TabByID("t1"); tab.Status != TabStatusConnecting {
 		t.Fatalf("unrelated tab touched: %v", tab.Status)

@@ -106,6 +106,7 @@ func tabChip(w *gui.Window, th gui.Theme, tab app.Tab, active bool, ctrl *app.Co
 				Clip:         true,
 				ClipContents: true,
 				Content: []gui.View{
+					tabDragHandle(w, th, tab, ctrl),
 					statusDot(th, tab),
 					gui.Button(gui.ButtonCfg{
 						ID:            "tab-" + tab.ID,
@@ -119,7 +120,7 @@ func tabChip(w *gui.Window, th gui.Theme, tab app.Tab, active bool, ctrl *app.Co
 						FocusDisabled: true,
 						OnClick: func(ctx gui.EventCtx) {
 							ctx.Consume()
-							gui.State[app.State](ctx.Window).ActiveTab = tab.ID
+							ctrl.ActivateTab(ctx.Window, tab.ID)
 						},
 					}),
 					gui.Button(gui.ButtonCfg{
@@ -211,7 +212,8 @@ func tabAddBtn(th gui.Theme, ctrl *app.Controller) gui.View {
 				},
 				OnClick: func(ctx gui.EventCtx) {
 					ctx.Consume()
-					gui.State[app.State](ctx.Window).OpenConnectTab(ctrl.NewSSHDraft)
+					ctrl.ActivateTab(ctx.Window,
+						gui.State[app.State](ctx.Window).OpenConnectTab(ctrl.NewSSHDraft))
 				},
 			}),
 		}

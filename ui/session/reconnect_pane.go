@@ -1,6 +1,8 @@
 package session
 
 import (
+	"fmt"
+
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
@@ -15,9 +17,23 @@ const reconnectPaneWidth float32 = 420
 // ReconnectPane replaces the terminal of a dropped session. The tab stays
 // open so the user can dial the same target again without retyping the form.
 func ReconnectPane(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
+	return paneReconnectView(w, ctrl, tab, 0)
+}
+
+// paneReconnectView is the per-slot variant: it reads the pane's own
+// status and error, and reconnects just that slot.
+func paneReconnectView(w *gui.Window, ctrl *app.Controller, tab *app.Tab, idx int) gui.View {
 	th := gui.CurrentTheme()
 	st := gui.State[app.State](w)
-	connecting := tab.Status == app.TabStatusConnecting
+	tab.EnsurePanes()
+	status := tab.Status
+	connErr := tab.ConnErr
+	if idx >= 0 && idx < len(tab.Panes) {
+		status = tab.Panes[idx].Status
+		connErr = tab.Panes[idx].ConnErr
+	}
+	connecting := status == app.TabStatusConnecting
+	tabID := tab.ID
 
 	content := []gui.View{
 		gui.Label(i18n.T("shell.session.disconnected"), th.TextStyleBody),
@@ -25,22 +41,26 @@ func ReconnectPane(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 	if connecting {
 		content = append(content, gui.Label(i18n.T("shell.session.connecting"), th.TextStyleSecondary))
 	}
-	if tab.ConnErr != "" {
+	if connErr != "" {
 		content = append(content, gui.Text(gui.TextCfg{
-			Text:      tab.ConnErr,
+			Text:      connErr,
 			TextStyle: th.TextStyleError,
 			Mode:      gui.TextModeWrap,
 		}))
 	}
+	btnID := fmt.Sprintf("pane-reconnect-%s-%d", tab.ID, idx)
+	if idx == 0 {
+		btnID = "tab-reconnect-" + tab.ID
+	}
 	content = append(content, gui.Button(gui.ButtonCfg{
-		ID:       "tab-reconnect-" + tab.ID,
+		ID:       btnID,
 		Variant:  gui.ButtonPrimary,
 		Label:    i18n.T("shell.session.reconnect"),
 		Sizing:   gui.FitFit,
 		Disabled: connecting || st.Busy,
 		OnClick: func(ctx gui.EventCtx) {
 			ctx.Consume()
-			ctrl.ReconnectTab(ctx.Window, tab.ID)
+			ctrl.ReconnectPane(ctx.Window, tabID, idx)
 		},
 	}))
 

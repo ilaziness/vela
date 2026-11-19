@@ -1176,5 +1176,14 @@
   "ai.chat.copy": "Copy",
   "ai.plan.pending": "Pending",
   "ai.plan.running": "Running",
-  "ai.chat.jump_bottom": "Jump to bottom"
+  "ai.chat.jump_bottom": "Jump to bottom",
+  "pane.split_h": "Split horizontally",
+  "pane.split_v": "Split vertically",
+  "pane.grid": "2x2 grid",
+  "pane.even": "Even panes",
+  "pane.close": "Close pane",
+  "pane.single": "Single pane",
+  "pane.empty_title": "Idle pane",
+  "pane.empty_hint": "Click to activate, then connect here — or drop a session tab onto it",
+  "pane.target_gone": "The target pane is no longer available"
 }
