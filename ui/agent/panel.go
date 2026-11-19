@@ -311,8 +311,11 @@ func transcript(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.
 		Sizing:     gui.FillFill,
 		Scrollable: true,
 		ScrollMode: gui.ScrollVerticalOnly,
-		Clip:       true,
-		Spacing:    gui.SpacingMedium,
+		// Vertical viewport: a sideways bar could only track the gutters,
+		// and it parks over the last message.
+		ScrollbarCfgX: &gui.ScrollbarCfg{Overflow: gui.ScrollbarHidden},
+		Clip:          true,
+		Spacing:       gui.SpacingMedium,
 		// Right pad is the gutter the overlaid scrollbar draws in.
 		// ClipContents must stay off: its stencil bracket masks the
 		// scrollbar too, hiding it. Clip alone scissors the content.
@@ -464,10 +467,12 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 		rowContent = []gui.View{body, avatar}
 	}
 	return gui.Row(layout.Flush(gui.ContainerCfg{
-		ID:      "agent-msg-" + m.ID,
-		Sizing:  gui.FillFit,
-		VAlign:  gui.VAlignTop,
-		Spacing: gui.SpacingMedium,
+		ID:     "agent-msg-" + m.ID,
+		Sizing: gui.FillFit,
+		VAlign: gui.VAlignTop,
+		// The avatar belongs to the message, not beside it: a sibling gap
+		// left the bubble and its name line floating away from it.
+		Spacing: gui.SpacingSmall,
 		Content: rowContent,
 	}))
 }
@@ -529,6 +534,11 @@ func msgTime(ts int64) string {
 	return t.Format("2006-01-02 15:04")
 }
 
+// bubbleCardPadding is the inset of the collapsible cards inside a
+// message bubble. ExpandPanel's default is PadAll(14), which stacks on the
+// bubble's padding and leaves a one-line head sitting in an empty box.
+func bubbleCardPadding() gui.Padding { return gui.PadVH(3, 6) }
+
 // blockView renders one ordered piece of an assistant message.
 func blockView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.Chat, m *model.Message, b *model.Block, idx int) gui.View {
 	th := gui.CurrentTheme()
@@ -557,6 +567,7 @@ func blockView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.C
 			Head:    head,
 			Open:    open,
 			Sizing:  gui.FillFit,
+			Padding: bubbleCardPadding(),
 			Content: gui.Text(gui.TextCfg{Text: b.Text, TextStyle: th.TextStyleSecondary, Mode: gui.TextModeWrap, Sizing: gui.FillFit}),
 			OnToggle: func(ctx gui.EventCtx) {
 				ctx.Consume()
@@ -629,7 +640,7 @@ func toolCard(st *app.State, t *model.ToolCall) gui.View {
 			Sizing:    gui.FillFit,
 		}))
 	}
-	if len(t.Output) > 0 {
+	if out := rawText(t.Output); out != "" {
 		key := "tool-" + t.ID + "-out"
 		open := st.AgentExpanded[key]
 		outHead := gui.Row(layout.Flush(gui.ContainerCfg{
@@ -640,12 +651,20 @@ func toolCard(st *app.State, t *model.ToolCall) gui.View {
 				gui.Text(gui.TextCfg{Text: i18n.T("ai.chat.tool_output"), TextStyle: th.TextStyleSecondary, Sizing: gui.FillFit}),
 			},
 		}))
+		// The code block is built only while open: the tree is built every
+		// frame either way, and tokenizing the output is this card's
+		// expensive part.
+		outView := gui.Column(layout.Flush(gui.ContainerCfg{Sizing: gui.FillFit}))
+		if open {
+			outView = shellOutput(out)
+		}
 		content = append(content, gui.ExpandPanel(gui.ExpandPanelCfg{
 			ID:      "agent-" + key,
 			Head:    outHead,
 			Open:    open,
 			Sizing:  gui.FillFit,
-			Content: codeBlock(th, rawText(t.Output)),
+			Padding: bubbleCardPadding(),
+			Content: outView,
 			OnToggle: func(ctx gui.EventCtx) {
 				ctx.Consume()
 				s := gui.State[app.State](ctx.Window)
@@ -661,7 +680,7 @@ func toolCard(st *app.State, t *model.ToolCall) gui.View {
 		ID:      "agent-tool-" + t.ID,
 		Sizing:  gui.FillFit,
 		Spacing: gui.SpacingTight,
-		Padding: gui.NewPadding(4, 6, 4, 6),
+		Padding: gui.PadVH(4, 6),
 		Color:   th.ColorBackground,
 		Radius:  gui.RadiusSmall,
 		Content: content,

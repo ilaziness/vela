@@ -97,6 +97,34 @@ func header(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 	}))
 }
 
+// History column geometry. The width is fixed; the title budget is derived
+// from it, so a row can never outgrow the column and start a horizontal
+// scroll range.
+const (
+	// historyPanelWidth is the history sub-column, divider excluded.
+	historyPanelWidth float32 = 260
+	// historyListPadLeft and historyListPadRight are the list's gutters; the
+	// right one also keeps rows clear of the overlay scrollbar's thumb.
+	historyListPadLeft  float32 = 8
+	historyListPadRight float32 = 12
+	// historyRowInset is the row button's own padding, per side.
+	historyRowInset float32 = 6
+	// historyTitleSlack covers the gap between a measured text width and
+	// what the shaper lays out: without it an ellipsized title still pushes
+	// the row a couple of pixels past the column.
+	historyTitleSlack float32 = 6
+)
+
+// historyTitleRoom is the fixed width a row title gets: the column minus
+// the list's gutters, the row's inset, the delete button and the gap before
+// it. Rows ellipsize to it at any theme's icon metrics.
+func historyTitleRoom(w *gui.Window, th gui.Theme) float32 {
+	delWidth := w.TextWidth(gui.IconTrash, th.TextStyleIconSmall) +
+		th.PaddingButton.Width()
+	return historyPanelWidth - historyListPadLeft - historyListPadRight -
+		2*historyRowInset - delWidth - th.SpacingTight - historyTitleSlack
+}
+
 // historyOverlay is the full-panel overlay layer: a FillFill column that
 // left-aligns the fixed-width history panel so it covers the whole panel.
 func historyOverlay(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
@@ -114,8 +142,9 @@ func historyPanel(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 	th := gui.CurrentTheme()
 
 	var rows []gui.View
+	titleRoom := historyTitleRoom(w, th)
 	for _, sess := range st.AgentSessions {
-		rows = append(rows, historyRow(w, ctrl, st, sess))
+		rows = append(rows, historyRow(w, ctrl, st, sess, titleRoom))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, gui.Text(gui.TextCfg{
@@ -128,7 +157,7 @@ func historyPanel(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 	panel := gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:     "agent-history",
 		Sizing: gui.FixedFill,
-		Width:  200,
+		Width:  historyPanelWidth,
 		Color:  th.ColorPanel,
 		Content: []gui.View{
 			gui.Row(layout.Flush(gui.ContainerCfg{
@@ -157,14 +186,17 @@ func historyPanel(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 				Sizing:     gui.FillFill,
 				Scrollable: true,
 				ScrollMode: gui.ScrollVerticalOnly,
+				// The list is a vertical viewport: its rows are sized to the
+				// column, so a sideways range could only come from the
+				// gutters themselves. Hide the bar rather than let it park
+				// over the last row.
+				ScrollbarCfgX: &gui.ScrollbarCfg{Overflow: gui.ScrollbarHidden},
 				// No ClipContents: its stencil also masks the overlaid
 				// scrollbar, so the list scrolled with no bar. Clip still
 				// scissors the rows, and Radius is none here anyway.
 				Clip:    true,
 				Spacing: gui.SpacingTight,
-				// Right gutter keeps the row's delete button clear of
-				// the overlay scrollbar.
-				Padding: gui.NewPadding(4, 12, 8, 8),
+				Padding: gui.NewPadding(4, historyListPadRight, 8, historyListPadLeft),
 				Content: rows,
 			})),
 		},
@@ -172,7 +204,7 @@ func historyPanel(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 	return gui.Row(layout.Flush(gui.ContainerCfg{
 		ID:      "agent-history-row",
 		Sizing:  gui.FixedFill,
-		Width:   201,
+		Width:   historyPanelWidth + 1,
 		Content: []gui.View{panel, layout.VRule()},
 	}))
 }
@@ -204,7 +236,8 @@ func confirmDeleteSession(w *gui.Window, ctrl *app.Controller, st *app.State, id
 }
 
 // historyRow is one selectable session entry: title + relative time.
-func historyRow(w *gui.Window, ctrl *app.Controller, st *app.State, sess *agent.AISession) gui.View {
+// titleRoom is the row title's budget, resolved once per frame by the panel.
+func historyRow(w *gui.Window, ctrl *app.Controller, st *app.State, sess *agent.AISession, titleRoom float32) gui.View {
 	th := gui.CurrentTheme()
 	title := sess.Title
 	if title == "" || title == "__new_session__" {
@@ -213,7 +246,7 @@ func historyRow(w *gui.Window, ctrl *app.Controller, st *app.State, sess *agent.
 	when := relTime(sess.UpdatedAt)
 	tip := title + " · " + when
 	active := sess.ID == st.AgentSessionID
-	short := layout.Ellipsize(title, 150, func(s string) float32 {
+	short := layout.Ellipsize(title, titleRoom, func(s string) float32 {
 		return w.TextWidth(s, th.TextStyleBody)
 	})
 
@@ -235,7 +268,7 @@ func historyRow(w *gui.Window, ctrl *app.Controller, st *app.State, sess *agent.
 						ID:            rowID + "-hit",
 						Variant:       gui.ButtonGhost,
 						Sizing:        gui.FillFill,
-						Padding:       gui.PadAll(6),
+						Padding:       gui.PadAll(historyRowInset),
 						Color:         bg,
 						Radius:        gui.RadiusSmall,
 						HAlign:        gui.Some(gui.HAlignLeft),

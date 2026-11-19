@@ -100,30 +100,34 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 			body,
 		},
 	}))
-	if !st.AgentOpen {
-		return main
-	}
-	// Agent panel docks on the right edge and squeezes the whole stage
+
+	// The agent docks on the right edge and squeezes the whole stage
 	// (tab bar + terminal + tool rails). Ratio is the terminal share;
 	// clamped so the agent pane never exceeds 60% of the stage.
 	ratio := st.AgentRatio
 	if ratio <= 0 || ratio >= 1 {
 		ratio = 0.65
 	}
-	return gui.Splitter(gui.SplitterCfg{
+	// The splitter is unconditional: it puts the stage under the
+	// "agent-split"/"pane:first" scopes, and focus, blur tracking and scroll
+	// offsets are all keyed by effective ID — adding it on open re-keyed the
+	// whole stage. Closed keeps the tree and collapses the second pane.
+	cfg := gui.SplitterCfg{
 		ID:          "agent-split",
 		Orientation: gui.SplitterHorizontal,
 		Sizing:      gui.FillFill,
-		Ratio:       gui.SomeF(ratio),
 		First: gui.SplitterPaneCfg{
 			Content: []gui.View{main},
 			MinSize: 240,
 		},
 		Second: gui.SplitterPaneCfg{
-			Content: []gui.View{agentui.Panel(w, ctrl)},
 			MinSize: 280,
 		},
-		OnChange: func(r float32, _ gui.SplitterCollapsed, ctx gui.EventCtx) {
+	}
+	if st.AgentOpen {
+		cfg.Ratio = gui.SomeF(ratio)
+		cfg.Second.Content = []gui.View{agentui.Panel(w, ctrl)}
+		cfg.OnChange = func(r float32, _ gui.SplitterCollapsed, ctx gui.EventCtx) {
 			r = f32Clamp01(r)
 			if r < 0.4 {
 				r = 0.4
@@ -132,8 +136,20 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 				r = 0.95
 			}
 			gui.State[app.State](ctx.Window).AgentRatio = r
-		},
-	})
+		}
+		return gui.Splitter(cfg)
+	}
+	// Closed: an empty second pane pinned to zero. Collapsible is what lets
+	// the splitter honour the collapse; the handle cannot go below a pixel, so
+	// it is painted out rather than left as a line at the window edge, and with
+	// no divider to drag it takes no OnChange — a stray press there must not
+	// rewrite the stored ratio.
+	cfg.Collapsed = gui.SplitterCollapseSecond
+	cfg.Second.Collapsible = true
+	cfg.HandleSize = gui.SomeF(1)
+	cfg.ColorHandle = gui.ColorTransparent
+	cfg.ColorGrip = gui.ColorTransparent
+	return gui.Splitter(cfg)
 }
 
 func f32Clamp01(v float32) float32 {

@@ -138,6 +138,7 @@
 - 能力缺口：以公开 API 为准；做不到则告知限制并接受现状，不 fork 改库。
 - 禁止使用emoji文字代替`go-gui`图标，图标需要使用`go-gui`库的`Feather`图标。
 - UI组件能通用的尽量创建公共组件使用，不要在不同地方写逻辑重复的UI组件
+- 改完 UI 不要靠读代码猜效果：按 §6 的「UI 无头验证」渲染出图并量出几何数字，再回报结论。
 
 ---
 
@@ -165,11 +166,51 @@ golangci-lint run
 go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe .
 ```
 
+### UI 无头验证（改界面必须出图 + 量几何）
+
+go-gui 自带软件渲染后端，可以在没有窗口、没有事件循环的情况下把任意 View 渲染成 PNG，并读出真实布局几何。用临时 `*_test.go` 驱动，验证完删除，不要提交。
+
+```go
+import (
+	"testing"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui/backend/soft"
+)
+
+func TestShot(t *testing.T) {
+	win := gui.NewTestWindow(t, gui.WindowCfg{
+		Width: 460, Height: 620,
+		// view：要验证的 View 函数（整块面板，或像 messageView 这样的单个组件）
+		OnInit: func(w *gui.Window) { w.SetView(view) },
+	})
+	// 跑一帧并出图：同时装上软件字体系统，布局用的就是真实字体度量
+	if err := soft.RenderToPNG(win, 2, "shot.png"); err != nil {
+		t.Fatal(err)
+	}
+	// 量几何：叶子 ID → 有效 ID → Shape 的 x/y/w/h
+	root := win.TestRender(nil)
+	for _, id := range win.ResolveID("agent-msg-1") {
+		if ly, ok := root.FindByID(id); ok {
+			t.Logf("%s x=%.1f y=%.1f w=%.1f h=%.1f", id,
+				ly.Shape.X, ly.Shape.Y, ly.Shape.Width, ly.Shape.Height)
+		}
+	}
+}
+```
+
+- `gui.NewTestWindow` 自己注册 cleanup，不需要 `soft.Release`；窗口没有 backend，`TestClick` / `TestFocus` / `TestScroll` 等动作可以在这里驱动状态后重新出图。
+- 中文文案先 `i18n.SetLanguage("zh-CN")`；渲染 AI 面板这类 View 直接构造 `*app.State`（如 `AgentChat`、`AgentExpanded`）传进去，不需要真 Controller。
+- 用 2 倍缩放出图（`RenderToPNG(win, 2, …)`）复核观感；判断内边距、高度、对齐要拿 `Shape` 的数字做前后对比，不要肉眼估。
+- 字体来自宿主机字体目录，所以**不要**提交 PNG 或像素级 golden；需要长期回归就断言几何与文本。
+- 临时脚本与图片用完删掉（给人看的对比图放仓库外或根目录，附在回复里），不要留在 diff 中。
+
 ---
 
 ## 7. 相关文档
 
 - go-gui：[README](https://github.com/go-gui-org/go-gui) / [llms.txt](https://raw.githubusercontent.com/go-gui-org/go-gui/main/llms.txt)
+- go-gui 无头渲染：`go doc github.com/go-gui-org/go-gui/gui/backend/soft`（`RenderToImage` / `RenderToPNG`）与 `go doc github.com/go-gui-org/go-gui/gui.NewTestWindow`
 - go-term：[Embedding wiki](https://github.com/go-gui-org/go-term/wiki/Embedding)
 - genkit：[get started](https://genkit.dev/docs/go/get-started)
 
