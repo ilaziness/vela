@@ -18,11 +18,6 @@ import (
 
 const FileName = "config.toml"
 
-// defaultTerminalFont is the generic system monospace. go-glyph maps it to the
-// platform face (Consolas / Menlo / …); missing glyphs fall back to system
-// sans/CJK fonts. Leave empty in user config to keep this default.
-const defaultTerminalFont = "monospace"
-
 const (
 	defaultGeneralTheme  = "dark"
 	defaultTerminalTheme = "Default"
@@ -49,8 +44,8 @@ type GeneralConfig struct {
 
 type TerminalConfig struct {
 	Theme       string `toml:"theme" json:"theme"`
-	Font        string `toml:"font" json:"fontFamily"`
-	FontSize    int    `toml:"font_size" json:"fontSize"`
+	Font        string `toml:"font" json:"fontFamily"`    // empty = platform monospace
+	FontSize    int    `toml:"font_size" json:"fontSize"` // <=0 or >72 = 14
 	Scrollback  int    `toml:"scrollback" json:"scrollback"`
 	CursorStyle string `toml:"cursor_style" json:"cursorStyle"`
 	CursorBlink bool   `toml:"cursor_blink" json:"cursorBlink"`
@@ -107,7 +102,6 @@ func Default() *Config {
 		},
 		Terminal: TerminalConfig{
 			Theme:       defaultTerminalTheme,
-			Font:        defaultTerminalFont,
 			FontSize:    14,
 			Scrollback:  defaultTerminalScrollback,
 			CursorStyle: "block",
@@ -168,9 +162,7 @@ func (c *TerminalConfig) Normalize() {
 	case c.Scrollback > maxTerminalScrollback:
 		c.Scrollback = maxTerminalScrollback
 	}
-	if strings.TrimSpace(c.Font) == "" {
-		c.Font = def.Font
-	}
+	c.Font = sanitizeUIFont(c.Font)
 	c.Theme = strings.TrimSpace(c.Theme)
 	if c.Theme == "" {
 		c.Theme = defaultTerminalTheme

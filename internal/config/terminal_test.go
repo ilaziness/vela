@@ -13,8 +13,14 @@ func TestTerminalConfigNormalize(t *testing.T) {
 	if c.FontSize != 14 {
 		t.Fatalf("fontSize=%d", c.FontSize)
 	}
-	if c.Font != defaultTerminalFont {
-		t.Fatalf("font=%q want %q", c.Font, defaultTerminalFont)
+	if c.Font != "" {
+		t.Fatalf("font=%q want empty", c.Font)
+	}
+
+	c = TerminalConfig{Scrollback: 5000, FontSize: 14, Font: "   "}
+	c.Normalize()
+	if c.Font != "" {
+		t.Fatalf("blank font=%q want empty", c.Font)
 	}
 	if c.Theme != defaultTerminalTheme {
 		t.Fatalf("theme=%q", c.Theme)

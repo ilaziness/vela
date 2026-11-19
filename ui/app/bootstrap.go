@@ -112,7 +112,7 @@ func Bootstrap() (*Runtime, error) {
 
 	ctrl := NewController(hub, reg, logger)
 	ctrl.SetTermTheme(store.Config.Terminal.Theme)
-	ctrl.setTermConfig(store.Config.Terminal)
+	ctrl.SetTermConfig(store.Config.Terminal)
 
 	// SFTP rides on the live SSH sessions: the manager reuses the
 	// existing ssh client per session, so opening the panel never

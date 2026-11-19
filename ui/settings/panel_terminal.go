@@ -7,11 +7,15 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/fonts"
 )
 
 func panelTerminal(d *Deps, st *State) gui.View {
 	t := &st.Terminal
-	fontSize := strconv.Itoa(t.FontSize)
+	fontSize := ""
+	if t.FontSize > 0 {
+		fontSize = strconv.Itoa(t.FontSize)
+	}
 	scrollback := strconv.Itoa(t.Scrollback)
 
 	body := []gui.View{
@@ -30,7 +34,12 @@ func panelTerminal(d *Deps, st *State) gui.View {
 			i18n.T("settings.terminal.font_placeholder"), false, func(v string) { t.Font = v }),
 		formRow("settings-term-font-size", i18n.T("settings.terminal.font_size"), fontSize,
 			i18n.T("settings.terminal.font_size_placeholder"), false, func(v string) {
-				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				v = strings.TrimSpace(v)
+				if v == "" {
+					t.FontSize = 0
+					return
+				}
+				if n, err := strconv.Atoi(v); err == nil {
 					t.FontSize = n
 				}
 			}),
@@ -136,6 +145,8 @@ func saveTerminal(w *gui.Window, d *Deps) {
 			}
 			s.Terminal = draft
 			d.Ctrl.SetTermTheme(draft.Theme)
+			d.Ctrl.SetTermConfig(draft)
+			fonts.Apply(d.Store.Config)
 			toastOK(win, i18n.T("settings.terminal.save_success"))
 		})
 	}()

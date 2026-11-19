@@ -119,10 +119,10 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 	}
 }
 
-// setTermConfig snapshots the terminal settings used to build every new
+// SetTermConfig snapshots the terminal settings used to build every new
 // session. It only affects terminals created afterwards — live terminals
 // keep their construction-time configuration until restart.
-func (c *Controller) setTermConfig(cfg config.TerminalConfig) {
+func (c *Controller) SetTermConfig(cfg config.TerminalConfig) {
 	cfg.Normalize()
 	c.mu.Lock()
 	defer c.mu.Unlock()
