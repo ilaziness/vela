@@ -93,6 +93,8 @@
 
 模块化，可复用，减少重复；能在引擎层做的不要堆在 UI。
 
+函数和关键代码需要合理注释，注释不要过多的代码逻辑描述，合理说明即可。
+
 分层硬规则：
 
 - `ui/shell`、`ui/session`：只认 `termio` / `termstream` / go-gui；**禁止** import `internal/ssh`、`internal/serial`。
@@ -213,4 +215,3 @@ func TestShot(t *testing.T) {
 - go-gui 无头渲染：`go doc github.com/go-gui-org/go-gui/gui/backend/soft`（`RenderToImage` / `RenderToPNG`）与 `go doc github.com/go-gui-org/go-gui/gui.NewTestWindow`
 - go-term：[Embedding wiki](https://github.com/go-gui-org/go-term/wiki/Embedding)
 - genkit：[get started](https://genkit.dev/docs/go/get-started)
-
