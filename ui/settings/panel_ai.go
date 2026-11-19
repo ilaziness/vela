@@ -259,7 +259,7 @@ func aiMCPBody(d *Deps, st *State) gui.View {
 		} else {
 			label += " — " + i18n.T("settings.ai.mcp_off")
 		}
-		rows = append(rows, switchRow("settings-mcp-"+name, label, enabled, func(ctx gui.EventCtx) {
+		rows = append(rows, switchListRow("settings-mcp-"+name, label, enabled, func(ctx gui.EventCtx) {
 			next := !enabled
 			if err := ai.SaveMCPEnabled(d.Store.UserDataDir(), name, next); err != nil {
 				toastErr(ctx.Window, err)
@@ -291,52 +291,27 @@ func aiSkillsBody(d *Deps, st *State) gui.View {
 			label += " — " + i18n.T("settings.ai.skill_off")
 		}
 		th := gui.CurrentTheme()
-		toggle := func(ctx gui.EventCtx) {
-			ctx.Consume()
+		rows = append(rows, switchListRow("settings-skill-"+name, label, enabled, func(ctx gui.EventCtx) {
 			next := !enabled
 			if err := ai.SetSkillEnabled(d.Store.UserDataDir(), name, next); err != nil {
 				toastErr(ctx.Window, err)
 				return
 			}
 			refreshLists(gui.State[State](ctx.Window), d)
-		}
-		rows = append(rows, gui.Row(layout.Flush(gui.ContainerCfg{
-			Sizing:  gui.FillFit,
-			Spacing: gui.SpacingSmall,
-			VAlign:  gui.VAlignMiddle,
-			Content: []gui.View{
-				gui.Switch(gui.SwitchCfg{
-					ID:       "settings-skill-" + name,
-					Selected: enabled,
-					OnClick:  toggle,
-				}),
-				layout.IconTipButton(layout.IconTipButtonCfg{
-					ID:        "settings-skill-open-" + name,
-					Glyph:     gui.IconFolder,
-					Tip:       i18n.T("settings.ai.open_skill_dir"),
-					Th:        th,
-					Variant:   gui.ButtonGhost,
-					Icon:      th.TextStyleIconSmall,
-					Padding:   gui.PaddingNone,
-					Placement: layout.TipBelow,
-					OnClick: func(ctx gui.EventCtx) {
-						ctx.Consume()
-						if err := d.Agent.OpenSkillDir(name); err != nil {
-							toastErr(ctx.Window, err)
-						}
-					},
-				}),
-				gui.Row(layout.Flush(gui.ContainerCfg{
-					Sizing:  gui.FillFit,
-					OnClick: toggle,
-					Content: []gui.View{
-						gui.Text(gui.TextCfg{
-							Text:      label,
-							TextStyle: th.TextStyleLabel,
-							Sizing:    gui.FillFit,
-						}),
-					},
-				})),
+		}, layout.IconTipButton(layout.IconTipButtonCfg{
+			ID:        "settings-skill-open-" + name,
+			Glyph:     gui.IconFolder,
+			Tip:       i18n.T("settings.ai.open_skill_dir"),
+			Th:        th,
+			Variant:   gui.ButtonGhost,
+			Icon:      th.TextStyleIconSmall,
+			Padding:   gui.PaddingNone,
+			Placement: layout.TipBelow,
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				if err := d.Agent.OpenSkillDir(name); err != nil {
+					toastErr(ctx.Window, err)
+				}
 			},
 		})))
 	}

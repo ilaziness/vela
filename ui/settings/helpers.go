@@ -307,6 +307,34 @@ func switchRow(id, label string, on bool, toggle func(gui.EventCtx)) gui.View {
 	})
 }
 
+// switchListRow is a list-row toggle: only the switch pill is clickable,
+// the label text is plain display. extra views sit between them.
+func switchListRow(id, label string, on bool, toggle func(gui.EventCtx), extra ...gui.View) gui.View {
+	th := gui.CurrentTheme()
+	content := make([]gui.View, 0, len(extra)+2)
+	content = append(content, gui.Switch(gui.SwitchCfg{
+		ID:       id,
+		Selected: on,
+		OnClick: func(ctx gui.EventCtx) {
+			ctx.Consume()
+			toggle(ctx)
+		},
+		A11YCfg: gui.A11YCfg{A11YLabel: label},
+	}))
+	content = append(content, extra...)
+	content = append(content, gui.Text(gui.TextCfg{
+		Text:      label,
+		TextStyle: th.TextStyleBody,
+		Sizing:    gui.FillFit,
+	}))
+	return gui.Row(layout.Flush(gui.ContainerCfg{
+		Sizing:  gui.FillFit,
+		Spacing: gui.SpacingSmall,
+		VAlign:  gui.VAlignMiddle,
+		Content: content,
+	}))
+}
+
 // settingsNavWidth is the settings left-nav column width (nav.go).
 const settingsNavWidth float32 = 180
 
