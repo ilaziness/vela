@@ -4,7 +4,46 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.19.0] - 2026-11-18
+
+### Added
+
+- `gotermrec` imports asciicast v2 (`import-cast`): external repros and demo
+  libraries convert to .gtr for falcon replay and fixture capture. Markers are
+  dropped with a warning, unknown event codes are skipped with a warning, and
+  resize events are preserved as .gtr resize frames. Event timing is validated
+  but not reproduced (recfmt stamps wall-clock deltas; frames land
+  back-to-back).
+
+### Fixed
+
+- `term`: right and middle presses reach the program in the terminal again.
+  go-gui v0.81.0 made a canvas's `OnClick` left-only, so the grid dropped every
+  other button: right-click menus in terminal apps (ttt) did not open, middle
+  button reports were lost, and middle-click paste did not work. The grid now
+  uses go-gui's `DrawCanvasCfg.OnAnyClick`.
+- `term`: a view scrolled back into history now stays on the rows being read
+  while output streams in, as in other terminals. Before, it kept the same
+  distance from the bottom, so the text slid up under the reader. A view at the
+  bottom still follows output.
+- `term`: scrolled-viewport frames resolve each row once and share the result
+  across the BiDi scan and both text passes instead of re-calling `ViewCellAt`
+  per cell (~8% faster on a 60x200 mid-history frame, allocations unchanged).
+- `term`: ignore DEL (0x7F) in the ground state instead of routing it through
+  the grapheme assembler, where it split clusters (e.g. dropping a combining
+  mark that followed it). Cursor and cells are unchanged by DEL, as in xterm.
+- `term`: narrow width-2 glyphs to one cell on a 1-column pane instead of
+  leaving a continuation-less Width-2 head.
+- Recordings, raw captures, and saved workspace state are now created owner-only
+  (0600 files, 0700 directories). Files written by older versions keep their
+  existing modes until re-recorded/re-saved.
+- `term`: malformed Kitty-graphics diagnostics no longer print to stderr
+  unconditionally; set GOTERM_DEBUG=1 to see them.
+- Docs: `make prepush` description no longer claims the benchmark gate; README
+  version pin bumped to v0.18.0; test commands use GOWORK=off.
+- Docs: canonical GOTERM_* environment variable reference in
+  docs/terminal-verification.md; architecture diagram covers action dispatch,
+  program status, and workspace recording/overlay files.
 
 ## [0.18.0] - 2026-11-13
 

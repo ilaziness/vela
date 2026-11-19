@@ -149,9 +149,14 @@ func openCapture(seq uint64) *recfmt.Recorder {
 		return nil
 	}
 	path := prefix + "-" + strconv.FormatUint(seq, 10) + ".bin"
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		log.Printf("term: GOTERM_CAPTURE: %v", err)
+		return nil
+	}
+	if err := f.Chmod(0o600); err != nil {
+		log.Printf("term: GOTERM_CAPTURE: %v", err)
+		_ = f.Close()
 		return nil
 	}
 	log.Printf("term: capturing pty output to %s", path)
@@ -489,14 +494,12 @@ func (t *Term) windowFocused(w *gui.Window) bool {
 // gui.Window SetView generator: w.SetView(t.View).
 func (t *Term) View(w *gui.Window) gui.View {
 	// Detect IME composition state changes and bump version to redraw.
-	// Composition state is window-global, but only the pane holding the
-	// window's keyboard focus may render it — otherwise every Term in a split
-	// paints the same preedit strip at its own cursor, and a pane that lost
-	// focus to a sibling text field (e.g. an AI composer) keeps painting the
-	// text typed there. An unfocused pane must also *clear* state it cached
-	// before losing focus (focus can change mid-composition), so read zero
-	// values rather than returning early: the change detection below then
-	// clears the cache and repaints exactly once.
+	// Composition state is window-global, but only the focused pane may
+	// render it — otherwise every Term in a split paints the same preedit
+	// strip at its own cursor. An unfocused pane must also *clear* state it
+	// cached before losing focus (focus can change mid-composition), so read
+	// zero values rather than returning early: the change detection below
+	// then clears the cache and repaints exactly once.
 	var (
 		composing  bool
 		compText   string
@@ -540,9 +543,13 @@ func (t *Term) View(w *gui.Window) gui.View {
 		Clip:          true,
 		OnDraw:        t.onDraw,
 		OnMouseScroll: t.onMouseScroll,
-		OnClick:       t.onClick,
-		OnMouseMove:   t.onMouseMove,
-		OnMouseUp:     t.onMouseUp,
+		// OnAnyClick, not OnClick: a canvas's OnClick runs on a left press
+		// only. The child needs right and middle presses too (right-click
+		// menus, middle-button reports), and middle-click paste needs the
+		// middle press. onClick sorts the buttons itself.
+		OnAnyClick:  t.onClick,
+		OnMouseMove: t.onMouseMove,
+		OnMouseUp:   t.onMouseUp,
 	})
 	colCfg := gui.ContainerCfg{
 		Padding:     gui.PadAll(gridPadding),
@@ -563,16 +570,12 @@ func (t *Term) View(w *gui.Window) gui.View {
 		// through Window.IMECompText, and the commit arrives in onChar.
 		colCfg.AcceptsTextInput = true
 		// SetView → clearViewStateLocked clears the window's
-		// focus ID. Reclaim it after a full layout rebuild, but only when
-		// nobody owns focus: a non-empty foreign ID means the user moved to
-		// a sibling widget in the same window (an AI composer, a form
-		// field, ...), and stealing it back on every rebuild would make
-		// those widgets impossible to type into. Clicking this pane focuses
-		// it again through go-gui's mouse-down focus handling.
-		// Skip while a modal dialog is up: go-gui routes keys to the dialog
-		// layer, and re-asserting here would steal focus back to the
-		// terminal, breaking Tab/Esc/Enter in the dialog.
-		// DialogDismiss restores focus to this pane on close.
+		// focus ID. Reassert after every full layout rebuild so
+		// keystrokes reach onChar/onKeyDown without requiring a
+		// prior click. Skip while a modal dialog is up: go-gui routes
+		// keys to the dialog layer, and re-asserting here would steal
+		// focus back to the terminal, breaking Tab/Esc/Enter in the
+		// dialog. DialogDismiss restores focus to this pane on close.
 		//
 		// A go-gui context-menu popup ("<menu>:popup") is the same kind of
 		// transient focus owner as a dialog: it takes focus on open for

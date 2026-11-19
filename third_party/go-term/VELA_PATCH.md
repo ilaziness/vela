@@ -1,6 +1,6 @@
 # Vela patch
 
-基于上游 `github.com/go-gui-org/go-term` **v0.18.0**。
+基于上游 `github.com/go-gui-org/go-term` **v0.19.0**。
 
 升级流程：整目录覆盖为上游版本 → 按下面 6 项重新打补丁 → 跑焦点/Stream 相关测试 → 手工验证。
 

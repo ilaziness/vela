@@ -54,7 +54,7 @@ full list of rebindable actions.
 
 `term` is a library; falcon is its proof. The public surface froze at v0.9.0
 (the export audit and Godoc pass landed there) and was amended once since, by
-the v0.10.0 `CursorBlink` bool change. Build against v0.17.0; further breaking
+the v0.10.0 `CursorBlink` bool change. Build against v0.19.0; further breaking
 changes before 1.0 ship as a new minor.
 
 ```go
@@ -124,6 +124,7 @@ go run ./term/gotermrec cat     session.gtr   # raw output bytes to stdout
 go run ./term/gotermrec play    session.gtr   # timed playback in any terminal
 go run ./term/gotermrec fixture session.gtr -name session   # replay-test fixture
 go run ./term/gotermrec export  session.gtr -cast session.cast   # asciicast v2
+go run ./term/gotermrec import-cast session.cast [-out session.gtr]   # asciicast v2 → .gtr (markers dropped, unknown codes skipped, resize events preserved) (event timing validated, not reproduced — frames land back-to-back)
 ```
 
 Recordings store the pty's bytes verbatim, so malformed output survives the
@@ -133,12 +134,15 @@ round trip; keystrokes are captured only when explicitly enabled
 ## Testing
 
 ```bash
-go test ./...
-go test -race ./...   # same suite with the race detector
-go vet ./...
-go test ./term -run EmulatorReplay   # replay-style emulator checks
-go test ./term -run TestConformance  # vttest-parity smoke tests
+GOWORK=off go test ./...
+GOWORK=off go test -race ./...   # same suite with the race detector
+GOWORK=off go vet ./...
+GOWORK=off go test ./term -run EmulatorReplay   # replay-style emulator checks
+GOWORK=off go test ./term -run TestConformance  # vttest-parity smoke tests
 ```
+
+Gate targets force `GOWORK=off` so a local `go.work` with sibling checkouts does
+not validate something CI never sees — see `CONTRIBUTING.md` for why.
 
 The emulator checks run against JSON fixtures in `term/testdata/` — recorded
 byte streams plus the grid state they should produce, so parser behaviour is

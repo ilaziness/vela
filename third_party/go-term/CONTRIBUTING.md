@@ -34,9 +34,11 @@ make prepush
 ```
 
 `make prepush` approximates the CI matrix from one host: race-enabled tests,
-`go vet`, lint at the version CI pins, the prod falcon build, the Windows
-cross-compile (`make cross-windows`), and the benchmark regression gate
-(`make bench-regress`). It aborts on the first failing target.
+`go vet`, lint at the version CI pins, the prod falcon build, and the Windows
+cross-compile (`make cross-windows`). It aborts on the first failing target.
+`make bench-regress` is intentionally not part of `prepush` — it is the long
+pole (`-count=10` over `./term`) and runs in CI on every PR and push; run it
+explicitly before merging perf-sensitive changes (see below).
 
 `bench-regress` is the long pole — `-count=10` over `./term`. Unlike go-gui,
 whose benchmark gate needs a baseline cached from `main`, this repo's baseline
@@ -109,6 +111,8 @@ term/widget_copymode.go  Vim-keyed copy mode; frozen output.
 term/widget_hints.go     Keyboard link hints (open/copy).
 term/widget_notify.go    Desktop notifications; OSC 9/777.
 term/widget_record.go    Session recording; Start/StopRecording.
+term/action_dispatch.go  RunAction table; direct dispatch.
+term/widget_status.go    OSC 7501 program-status surface.
         │
         ▼
 term/parser.go           VT state machine. Bytes → grid mutations.
@@ -116,17 +120,19 @@ term/parser_csi.go       CSI dispatch (SGR, cursor, erase, modes, …)
 term/parser_osc.go       OSC dispatch (title, CWD, clipboard, …)
 term/parser_dcs.go       DCS dispatch (DECRQSS, sixel, sync)
 term/parser_apc.go       APC dispatch (Kitty Graphics)
+term/parser_status.go    OSC 7501 program-status report parsing.
         │
         ▼
 term/grid.go             Cell buffer + cursor state + alt-screen.
 term/grid_*.go           Scroll, reflow, search, selection, marks, BiDi, graphics.
+term/grid_status.go      Program-status record store.
 term/scrollback.go       Ring buffer.
 term/pty.go              ptyIO interface; creack/pty (Unix) + ConPTY (Windows).
 term/palette.go          256-color table.
 
 term/replay.go           replayPTY (a recording as a ptyIO); NewReplay.
 
-term/workspace/          Panes/tabs/persistence — sits above term, public API only.
+term/workspace/          Panes/tabs/persistence — sits above term, public API only; record.go, overlay.go.
 internal/recfmt/         .gtr session-recording container (Recorder + Reader).
 term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 ```
@@ -157,8 +163,8 @@ term/gotermrec/          CLI over a recording: info/cat/play/fixture/export.
 
 ## Pull request checklist
 
-1. `make prepush` passes (build, vet, race tests, lint, Windows cross-compile,
-   benchmark gate)
+1. `make prepush` passes (build, vet, race tests, lint, Windows cross-compile)
+   plus `make bench-regress` when the change touches render/parser hot paths
 2. New tests for new pure-logic code
 3. Manual smoke test of `examples/falcon` for any change touching `widget.go`,
    `pty.go`, or render/input paths

@@ -209,8 +209,12 @@ type scrollbarState struct {
 	// dragging is true while the user holds the thumb; grabDy is the
 	// pointer offset from the thumb top captured at grab time so the thumb
 	// tracks the cursor without snapping its center to the pointer.
+	// lastY is the pointer Y of the previous drag event. scrollbarDrag moves
+	// the view by the change from lastY, so output that the reader pins in
+	// between moves is kept (see scrollbarDrag).
 	dragging bool
 	grabDy   float32
+	lastY    float32
 }
 
 // mouseState tracks pointer state for selection drags, host-side mouse
@@ -311,6 +315,12 @@ type drawBufs struct {
 	bidiVisRows [][]cell        // visual-reordered rows for current frame
 	bidiV2LRows [][]int         // visual→logical column maps
 	bidiScratch []cell          // reused per-row cell buffer for BiDi pre-pass
+	// resolvedFlat is the backing store for resolvedRows: one resolveCell
+	// per viewport cell, resolved once per non-live frame and shared by
+	// the BiDi scan and both text passes. Grown on resize, resliced (never
+	// reallocated) per frame, so the OnDraw hot path allocates nothing.
+	resolvedFlat []cell   // backing store, rows*cols cells
+	resolvedRows [][]cell // per-frame row views into resolvedFlat
 	// phRects accumulates the Kitty Unicode-placeholder rectangles found in
 	// the viewport (see drawPlaceholders). Kept here so a screen full of
 	// placeholder cells does not allocate every frame.
