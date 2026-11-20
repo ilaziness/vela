@@ -9,13 +9,13 @@ import (
 	"github.com/ilaziness/vela/internal/usererr"
 )
 
-// Manager merges defaults with config overrides. Global hotkey dispatch
-// can be wired later; this package owns persistence for the settings UI.
+// Manager merges defaults with config overrides and notifies listeners.
 type Manager struct {
-	mu      sync.Mutex
-	store   *config.Store
-	defs    map[string]def
-	current map[string]string // action -> logical
+	mu       sync.Mutex
+	store    *config.Store
+	defs     map[string]def
+	current  map[string]string // action -> logical
+	onChange func()
 }
 
 // New builds a manager and loads overrides from store.
@@ -62,14 +62,50 @@ func (m *Manager) List() []Info {
 	return out
 }
 
+// Bindings returns the effective action -> logical table.
+func (m *Manager) Bindings() map[string]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]string, len(m.current))
+	for k, v := range m.current {
+		out[k] = v
+	}
+	return out
+}
+
+// SetOnChange registers a callback fired after a successful binding change.
+// It runs without the manager lock held.
+func (m *Manager) SetOnChange(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onChange = fn
+}
+
+func (m *Manager) notifyChange() {
+	m.mu.Lock()
+	fn := m.onChange
+	m.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // Set updates one binding. Empty logical resets to default.
 func (m *Manager) Set(action, logical string) error {
+	changed, err := m.set(action, logical)
+	if err == nil && changed {
+		m.notifyChange()
+	}
+	return err
+}
+
+func (m *Manager) set(action, logical string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	d, ok := m.defs[action]
 	if !ok {
-		return usererr.Coded("keybinding.unknown_action", "Unknown shortcut action: %s", action)
+		return false, usererr.Coded("keybinding.unknown_action", "Unknown shortcut action: %s", action)
 	}
 
 	logical = strings.TrimSpace(logical)
@@ -84,7 +120,7 @@ func (m *Manager) Set(action, logical string) error {
 		newLogical = d.logical
 	} else {
 		if err := validateLogical(logical); err != nil {
-			return err
+			return false, err
 		}
 		newLogical = canonicalizeLogical(logical)
 		if normalizeAccel(newLogical) == normalizeAccel(d.logical) {
@@ -95,9 +131,9 @@ func (m *Manager) Set(action, logical string) error {
 
 	if normalizeAccel(newLogical) == normalizeAccel(oldLogical) {
 		if clearOverride {
-			return m.writeOverrideLocked(action, "")
+			return true, m.writeOverrideLocked(action, "")
 		}
-		return nil
+		return false, nil
 	}
 
 	newNorm := normalizeAccel(newLogical)
@@ -110,15 +146,24 @@ func (m *Manager) Set(action, logical string) error {
 			if xd, ok := m.defs[act]; ok {
 				label = i18n.T(xd.labelKey)
 			}
-			return usererr.Coded("keybinding.conflict", "Shortcut conflicts with \"%s\"", label)
+			return false, usererr.Coded("keybinding.conflict", "Shortcut conflicts with \"%s\"", label)
 		}
 	}
 
 	m.current[action] = newLogical
+	var err error
 	if clearOverride {
-		return m.writeOverrideLocked(action, "")
+		err = m.writeOverrideLocked(action, "")
+	} else {
+		err = m.writeOverrideLocked(action, newLogical)
 	}
-	return m.writeOverrideLocked(action, newLogical)
+	if err != nil {
+		// Keep memory and disk consistent: a failed save must not
+		// leave an unsaved binding that dispatch already sees.
+		m.current[action] = oldLogical
+		return false, err
+	}
+	return true, nil
 }
 
 // Reset restores one action to its default.
@@ -129,19 +174,21 @@ func (m *Manager) Reset(action string) error {
 // ResetAll clears all overrides.
 func (m *Manager) ResetAll() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.store != nil && m.store.Config != nil {
 		prev := m.store.Config.Keybindings
 		m.store.Config.Keybindings = nil
 		if err := m.store.Save(); err != nil {
 			m.store.Config.Keybindings = prev
+			m.mu.Unlock()
 			return usererr.Coded("keybinding.save_failed", "Failed to save shortcuts: %s", err.Error())
 		}
 	}
 	for action := range m.current {
 		m.current[action] = m.defs[action].logical
 	}
+	m.mu.Unlock()
+	m.notifyChange()
 	return nil
 }
 

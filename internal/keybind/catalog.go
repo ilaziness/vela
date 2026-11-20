@@ -1,21 +1,19 @@
 package keybind
 
-import "github.com/ilaziness/vela/internal/i18n"
+import (
+	"runtime"
+
+	"github.com/ilaziness/vela/internal/i18n"
+)
 
 // Action IDs (stable config keys).
 const (
-	TerminalFind         = "terminal.find"
-	TerminalCopy         = "terminal.copy"
-	TerminalPaste        = "terminal.paste"
-	TerminalAddToChat    = "terminal.addToChat"
-	TerminalToggleLog    = "terminal.toggleLog"
-	TerminalClear        = "terminal.clear"
-	PanelAI              = "panel.ai"
-	PanelBookmarks       = "panel.bookmarks"
-	PanelBookmarkConnect = "panel.bookmarkConnect"
-	PanelCommand         = "panel.command"
-	PanelTools           = "panel.tools"
-	PanelSettings        = "panel.settings"
+	TerminalFind      = "terminal.find"
+	TerminalCopy      = "terminal.copy"
+	TerminalPaste     = "terminal.paste"
+	TerminalToggleLog = "terminal.toggleLog"
+	PanelAI           = "panel.ai"
+	PanelQuickConnect = "panel.quickConnect"
 )
 
 const (
@@ -42,19 +40,24 @@ type def struct {
 }
 
 func builtin() []def {
+	// Copy/paste keep the platform's primary chord: macOS users expect
+	// Cmd+C/Cmd+V, everywhere else the Shift forms avoid stealing
+	// Ctrl+C/Ctrl+V from the child process.
+	copyLogical, pasteLogical := "CmdOrCtrl+Shift+C", "CmdOrCtrl+Shift+V"
+	findLogical := "CmdOrCtrl+Shift+F"
+	if runtime.GOOS == "darwin" {
+		// macOS keeps the bare Cmd chords; elsewhere the Shift forms
+		// avoid stealing control characters (^F, ^C) from the child.
+		copyLogical, pasteLogical = "CmdOrCtrl+C", "CmdOrCtrl+V"
+		findLogical = "CmdOrCtrl+F"
+	}
 	return []def{
-		{TerminalFind, "CmdOrCtrl+F", "keybinding.terminal.find", categoryTerminal},
-		{TerminalCopy, "CmdOrCtrl+Shift+C", "keybinding.terminal.copy", categoryTerminal},
-		{TerminalPaste, "CmdOrCtrl+Shift+V", "keybinding.terminal.paste", categoryTerminal},
-		{TerminalAddToChat, "CmdOrCtrl+Shift+L", "keybinding.terminal.addToChat", categoryTerminal},
+		{TerminalFind, findLogical, "keybinding.terminal.find", categoryTerminal},
+		{TerminalCopy, copyLogical, "keybinding.terminal.copy", categoryTerminal},
+		{TerminalPaste, pasteLogical, "keybinding.terminal.paste", categoryTerminal},
 		{TerminalToggleLog, "CmdOrCtrl+Shift+Y", "keybinding.terminal.toggleLog", categoryTerminal},
-		{TerminalClear, "CmdOrCtrl+Shift+K", "keybinding.terminal.clear", categoryTerminal},
-		{PanelAI, "CmdOrCtrl+Shift+A", "keybinding.panel.ai", categoryPanel},
-		{PanelBookmarkConnect, "CmdOrCtrl+B", "keybinding.panel.bookmarkConnect", categoryPanel},
-		{PanelBookmarks, "CmdOrCtrl+Shift+B", "keybinding.panel.bookmarks", categoryPanel},
-		{PanelCommand, "CmdOrCtrl+Shift+P", "keybinding.panel.command", categoryPanel},
-		{PanelTools, "CmdOrCtrl+Shift+U", "keybinding.panel.tools", categoryPanel},
-		{PanelSettings, "CmdOrCtrl+,", "keybinding.panel.settings", categoryPanel},
+		{PanelAI, "CmdOrCtrl+Shift+J", "keybinding.panel.ai", categoryPanel},
+		{PanelQuickConnect, "CmdOrCtrl+B", "keybinding.panel.quickConnect", categoryPanel},
 	}
 }
 

@@ -2,6 +2,7 @@ package keybind
 
 import (
 	"runtime"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -89,6 +90,8 @@ func validateLogical(logical string) error {
 			return usererr.Coded("keybinding.unsupported_modifier", "Unsupported modifier: %s", p)
 		}
 	}
+	// go-gui defines KeyF1..KeyF25; anything outside that range can
+	// validate but never dispatch, so reject it here instead.
 	isFunc := len(key) >= 2 && (key[0] == 'F' || key[0] == 'f')
 	if isFunc {
 		rest := key[1:]
@@ -100,7 +103,9 @@ func validateLogical(logical string) error {
 			}
 		}
 		if allDigit {
-			return nil
+			if n, err := strconv.Atoi(rest); err == nil && n >= 1 && n <= 25 {
+				return nil
+			}
 		}
 	}
 	if isNamedKey(key) && strings.EqualFold(key, "Escape") {
@@ -118,7 +123,7 @@ func validateLogical(logical string) error {
 	if isNamedKey(key) {
 		return nil
 	}
-	if (hasPrimary || hasAlt) && len(key) >= 1 {
+	if (hasPrimary || hasAlt) && len(key) == 1 && key[0] >= '!' && key[0] <= '~' {
 		return nil
 	}
 	return usererr.Coded("keybinding.unsupported_key", "Unsupported key: %s", key)

@@ -111,6 +111,7 @@ func Bootstrap() (*Runtime, error) {
 	}, nil)
 
 	ctrl := NewController(hub, reg, logger)
+	ctrl.SetKeybind(kb)
 	ctrl.SetTermTheme(store.Config.Terminal.Theme)
 	ctrl.SetTermConfig(store.Config.Terminal)
 

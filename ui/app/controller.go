@@ -16,6 +16,7 @@ import (
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/keybind"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/sftp"
@@ -79,6 +80,10 @@ type Controller struct {
 	// Both are wired by SetSFTP during bootstrap.
 	sftpMgr *sftp.Manager
 	edits   *sftpEditBook
+
+	// keybindMgr is the user shortcut table; wired by SetKeybind during
+	// bootstrap before any window exists.
+	keybindMgr *keybind.Manager
 
 	// tunnels is the port-forward engine (SetTunnels); tunnelRules
 	// caches saved bookmark rules keyed by bookmark id.
@@ -401,6 +406,7 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 	c.mu.Lock()
 	c.terms[sess.ID()] = tm
 	c.mu.Unlock()
+	tm.SetKeyBindings(c.termKeyMap())
 
 	// The tab slice may have shifted while the Term was built;
 	// re-resolve before writing the pane.

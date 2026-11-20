@@ -38,14 +38,7 @@ func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 	// Quick connect: toggle the bookmark side panel.
 	quickBtn := railBtn(navQuickConnect, gui.IconBolt, i18n.T("shell.nav.quick_connect"), th, quickOpen, func(ctx gui.EventCtx) {
 		ctx.Consume()
-		s := gui.State[app.State](ctx.Window)
-		if s.ActiveNav == navQuickConnect && s.SideVisible {
-			s.SideVisible = false
-			return
-		}
-		s.ActiveNav = navQuickConnect
-		s.SideVisible = true
-		ctrl.ReloadBookmarkGroups(ctx.Window)
+		ToggleQuickConnect(ctx.Window, ctrl)
 	})
 
 	bookmarksBtn := railBtn(navBookmarks, gui.IconBookmark, i18n.T("header.bookmarks"), th, false, func(ctx gui.EventCtx) {

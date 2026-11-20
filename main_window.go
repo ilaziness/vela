@@ -90,6 +90,8 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 		Decorations: chrome.Decoration(rt.Store.Config.General.Frameless),
 		OnInit: func(w *gui.Window) {
 			rt.BindWindow(w)
+			installKeybindCommands(w, rt)
+			watchKeybindChanges(w, rt)
 			frameless := rt.Store.Config.General.Frameless
 			gui.State[app.State](w).Frameless = frameless
 			if frameless {
