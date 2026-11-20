@@ -18,7 +18,7 @@ import (
 
 const (
 	perfPanelWidth  float32 = 360
-	perfChartHeight float32 = 140
+	perfChartHeight float32 = 112
 	// perfChartPadLeft reserves room for y tick labels inside the
 	// panel card.
 	perfChartPadLeft float32 = 46
@@ -118,7 +118,7 @@ func niceCeil(v float64) float64 {
 // PerfPanel is the performance column shown between the terminal and
 // the tool rail, rendered top-to-bottom: header, load/latency, then
 // CPU / memory / root-FS / per-NIC / per-disk chart cards.
-func PerfPanel(ctrl *app.Controller, tab *app.Tab) gui.View {
+func PerfPanel(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 	th := gui.CurrentTheme()
 	samples, lastErr := ctrl.PerfSnapshot(tab.SessID)
 
@@ -146,6 +146,11 @@ func PerfPanel(ctrl *app.Controller, tab *app.Tab) gui.View {
 	}
 
 	last := samples[len(samples)-1]
+	// The chart cache keys on Version: a constant zero leaves the
+	// first frame tessellated forever (data only appeared after a
+	// hover bumped the library's own version), so every new sample
+	// must move it.
+	version := perfChartVersion(samples)
 
 	overview := gui.Row(layout.Flush(gui.ContainerCfg{
 		ID:      "perf-overview-" + tab.ID,
@@ -178,16 +183,16 @@ func PerfPanel(ctrl *app.Controller, tab *app.Tab) gui.View {
 		rootFS,
 		chartCard(tab.ID, "cpu", i18n.T("shell.perf.cpu"),
 			strconv.Itoa(int(last.CPUPercent))+"%",
-			lineChart(tab.ID, "cpu",
+			lineChart(w, tab.ID, "cpu",
 				[]series.XY{xy(i18n.T("shell.perf.series.cpu"), perfColorCPU,
 					chartPoints(samples, cpuPct))},
-				newFloorAxis(100, pctTick), i18n.T("shell.perf.y_pct"))),
+				newFloorAxis(100, pctTick), i18n.T("shell.perf.y_pct"), version)),
 		chartCard(tab.ID, "mem", i18n.T("shell.perf.mem"),
 			formatBytes(last.MemUsed)+" / "+formatBytes(last.MemTotal),
-			lineChart(tab.ID, "mem",
+			lineChart(w, tab.ID, "mem",
 				[]series.XY{xy(i18n.T("shell.perf.series.mem"), perfColorMem,
 					chartPoints(samples, memPct))},
-				newFloorAxis(100, pctTick), i18n.T("shell.perf.y_pct"))),
+				newFloorAxis(100, pctTick), i18n.T("shell.perf.y_pct"), version)),
 	}
 
 	for _, iface := range last.Net {
@@ -195,24 +200,24 @@ func PerfPanel(ctrl *app.Controller, tab *app.Tab) gui.View {
 			i18n.Tf("shell.perf.net", iface.Name),
 			i18n.Tf("shell.perf.rx", formatRate(iface.RxBps))+" · "+
 				i18n.Tf("shell.perf.tx", formatRate(iface.TxBps)),
-			lineChart(tab.ID, "net-"+iface.Name, []series.XY{
+			lineChart(w, tab.ID, "net-"+iface.Name, []series.XY{
 				xy(i18n.T("shell.perf.series.rx"), perfColorPrimary,
 					chartPoints(samples, netRate(iface.Name, true))),
 				xy(i18n.T("shell.perf.series.tx"), perfColorSecondary,
 					chartPoints(samples, netRate(iface.Name, false))),
-			}, newFloorAxis(0, bytesTick), i18n.T("shell.perf.y_rate"))))
+			}, newFloorAxis(0, bytesTick), i18n.T("shell.perf.y_rate"), version)))
 	}
 	for _, disk := range last.DiskIO {
 		cards = append(cards, chartCard(tab.ID, "io-"+disk.Name,
 			i18n.Tf("shell.perf.disk_io", disk.Name),
 			i18n.Tf("shell.perf.read", formatRate(disk.ReadBps))+" · "+
 				i18n.Tf("shell.perf.write", formatRate(disk.WriteBps)),
-			lineChart(tab.ID, "io-"+disk.Name, []series.XY{
+			lineChart(w, tab.ID, "io-"+disk.Name, []series.XY{
 				xy(i18n.T("shell.perf.series.read"), perfColorPrimary,
 					chartPoints(samples, diskRate(disk.Name, true))),
 				xy(i18n.T("shell.perf.series.write"), perfColorSecondary,
 					chartPoints(samples, diskRate(disk.Name, false))),
-			}, newFloorAxis(0, bytesTick), i18n.T("shell.perf.y_rate"))))
+			}, newFloorAxis(0, bytesTick), i18n.T("shell.perf.y_rate"), version)))
 	}
 
 	return perfColumn(tab, header, append([]gui.View{overview}, cards...)...)
@@ -338,18 +343,24 @@ func xy(name string, color gui.Color, pts []series.Point) series.XY {
 // lineChart wires one go-charts line chart inside a compact theme.
 // A single series renders as a filled area without a legend; two
 // series get a compact bottom legend to tell the colors apart.
-func lineChart(tabID, metric string, xs []series.XY, yAxis axis.Axis, yName string) gui.View {
+// version must change whenever the sample history does, or go-gui's
+// canvas cache keeps the first tessellation forever.
+func lineChart(
+	w *gui.Window, tabID, metric string,
+	xs []series.XY, yAxis axis.Axis, yName string, version uint64,
+) gui.View {
 	cfg := chart.LineCfg{
 		BaseCfg: chart.BaseCfg{
 			ID:            "perf-chart-" + tabID + "-" + metric,
 			Sizing:        gui.FillFixed,
 			Height:        perfChartHeight,
+			Version:       version,
 			Theme:         perfChartTheme(),
 			TooltipXLabel: i18n.T("shell.perf.tip_x"),
 			TooltipYLabel: yName,
 		},
 		Series:   xs,
-		XAxis:    timeXAxis(),
+		XAxis:    timeXAxis(w),
 		YAxis:    yAxis,
 		ShowArea: len(xs) == 1,
 	}
@@ -361,16 +372,57 @@ func lineChart(tabID, metric string, xs []series.XY, yAxis axis.Axis, yName stri
 	return chart.Line(cfg)
 }
 
-// timeXAxis formats unix seconds as wall-clock ticks and keeps the tick
-// count low: the library's time axis always targets ~8 ticks, which
-// overlap in a panel card.
-func timeXAxis() axis.Axis {
-	return axis.NewLinear(axis.LinearCfg{
-		TickTarget: 3,
-		TickFormat: func(sec float64) string {
-			return time.Unix(int64(sec), 0).Format("15:04")
-		},
-	})
+// perfChartVersion turns the newest sample into a cache version. Unix
+// nanoseconds differ on every 5s poll, so the curves and axes follow
+// the data without waiting for a hover.
+func perfChartVersion(samples []app.PerfSample) uint64 {
+	if len(samples) == 0 {
+		return 0
+	}
+	return uint64(samples[len(samples)-1].At.UnixNano())
+}
+
+// plotTicksAxis trims x ticks the linear axis snapped outside the
+// plot: GenerateNiceTicks floors the first tick, and a centered label
+// there spilled into the y-tick gutter as the window scrolled. Labels
+// within half a label width of an edge are dropped too, since they
+// would overhang it.
+type plotTicksAxis struct {
+	*axis.Linear
+	inset float32
+}
+
+func (a *plotTicksAxis) Ticks(pixelMin, pixelMax float32) []axis.Tick {
+	ticks := a.Linear.Ticks(pixelMin, pixelMax)
+	out := ticks[:0]
+	for _, t := range ticks {
+		if t.Position <= pixelMin+a.inset || t.Position >= pixelMax-a.inset {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// timeXAxis formats unix seconds as wall-clock ticks. The library's
+// time axis always targets ~8 ticks, which overlap in a panel card;
+// four keeps a couple of labels after the edge filter drops the ones
+// that would overhang.
+func timeXAxis(w *gui.Window) axis.Axis {
+	th := gui.CurrentTheme()
+	inset := float32(18)
+	if w != nil {
+		inset = w.TextWidth("00:00", th.TextStyleBody)/2 + 2
+	}
+	return &plotTicksAxis{
+		Linear: axis.NewLinear(axis.LinearCfg{
+			TickTarget: 4,
+			TickFormat: func(sec float64) string {
+				return time.Unix(int64(sec), 0).Format("15:04")
+			},
+		}),
+		inset: inset,
+	}
 }
 
 func cpuPct(s app.PerfSample) float64 { return s.CPUPercent }

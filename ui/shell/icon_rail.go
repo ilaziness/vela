@@ -48,10 +48,15 @@ func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 		}
 	})
 
-	agentBtn := railBtn("agent", gui.IconStar, i18n.T("ai.chat.user_assistant"), th, st.AgentOpen, func(ctx gui.EventCtx) {
-		ctx.Consume()
-		ctrl.AgentToggle(ctx.Window)
-	})
+	agentBtn := railViewBtn("agent",
+		layout.RobotIcon(layout.RobotIconCfg{
+			Size:  th.TextStyleIconLarge.Size,
+			Color: th.TextStyleIconLarge.Color,
+		}),
+		i18n.T("ai.chat.user_assistant"), th, st.AgentOpen, func(ctx gui.EventCtx) {
+			ctx.Consume()
+			ctrl.AgentToggle(ctx.Window)
+		})
 
 	backupBtn := railBtn(navBackup, gui.IconSync, i18n.T("header.backup_restore"), th, false, func(ctx gui.EventCtx) {
 		ctx.Consume()
@@ -106,16 +111,29 @@ func railBtn(
 	active bool,
 	onClick func(gui.EventCtx),
 ) gui.View {
+	return railViewBtn(id,
+		gui.Text(gui.TextCfg{Text: glyph, TextStyle: th.TextStyleIconLarge}),
+		tip, th, active, onClick)
+}
+
+// railViewBtn is railBtn for an icon the glyph face cannot express.
+func railViewBtn(
+	id string,
+	icon gui.View,
+	tip string,
+	th gui.Theme,
+	active bool,
+	onClick func(gui.EventCtx),
+) gui.View {
 	return layout.IconTipButton(layout.IconTipButtonCfg{
 		ID:        "rail-" + id,
-		Glyph:     glyph,
+		IconView:  icon,
 		Tip:       tip,
 		Th:        th,
 		OnClick:   onClick,
 		Variant:   gui.ButtonGhost,
 		Active:    active,
 		Size:      railBtnSize,
-		Icon:      th.TextStyleIconLarge,
 		Padding:   gui.PaddingXSmall,
 		Radius:    gui.RadiusSmall,
 		Placement: layout.TipRight,

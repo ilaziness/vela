@@ -674,6 +674,7 @@
   "sftp.confirm_overwrite_many": "%d 項已存在（%s），是否覆蓋？目錄將合併，同名檔案將被覆蓋。",
   "sftp.confirm_overwrite_one": "「%s」已存在，是否覆蓋？目錄將合併，同名檔案將被覆蓋。",
   "sftp.confirm_overwrite_title": "確認覆蓋",
+  "sftp.confirm_redownload": "「%s」本機有未儲存的修改，重新下載將覆蓋本機內容，是否繼續？",
   "sftp.confirm_remote_changed": "遠端檔案的大小或修改時間与下載时不一致。",
   "sftp.confirm_upload": "檔案 %s 已在本機修改，是否上傳並覆盖遠端檔案？",
   "sftp.confirm_upload_session": "部分檔案有未儲存的變更，關閉前上傳嗎？",

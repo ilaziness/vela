@@ -62,7 +62,7 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 		if tab.PerfOpen {
 			stage = gui.Row(flush(gui.ContainerCfg{
 				Sizing:  gui.FillFill,
-				Content: []gui.View{stage, session.PerfPanel(ctrl, tab)},
+				Content: []gui.View{stage, session.PerfPanel(w, ctrl, tab)},
 			}))
 		}
 		if tab.TunnelOpen {

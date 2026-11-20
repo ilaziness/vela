@@ -64,7 +64,11 @@ const (
 type IconTipButtonCfg struct {
 	ID    string
 	Glyph string
-	Tip   string
+	// IconView, when set, replaces Glyph as the button content: use it
+	// for icons the bundled glyph face cannot express (a drawn robot,
+	// for example).
+	IconView gui.View
+	Tip      string
 	// Th is the current theme; callers pass gui.CurrentTheme().
 	Th      gui.Theme
 	OnClick func(gui.EventCtx)
@@ -110,6 +114,10 @@ func IconTipButton(cfg IconTipButtonCfg) gui.View {
 			wrapSizing = gui.FixedFixed
 			wrapW, wrapH = cfg.Size, cfg.Size
 		}
+		iconContent := gui.Text(gui.TextCfg{Text: cfg.Glyph, TextStyle: icon})
+		if cfg.IconView != nil {
+			iconContent = cfg.IconView
+		}
 		content := []gui.View{
 			gui.Button(gui.ButtonCfg{
 				ID:            cellID + "-hit",
@@ -123,10 +131,8 @@ func IconTipButton(cfg IconTipButtonCfg) gui.View {
 				HAlign:        gui.Some(gui.HAlignCenter),
 				VAlign:        gui.Some(gui.VAlignMiddle),
 				A11YCfg:       gui.A11YCfg{A11YLabel: cfg.Tip},
-				Content: []gui.View{
-					gui.Text(gui.TextCfg{Text: cfg.Glyph, TextStyle: icon}),
-				},
-				OnClick: cfg.OnClick,
+				Content:       []gui.View{iconContent},
+				OnClick:       cfg.OnClick,
 			}),
 		}
 		if is.Hovered && cfg.Tip != "" {

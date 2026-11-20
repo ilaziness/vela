@@ -58,6 +58,10 @@ type Controller struct {
 	// closing suppresses disconnect handling while the app tears down:
 	// Term.Close fires OnExit like any other exit.
 	closing bool
+	// shutdownCh unblocks prompts still waiting on a dialog once the app
+	// closes; Shutdown closes it exactly once.
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
 
 	// Bookmark dial / quick-connect.
 	bookmarks   *bookmark.Service
@@ -111,16 +115,17 @@ func NewController(hub *termio.Hub, registry *protocol.Registry, logger *zap.Log
 		logger = zap.NewNop()
 	}
 	return &Controller{
-		hub:       hub,
-		registry:  registry,
-		logger:    logger,
-		terms:     make(map[string]*term.Term),
-		termCfg:   config.Default().Terminal,
-		termTheme: defaultTermTheme(),
-		reconnect: make(map[string]reconnectReq),
-		paneLoc:   make(map[string]paneRef),
-		transfers: make(map[string][]transfer.ProgressData),
-		edits:     newEditBook(),
+		hub:        hub,
+		registry:   registry,
+		logger:     logger,
+		terms:      make(map[string]*term.Term),
+		termCfg:    config.Default().Terminal,
+		termTheme:  defaultTermTheme(),
+		reconnect:  make(map[string]reconnectReq),
+		paneLoc:    make(map[string]paneRef),
+		transfers:  make(map[string][]transfer.ProgressData),
+		edits:      newEditBook(),
+		shutdownCh: make(chan struct{}),
 	}
 }
 
@@ -143,6 +148,13 @@ func (c *Controller) SetWindow(w *gui.Window) {
 
 // SetShutdown registers a process shutdown hook.
 func (c *Controller) SetShutdown(fn func()) { c.onClose = fn }
+
+// shutdownDone is closed by Shutdown, so a prompt blocking on a dialog
+// returns instead of holding the window open. A Controller built by
+// hand (tests) has a nil channel, which never fires.
+func (c *Controller) shutdownDone() <-chan struct{} {
+	return c.shutdownCh
+}
 
 // Window implements protocol.Bus.
 func (c *Controller) Window() *gui.Window {
@@ -677,6 +689,12 @@ func (c *Controller) Shutdown() {
 	c.paneLoc = make(map[string]paneRef)
 	c.closing = true
 	c.mu.Unlock()
+	// Release prompts blocked on a dialog before their resources go away.
+	c.shutdownOnce.Do(func() {
+		if c.shutdownCh != nil {
+			close(c.shutdownCh)
+		}
+	})
 	// SFTP clients and edit watchers go down before the SSH sessions
 	// they ride on; watchers are discarded, never prompted, here.
 	c.CloseAllSFTP()

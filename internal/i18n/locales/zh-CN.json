@@ -674,6 +674,7 @@
   "sftp.confirm_overwrite_many": "%d 项已存在（%s），是否覆盖？目录将合并，同名文件将被覆盖。",
   "sftp.confirm_overwrite_one": "「%s」已存在，是否覆盖？目录将合并，同名文件将被覆盖。",
   "sftp.confirm_overwrite_title": "确认覆盖",
+  "sftp.confirm_redownload": "「%s」本地有未保存的修改，重新下载将覆盖本地内容，是否继续？",
   "sftp.confirm_remote_changed": "远程文件的大小或修改时间与下载时不一致。",
   "sftp.confirm_upload": "文件 %s 已在本地修改，是否上传并覆盖远程文件？",
   "sftp.confirm_upload_session": "部分文件有未保存的更改，关闭前上传吗？",

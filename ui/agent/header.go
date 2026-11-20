@@ -62,7 +62,10 @@ func header(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 				VAlign:  gui.VAlignMiddle,
 				Spacing: gui.SpacingTight,
 				Content: []gui.View{
-					gui.Text(gui.TextCfg{Text: gui.IconStar, TextStyle: th.TextStyleIconSmall, Sizing: gui.FitFit}),
+					layout.RobotIcon(layout.RobotIconCfg{
+						Size:  th.TextStyleIconSmall.Size,
+						Color: th.TextStyleIconSmall.Color,
+					}),
 					gui.Text(gui.TextCfg{
 						Text:      title,
 						TextStyle: th.TextStyleLabel,

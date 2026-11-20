@@ -27,14 +27,6 @@ const (
 	editMtimeStable  = 800 * time.Millisecond
 )
 
-type beginAction int
-
-const (
-	beginStarted beginAction = iota
-	beginDownloading
-	beginReopen
-)
-
 // remoteEdit tracks one remote file opened in an external editor.
 type remoteEdit struct {
 	sessionID   string
@@ -88,9 +80,14 @@ func (b *sftpEditBook) promptLock(sessionID string) *sync.Mutex {
 	return m
 }
 
-func (b *sftpEditBook) begin(ed *remoteEdit) (beginAction, string) {
+// begin registers ed as the session's current edit for its path and
+// reports whether the caller should download. A download already in
+// flight wins (false: the caller does nothing); an already-open edit
+// is replaced — its watcher is cancelled so the new download
+// overwrites the temp copy and reopens it.
+func (b *sftpEditBook) begin(ed *remoteEdit) bool {
 	if b == nil {
-		return beginStarted, ed.local
+		return true
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -102,22 +99,54 @@ func (b *sftpEditBook) begin(ed *remoteEdit) (beginAction, string) {
 	if cur := files[ed.remote]; cur != nil {
 		cur.mu.Lock()
 		downloading := cur.downloading
-		opened := cur.opened
-		local := cur.local
+		if !downloading {
+			cur.closing = true
+		}
 		cancel := cur.cancel
 		cur.mu.Unlock()
 		if downloading {
-			return beginDownloading, local
-		}
-		if opened {
-			return beginReopen, local
+			return false
 		}
 		if cancel != nil {
 			cancel()
 		}
 	}
 	files[ed.remote] = ed
-	return beginStarted, ed.local
+	return true
+}
+
+// remoteDirty reports whether an already-open edit for remote has
+// local changes that were not uploaded yet. A missing temp file counts
+// as clean: the re-download recreates it.
+func (b *sftpEditBook) remoteDirty(sessionID, remote string) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	ed := b.by[sessionID][remote]
+	b.mu.Unlock()
+	return ed.localDirty()
+}
+
+// localDirty reports unsaved edits in the temp file. Downloads leave
+// opened false until they land, so an in-flight download is clean.
+func (ed *remoteEdit) localDirty() bool {
+	if ed == nil {
+		return false
+	}
+	ed.mu.Lock()
+	opened := ed.opened
+	local := ed.local
+	baseline := ed.baseline
+	ed.mu.Unlock()
+	if !opened {
+		return false
+	}
+	st, err := os.Stat(local)
+	if err != nil {
+		return false
+	}
+	return st.ModTime().After(baseline)
 }
 
 // remove drops ed only when it is still the session's current edit for
@@ -179,20 +208,7 @@ func (b *sftpEditBook) dropSession(sessionID string) {
 func (b *sftpEditBook) unsaved(sessionID string) []*remoteEdit {
 	var out []*remoteEdit
 	for _, ed := range b.snapshot(sessionID) {
-		ed.mu.Lock()
-		opened := ed.opened
-		downloading := ed.downloading
-		baseline := ed.baseline
-		local := ed.local
-		ed.mu.Unlock()
-		if !opened || downloading {
-			continue
-		}
-		st, err := os.Stat(local)
-		if err != nil {
-			continue
-		}
-		if st.ModTime().After(baseline) {
+		if ed.localDirty() {
 			out = append(out, ed)
 		}
 	}
@@ -200,9 +216,11 @@ func (b *sftpEditBook) unsaved(sessionID string) []*remoteEdit {
 }
 
 // EditRemoteFile downloads a remote file into a temp directory and
-// opens it with the OS default application. A second call while the
-// download runs does nothing; if already open, the temp file is
-// reopened. Ported from v1 services/sftp_edit.go.
+// opens it with the OS default application. Every call re-downloads,
+// so a stale temp copy can never be edited by mistake; when the temp
+// copy has unsaved local changes the user confirms the overwrite
+// first. A call while the same download runs does nothing. Ported from
+// v1 services/sftp_edit.go.
 func (c *Controller) EditRemoteFile(sessionID, remotePath string) error {
 	remotePath = path.Clean(remotePath)
 	if sessionID == "" || remotePath == "" || remotePath == "." {
@@ -224,6 +242,15 @@ func (c *Controller) EditRemoteFile(sessionID, remotePath string) error {
 	if err != nil {
 		return err
 	}
+	if c.edits.remoteDirty(sessionID, remotePath) {
+		c.edits.dialogLock()
+		choice := c.askEditYes(context.Background(),
+			i18n.Tf("sftp.confirm_redownload", path.Base(remotePath)))
+		c.edits.dialogUnlock()
+		if choice != editYes {
+			return nil
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ed := &remoteEdit{
 		sessionID:   sessionID,
@@ -234,16 +261,8 @@ func (c *Controller) EditRemoteFile(sessionID, remotePath string) error {
 		downloading: true,
 		cancel:      cancel,
 	}
-	switch action, existing := c.edits.begin(ed); action {
-	case beginDownloading:
+	if !c.edits.begin(ed) {
 		cancel()
-		return nil
-	case beginReopen:
-		cancel()
-		if err := system.OpenPath(existing); err != nil {
-			c.logger.Error("reopen editor failed", zap.String("path", existing), zap.Error(err))
-			return err
-		}
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
@@ -583,6 +602,8 @@ func (c *Controller) askEditYes(ctx context.Context, message string) editChoice 
 		}
 		return editNo
 	case <-ctx.Done():
+		return editInterrupted
+	case <-c.shutdownDone():
 		return editInterrupted
 	}
 }

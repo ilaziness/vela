@@ -379,12 +379,15 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 
 	bubbleColor := th.ColorInterior
 	avatarBg := th.ColorActive
-	avatarGlyph := gui.IconStar
+	avatarIcon := layout.RobotIcon(layout.RobotIconCfg{
+		Size:  th.TextStyleIconSmall.Size,
+		Color: th.TextStyleIconSmall.Color,
+	})
 	name := i18n.T("ai.chat.user_assistant")
 	if isUser {
 		bubbleColor = th.ColorAccentSubtle
 		avatarBg = th.ColorSelect
-		avatarGlyph = gui.IconUser
+		avatarIcon = gui.Text(gui.TextCfg{Text: gui.IconUser, TextStyle: th.TextStyleIconSmall})
 		name = i18n.T("ai.chat.user_you")
 	}
 
@@ -458,7 +461,7 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 		HAlign: gui.HAlignCenter,
 		VAlign: gui.VAlignMiddle,
 		Content: []gui.View{
-			gui.Text(gui.TextCfg{Text: avatarGlyph, TextStyle: th.TextStyleIconSmall}),
+			avatarIcon,
 		},
 	}))
 
