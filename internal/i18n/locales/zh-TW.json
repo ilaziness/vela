@@ -678,6 +678,7 @@
   "sftp.confirm_remote_changed": "遠端檔案的大小或修改時間与下載时不一致。",
   "sftp.confirm_upload": "檔案 %s 已在本機修改，是否上傳並覆盖遠端檔案？",
   "sftp.confirm_upload_session": "部分檔案有未儲存的變更，關閉前上傳嗎？",
+  "sftp.copy_path": "複製路徑",
   "sftp.create": "建立",
   "sftp.delete_with_count": "刪除（%d）",
   "sftp.deselect": "取消選擇",

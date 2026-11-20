@@ -68,7 +68,9 @@ func remoteFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SF
 	return gui.ContextMenu(w, cfg)
 }
 
-// localFileList renders the local pane's scrollable rows.
+// localFileList renders the local pane's scrollable rows. The list is
+// wrapped in the blank-area menu; rows carry their own menu which wins
+// on right-click.
 func localFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFTPState) gui.View {
 	th := gui.CurrentTheme()
 	rows := make([]gui.View, 0, len(s.LocalEntries)+1)
@@ -78,7 +80,7 @@ func localFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFT
 	if len(rows) == 0 {
 		rows = append(rows, emptyRow(th))
 	}
-	return gui.Column(layout.Flush(gui.ContainerCfg{
+	list := gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:         "sftp-local-list",
 		Sizing:     gui.FillFill,
 		Scrollable: true,
@@ -90,6 +92,9 @@ func localFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFT
 		Spacing: gui.NoSpacing,
 		Content: rows,
 	}))
+	cfg := localBlankMenu(ctrl, tab)
+	cfg.Content = []gui.View{list}
+	return gui.ContextMenu(w, cfg)
 }
 
 func emptyRow(th gui.Theme) gui.View {
@@ -133,9 +138,9 @@ func remoteRow(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFTPSta
 	return gui.ContextMenu(w, cfg)
 }
 
-// localRow is one local file row (no context menu, like v1).
+// localRow is one local file row wrapped in its context menu.
 func localRow(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e localfs.Entry, idx int) gui.View {
-	return fileRow(
+	row := fileRow(
 		w,
 		fmt.Sprintf("sftp-l-%d", idx),
 		s.LocalSelected[e.Path],
@@ -158,6 +163,12 @@ func localRow(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFTPStat
 			})
 		},
 	)
+	cfg := localItemMenu(ctrl, tab, s, e)
+	// Menu open-state is keyed by ID: every row needs its own or one
+	// right-click opens a popup in every row's wrapper at once.
+	cfg.ID = fmt.Sprintf("sftp-lmenu-%d", idx)
+	cfg.Content = []gui.View{row}
+	return gui.ContextMenu(w, cfg)
 }
 
 // nameBudget approximates the pixel width left for the name column:
@@ -214,7 +225,17 @@ func fileRow(w *gui.Window, id string, selected, isDir bool, name, mode, size, m
 			}
 			onToggle(ctx)
 		},
-		OnMouseDown:  onActivate,
+		// Right-press is the context menu's job; counting it as an
+		// activation made two quick right-clicks open a directory.
+		OnMouseDown: func(ctx gui.EventCtx) {
+			if onActivate == nil {
+				return
+			}
+			if e := ctx.Event; e != nil && e.MouseButton != gui.MouseLeft {
+				return
+			}
+			onActivate(ctx)
+		},
 		Clip:         true,
 		ClipContents: true,
 		Content: []gui.View{
