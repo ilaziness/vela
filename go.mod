@@ -5,10 +5,10 @@ go 1.27.3
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/firebase/genkit/go v1.14.0
-	github.com/go-gui-org/go-charts v0.32.0
+	github.com/go-gui-org/go-charts v0.33.0
 	github.com/go-gui-org/go-gui v0.98.0
-	github.com/go-gui-org/go-term v0.19.0
-	github.com/google/dotprompt/go v0.0.0-20260918022926-df612903a877
+	github.com/go-gui-org/go-term v0.19.1
+	github.com/google/dotprompt/go v0.0.0-20261118215426-97751971e864
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/openai/openai-go v1.12.0
@@ -20,13 +20,13 @@ require (
 	github.com/xx25/go-zmodem v0.0.0-20260928123519-057a34b28431
 	go.bug.st/serial v1.8.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/crypto v0.58.0
-	golang.org/x/net v0.62.0
+	golang.org/x/crypto v0.59.0
+	golang.org/x/net v0.63.0
 	golang.org/x/sys v0.50.0
 	golang.org/x/text v0.44.0
-	google.golang.org/genai v1.77.0
+	google.golang.org/genai v1.79.1
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.61.1
+	modernc.org/sqlite v1.62.0
 )
 
 require (
@@ -107,7 +107,7 @@ require (
 	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
-	modernc.org/libc v1.79.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
