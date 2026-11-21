@@ -234,6 +234,16 @@ func (r *BookmarkRepository) DeleteBookmark(id string) error {
 	return nil
 }
 
+// ClearProxyJumpRefs 清空指向已删除书签的 ProxyJump 引用。
+func (r *BookmarkRepository) ClearProxyJumpRefs(id string) error {
+	if _, err := r.db.Exec(`UPDATE bookmarks SET proxy_jump_id = '' WHERE proxy_jump_id = ?`, id); err != nil {
+		return fmt.Errorf(errUpdateQuery, "bookmark proxy jump refs", err)
+	}
+
+	r.logger.Debug("proxy jump refs cleared", zap.String("deleted", id))
+	return nil
+}
+
 // CountBySSHKeyID 统计引用某个应用内密钥的书签数量。
 func (r *BookmarkRepository) CountBySSHKeyID(id string) (int, error) {
 	var count int
@@ -302,17 +312,32 @@ func (r *BookmarkRepository) UpdateGroup(oldName, newName, icon string) error {
 	return nil
 }
 
-// GetGroupBookmarkCount 获取分组下的书签数量
-func (r *BookmarkRepository) GetGroupBookmarkCount(groupName string) (int, error) {
-	query := `SELECT COUNT(b.id) FROM bookmarks b
-			  INNER JOIN bookmark_groups g ON b.group_id = g.id
-			  WHERE g.name = ?`
-	var count int
-	err := r.db.QueryRow(query, groupName).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf(errQuery, "group bookmark count", err)
+// ClearProxyJumpRefsByGroup 清空指向分组内书签的 ProxyJump 引用。
+// 需在书签行删除之前调用，子查询依赖书签行仍存在。
+func (r *BookmarkRepository) ClearProxyJumpRefsByGroup(groupName string) error {
+	query := `UPDATE bookmarks SET proxy_jump_id = ''
+			  WHERE proxy_jump_id IN (
+				  SELECT b.bookmark_id FROM bookmarks b
+				  INNER JOIN bookmark_groups g ON b.group_id = g.id
+				  WHERE g.name = ?)`
+	if _, err := r.db.Exec(query, groupName); err != nil {
+		return fmt.Errorf(errUpdateQuery, "bookmark proxy jump refs by group", err)
 	}
-	return count, nil
+
+	r.logger.Debug("proxy jump refs cleared by group", zap.String("name", groupName))
+	return nil
+}
+
+// DeleteBookmarksByGroup 一次性删除分组下的所有书签。
+func (r *BookmarkRepository) DeleteBookmarksByGroup(groupName string) error {
+	query := `DELETE FROM bookmarks
+			  WHERE group_id IN (SELECT id FROM bookmark_groups WHERE name = ?)`
+	if _, err := r.db.Exec(query, groupName); err != nil {
+		return fmt.Errorf(errDeleteQuery, "bookmarks by group", err)
+	}
+
+	r.logger.Debug("bookmarks deleted by group", zap.String("name", groupName))
+	return nil
 }
 
 // DeleteGroup 删除分组

@@ -409,11 +409,17 @@ func confirmDeleteGroup(w *gui.Window, d *Deps) {
 		return
 	}
 	name := st.SelID
+	count := groupBookmarkCount(st, name)
 	confirmIfDirty(w, func() {
+		label := displayGroupName(name)
+		body := label
+		if count > 0 {
+			body = i18n.Tf("bookmark.delete_group_with_bookmarks", label, count)
+		}
 		w.Dialog(gui.DialogCfg{
 			DialogType: gui.DialogConfirm,
 			Title:      i18n.T("bookmark.delete_group"),
-			Body:       displayGroupName(name),
+			Body:       body,
 			OnOkYes: func(win *gui.Window) {
 				if err := d.Bookmarks.DeleteGroup(name); err != nil {
 					toastErrText(win, i18n.Tf("bookmark.delete_group_failed", errText(err)))

@@ -84,3 +84,17 @@ func (r *SSHTunnelRepository) DeleteByBookmark(bookmarkID string) error {
 	}
 	return nil
 }
+
+// DeleteByBookmarkGroup removes every rule bound to bookmarks in a group.
+// Call it before the bookmarks are deleted; the subquery reads their rows.
+func (r *SSHTunnelRepository) DeleteByBookmarkGroup(groupName string) error {
+	query := `DELETE FROM ssh_tunnels
+			  WHERE bookmark_id IN (
+				  SELECT b.bookmark_id FROM bookmarks b
+				  INNER JOIN bookmark_groups g ON b.group_id = g.id
+				  WHERE g.name = ?)`
+	if _, err := r.db.Exec(query, groupName); err != nil {
+		return fmt.Errorf("delete ssh tunnels by group: %w", err)
+	}
+	return nil
+}

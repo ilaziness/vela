@@ -3,7 +3,6 @@ package bookmark
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -661,6 +660,12 @@ func (s *Service) Delete(id string) error {
 		s.logger.Warn("delete bookmark tunnel rules failed",
 			zap.String("bookmark_id", id), zap.Error(err))
 	}
+	// Others may jump through this bookmark; drop those references so they do
+	// not fail later with a missing ProxyJump target.
+	if err := s.db.BookmarkRepo.ClearProxyJumpRefs(id); err != nil {
+		s.logger.Warn("clear proxy jump references failed",
+			zap.String("bookmark_id", id), zap.Error(err))
+	}
 	s.emit()
 	return nil
 }
@@ -771,16 +776,23 @@ func (s *Service) uniqueCopyTitle(base string, groupID int) (string, error) {
 	}
 }
 
+// DeleteGroup 批量删除分组及其下的所有书签（含书签关联的隧道规则）。
 func (s *Service) DeleteGroup(name string) error {
 	if name == DefaultGroupName || name == LegacyDefaultGroupName {
 		return usererr.Coded("bookmark.cannot_delete_default", "Cannot delete the default group")
 	}
-	count, err := s.db.BookmarkRepo.GetGroupBookmarkCount(name)
-	if err != nil {
-		return err
+	// 关联清理必须在书签行删除前执行：它们的子查询依赖书签行。
+	// 清理失败只留下孤儿数据，告警后继续删除。
+	if err := s.db.BookmarkRepo.ClearProxyJumpRefsByGroup(name); err != nil {
+		s.logger.Warn("clear proxy jump references failed",
+			zap.String("group", name), zap.Error(err))
 	}
-	if count > 0 {
-		return usererr.Coded("bookmark.group_not_empty", "Group '%s' still has %s bookmarks and cannot be deleted", name, strconv.Itoa(count))
+	if err := s.db.SSHTunnelRepo.DeleteByBookmarkGroup(name); err != nil {
+		s.logger.Warn("delete group tunnel rules failed",
+			zap.String("group", name), zap.Error(err))
+	}
+	if err := s.db.BookmarkRepo.DeleteBookmarksByGroup(name); err != nil {
+		return err
 	}
 	if err := s.db.BookmarkRepo.DeleteGroup(name); err != nil {
 		return err
