@@ -17,6 +17,7 @@ const connectFormMaxWidth float32 = 480
 // the protocol switcher (no floating card / rounded panel).
 func FormHost(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 	th := gui.CurrentTheme()
+	st := gui.State[app.State](w)
 	reg := ctrl.Registry()
 	entries := reg.Entries()
 	opts := make([]gui.SegmentOption, 0, len(entries))
@@ -70,6 +71,22 @@ func FormHost(w *gui.Window, ctrl *app.Controller, tab *app.Tab) gui.View {
 				},
 			})),
 			body,
+			gui.Row(layout.Flush(gui.ContainerCfg{
+				Sizing: gui.FillFit,
+				HAlign: gui.HAlignCenter,
+				Content: []gui.View{
+					gui.Button(gui.ButtonCfg{
+						ID:       "connect-play-recording-" + tab.ID,
+						Variant:  gui.ButtonGhost,
+						Label:    i18n.T("terminal.play_recording"),
+						Disabled: st.Busy,
+						OnClick: func(ctx gui.EventCtx) {
+							ctx.Consume()
+							ctrl.ShowRecordingPicker(ctx.Window, tab.ID)
+						},
+					}),
+				},
+			})),
 		},
 	}))
 

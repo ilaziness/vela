@@ -351,6 +351,21 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 	}()
 }
 
+// termRuntime snapshots the terminal settings a new Term widget needs, with
+// the zero-value fallbacks required when no settings store is attached (tests).
+func (c *Controller) termRuntime() (config.TerminalConfig, term.NamedTheme) {
+	c.mu.Lock()
+	cfg, theme := c.termCfg, c.termTheme
+	c.mu.Unlock()
+	if cfg.Scrollback <= 0 {
+		cfg.Scrollback = 10000
+	}
+	if theme.Name == "" {
+		theme = defaultTermTheme()
+	}
+	return cfg, theme
+}
+
 // attachSession wires sess into a go-term pane and binds it to the
 // pane slot captured when the dial started; req is how the pane can
 // dial again after a drop.
@@ -360,23 +375,13 @@ func (c *Controller) attachSession(w *gui.Window, st *State, sess termio.Session
 		return err
 	}
 	tabID := tab.ID
-	c.mu.Lock()
-	termCfg := c.termCfg
-	termTheme := c.termTheme
-	c.mu.Unlock()
-	scrollback := termCfg.Scrollback
-	if scrollback <= 0 {
-		scrollback = 10000
-	}
-	if termTheme.Name == "" {
-		termTheme = defaultTermTheme()
-	}
+	termCfg, termTheme := c.termRuntime()
 
 	stream := termstream.New(sess)
 	var tm *term.Term
 	tm, err = term.NewWithStream(w, term.Cfg{
 		NoWindowHandler: true,
-		ScrollbackRows:  scrollback,
+		ScrollbackRows:  termCfg.Scrollback,
 		TextStyle:       fonts.TermStyle(termCfg),
 		Themes:          []term.NamedTheme{termTheme},
 		CursorStyle:     cursorStyleOf(termCfg.CursorStyle),

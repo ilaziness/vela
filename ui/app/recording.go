@@ -58,9 +58,11 @@ func (c *Controller) ToggleSessionRecording(w *gui.Window, sessID string) {
 	})
 }
 
-// recordingPath builds the destination for a new recording:
-// <record_dir or user_data_dir/recordings>/<timestamp>-<sessID>.gtr.
-func (c *Controller) recordingPath(sessID string) (string, error) {
+// recordingDir resolves the directory recordings are written to and listed
+// from: the record_dir setting, else <user_data_dir>/recordings, else the
+// user cache dir when no store is configured (tests). It does not create the
+// directory; callers that write decide whether to MkdirAll.
+func (c *Controller) recordingDir() (string, error) {
 	c.mu.Lock()
 	dir := c.termCfg.RecordDir
 	var storeDir string
@@ -69,18 +71,27 @@ func (c *Controller) recordingPath(sessID string) (string, error) {
 	}
 	c.mu.Unlock()
 
-	if dir == "" {
-		if storeDir != "" {
-			dir = filepath.Join(storeDir, "recordings")
-		} else {
-			// store unset (tests): park under the user cache dir rather
-			// than the process working directory.
-			cacheDir, err := os.UserCacheDir()
-			if err != nil {
-				return "", err
-			}
-			dir = filepath.Join(cacheDir, "vela", "recordings")
-		}
+	if dir != "" {
+		return dir, nil
+	}
+	if storeDir != "" {
+		return filepath.Join(storeDir, "recordings"), nil
+	}
+	// store unset (tests): park under the user cache dir rather than the
+	// process working directory.
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, "vela", "recordings"), nil
+}
+
+// recordingPath builds the destination for a new recording:
+// <record_dir or user_data_dir/recordings>/<timestamp>-<sessID>.gtr.
+func (c *Controller) recordingPath(sessID string) (string, error) {
+	dir, err := c.recordingDir()
+	if err != nil {
+		return "", err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err

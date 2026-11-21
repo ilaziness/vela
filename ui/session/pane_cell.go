@@ -75,7 +75,7 @@ func paneCell(w *gui.Window, ctrl *app.Controller, tab *app.Tab, idx int) gui.Vi
 				X: sh.X, Y: sh.Y, W: sh.Width, H: sh.Height,
 			}
 		},
-		Content: []gui.View{paneMenu(w, ctrl, tab, idx, p.SessID, body)},
+		Content: []gui.View{paneMenu(w, ctrl, tab, idx, p, body)},
 	}))
 }
 
@@ -115,32 +115,42 @@ func emptyPaneView(w *gui.Window, ctrl *app.Controller, tabID string, idx int) g
 }
 
 // paneMenu wraps a pane cell in a right-click context menu. Live
-// terminals get copy/paste/find/record; every cell gets the pane
-// layout actions.
-func paneMenu(w *gui.Window, ctrl *app.Controller, tab *app.Tab, idx int, sessID string, body gui.View) gui.View {
+// terminals get copy/paste/find/record (a replay gets no paste or record);
+// every cell gets the pane layout actions.
+func paneMenu(w *gui.Window, ctrl *app.Controller, tab *app.Tab, idx int, p app.Pane, body gui.View) gui.View {
 	items := paneLayoutMenuItems(ctrl, tab, idx)
-	if sessID != "" {
-		if tm := ctrl.TermFor(sessID); tm != nil {
-			recordText := i18n.T("terminal.start_logging")
-			if tm.Recording() {
-				recordText = i18n.T("terminal.stop_logging")
-			}
-			items = append([]gui.MenuItemCfg{
+	if p.SessID != "" {
+		if tm := ctrl.TermFor(p.SessID); tm != nil {
+			replay := app.IsReplayProtocol(p.Protocol)
+			top := []gui.MenuItemCfg{
 				{ID: "copy", Text: i18n.T("common.copy"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 					tm.RunAction(term.ActionCopy, ctx.Window)
 				}},
-				{ID: "paste", Text: i18n.T("terminal.paste"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			}
+			if !replay {
+				top = append(top, gui.MenuItemCfg{ID: "paste", Text: i18n.T("terminal.paste"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 					tm.RunAction(term.ActionPaste, ctx.Window)
-				}},
-				{ID: "find", Text: i18n.T("terminal.find"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-					tm.RunAction(term.ActionFind, ctx.Window)
-				}},
-				gui.MenuSeparator(),
-				{ID: "record", Text: recordText, Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-					ctrl.ToggleSessionRecording(ctx.Window, sessID)
-				}},
-				gui.MenuSeparator(),
-			}, items...)
+				}})
+			}
+			top = append(top, gui.MenuItemCfg{ID: "find", Text: i18n.T("terminal.find"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+				tm.RunAction(term.ActionFind, ctx.Window)
+			}})
+			if replay {
+				top = append(top, gui.MenuSeparator())
+			} else {
+				recordText := i18n.T("terminal.start_logging")
+				if tm.Recording() {
+					recordText = i18n.T("terminal.stop_logging")
+				}
+				top = append(top,
+					gui.MenuSeparator(),
+					gui.MenuItemCfg{ID: "record", Text: recordText, Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+						ctrl.ToggleSessionRecording(ctx.Window, p.SessID)
+					}},
+					gui.MenuSeparator(),
+				)
+			}
+			items = append(top, items...)
 		}
 	}
 	return gui.ContextMenu(w, gui.ContextMenuCfg{
