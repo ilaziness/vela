@@ -1,0 +1,66 @@
+# https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# GitHub Actions / CI 配置
+[*.yml]
+indent_style = space
+indent_size = 2
+
+# Makefile 必须使用 tab
+[Makefile]
+indent_style = tab
+
+# Shell 脚本（.gitattributes 已强制 *.sh eol=lf）
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# JSON：嵌入式 locale / 配置数据
+[*.json]
+indent_style = space
+indent_size = 2
+
+# TOML：sync-backend 配置示例
+[*.toml]
+indent_style = space
+indent_size = 2
+
+# Markdown 文档：保留行尾空格（双换行），避免破坏硬换行
+[*.md]
+trim_trailing_whitespace = false
+
+# Windows 批处理：CRLF 更稳妥
+[*.bat]
+end_of_line = crlf
+
+# LLM prompt 文件：行尾空格可能有语义，不裁剪
+[*.prompt]
+trim_trailing_whitespace = false
+
+# 二进制资源：全部 unset，编辑器不得做任何文本规整
+[*.{png,ico,icns,jpg,jpeg,gif,webp,bmp,svg,wasm,zip,gz,7z,pdf,db,sqlite,sqlite3,ttf,otf,woff,woff2,eot}]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+# vendored 上游 go-term：非 Go 文件保持上游原样（含 testdata golden 夹具），
+# 必须放在 [*.{go,mod,sum}] 之前，使上游 Go 文件仍命中后面的 tab 规则
+[third_party/**]
+indent_style = unset
+trim_trailing_whitespace = unset
+insert_final_newline = unset
+
+# Go 源码：gofmt 强制 tab，编辑器不应覆盖；放最后以覆盖 third_party 的 unset
+[*.{go,mod,sum}]
+indent_style = tab
+indent_size = 4
+trim_trailing_whitespace = false
