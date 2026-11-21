@@ -19,52 +19,49 @@ func SidePanel(w *gui.Window, ctrl *app.Controller) gui.View {
 		Sizing: gui.FixedFill,
 		Width:  sidePanelWidth,
 		Color:  th.ColorPanel,
+		// 左右用窄内边距：搜索框有 160 的最小宽度下限，
+		// 12px 会让这一行挤不下，右侧边距被顶小。
+		Padding: gui.NewPadding(10, 8, 10, 8),
+		Spacing: gui.SpacingSmall,
 		Content: []gui.View{
-			gui.Column(flush(gui.ContainerCfg{
-				Sizing:  gui.FillFill,
-				Padding: gui.NewPadding(10, 12, 10, 12),
+			gui.Row(flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
 				Spacing: gui.SpacingSmall,
+				VAlign:  gui.VAlignMiddle,
 				Content: []gui.View{
-					gui.Row(flush(gui.ContainerCfg{
-						Sizing:  gui.FillFit,
-						Spacing: gui.SpacingSmall,
-						VAlign:  gui.VAlignMiddle,
+					gui.Button(gui.ButtonCfg{
+						ID: "qc-refresh", Variant: gui.ButtonSecondary, Sizing: gui.FitFit,
+						Disabled:  st.Busy,
+						A11YLabel: i18n.T("common.refresh"),
 						Content: []gui.View{
-							gui.Button(gui.ButtonCfg{
-								ID: "qc-refresh", Variant: gui.ButtonSecondary, Sizing: gui.FitFit,
-								Disabled:  st.Busy,
-								A11YLabel: i18n.T("common.refresh"),
-								Content: []gui.View{
-									gui.Text(gui.TextCfg{
-										Text:      gui.IconSync,
-										TextStyle: th.TextStyleIconSmall,
-									}),
-								},
-								OnClick: func(ctx gui.EventCtx) {
-									ctx.Consume()
-									if gui.State[app.State](ctx.Window).Busy {
-										return
-									}
-									ctrl.ReloadBookmarkGroups(ctx.Window)
-								},
-							}),
-							gui.Input(gui.InputCfg{
-								ID:          "qc-search",
-								Placeholder: i18n.T("bookmark.search_connect_placeholder"),
-								Text:        st.SearchQuery,
-								Sizing:      gui.FillFit,
-								OnTextChanged: func(v string, ctx gui.EventCtx) {
-									gui.State[app.State](ctx.Window).SearchQuery = v
-									ctx.Consume()
-								},
+							gui.Text(gui.TextCfg{
+								Text:      gui.IconSync,
+								TextStyle: th.TextStyleIconSmall,
 							}),
 						},
-					})),
-					bookmarks.ConnectTree(st.BookmarkGroups, st.SearchQuery, func(id string) {
-						ctrl.ConnectBookmark(w, id)
+						OnClick: func(ctx gui.EventCtx) {
+							ctx.Consume()
+							if gui.State[app.State](ctx.Window).Busy {
+								return
+							}
+							ctrl.ReloadBookmarkGroups(ctx.Window)
+						},
+					}),
+					gui.Input(gui.InputCfg{
+						ID:          "qc-search",
+						Placeholder: i18n.T("bookmark.search_connect_placeholder"),
+						Text:        st.SearchQuery,
+						Sizing:      gui.FillFit,
+						OnTextChanged: func(v string, ctx gui.EventCtx) {
+							gui.State[app.State](ctx.Window).SearchQuery = v
+							ctx.Consume()
+						},
 					}),
 				},
 			})),
+			bookmarks.ConnectTree(st.BookmarkGroups, st.SearchQuery, func(id string) {
+				ctrl.ConnectBookmark(w, id)
+			}),
 		},
 	}))
 }
