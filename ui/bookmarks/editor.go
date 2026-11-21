@@ -50,7 +50,7 @@ func editor(w *gui.Window, d *Deps) gui.View {
 	case tabConnection:
 		body = tabConnectionBody(st)
 	case tabAuth:
-		body = tabAuthBody(st)
+		body = tabAuthBody(d, st)
 	case tabSession:
 		body = tabSessionBody(st)
 	default:
@@ -668,7 +668,7 @@ func serialFields(st *State) []gui.View {
 	}
 }
 
-func tabAuthBody(st *State) gui.View {
+func tabAuthBody(d *Deps, st *State) gui.View {
 	b := &st.Draft
 	keyOpts := []gui.SelectOption{{Label: i18n.T("bookmark.field.app_key_none"), Value: ""}}
 	for _, k := range st.Keys {
@@ -732,11 +732,13 @@ func tabAuthBody(st *State) gui.View {
 			i18n.T("bookmark.field.key_file_placeholder"), i18n.T("common.select_file"), func(ctx gui.EventCtx) {
 				ctx.Consume()
 				ctx.Window.NativeOpenDialog(gui.NativeOpenDialogCfg{
-					Title: i18n.T("bookmark.field.key_file"),
+					Title:    i18n.T("bookmark.field.key_file"),
+					StartDir: d.Store.LastDialogDir(),
 					OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
 						if res.Status != gui.DialogOK || len(res.Paths) == 0 {
 							return
 						}
+						d.Store.RememberDialogPath(res.Paths[0].Path)
 						s := gui.State[State](win)
 						s.Draft.PrivateKey = res.Paths[0].Path
 						s.Draft.SshKeyID = ""
@@ -760,11 +762,13 @@ func tabAuthBody(st *State) gui.View {
 			i18n.T("bookmark.field.cert_file_placeholder"), i18n.T("common.select_file"), func(ctx gui.EventCtx) {
 				ctx.Consume()
 				ctx.Window.NativeOpenDialog(gui.NativeOpenDialogCfg{
-					Title: i18n.T("bookmark.select_cert"),
+					Title:    i18n.T("bookmark.select_cert"),
+					StartDir: d.Store.LastDialogDir(),
 					OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
 						if res.Status != gui.DialogOK || len(res.Paths) == 0 {
 							return
 						}
+						d.Store.RememberDialogPath(res.Paths[0].Path)
 						s := gui.State[State](win)
 						s.Draft.Certificate = res.Paths[0].Path
 						s.Dirty = true

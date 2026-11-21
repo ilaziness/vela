@@ -137,7 +137,9 @@ func restoreBackup(backupDir, dstDir string) error {
 	return os.Rename(backupDir, dstDir)
 }
 
-// Download downloads a backup zip, verifies the payload hash, then decrypts over local data.
+// Download downloads a backup zip, verifies the payload hash, then
+// replaces the whole local data directory with the backup contents.
+// This is a full replacement, not a merge-over-existing restore.
 func (sm *SyncManager) Download(dstDir, name, password string, db *database.Database) error {
 	if sm.store == nil {
 		return fmt.Errorf("sync not configured")
@@ -206,6 +208,10 @@ func (sm *SyncManager) Download(dstDir, name, password string, db *database.Data
 		db.Close()
 	}
 
+	// Restore replaces the whole user data directory: it is not a
+	// merge-over-existing restore. Files the pack intentionally leaves
+	// out (e.g. machine-local local-state.toml) are therefore dropped
+	// along with the swapped-out directory.
 	backupDir := dstDir + ".backup"
 	if _, err := os.Stat(dstDir); err == nil {
 		if err := os.RemoveAll(backupDir); err != nil {

@@ -213,6 +213,27 @@ func (c *Controller) initialLocalDir() string {
 	return ""
 }
 
+// lastDialogDir returns the remembered native-dialog directory, if any.
+func (c *Controller) lastDialogDir() string {
+	c.mu.Lock()
+	store := c.store
+	c.mu.Unlock()
+	if store == nil {
+		return ""
+	}
+	return store.LastDialogDir()
+}
+
+// rememberDialogPath persists the directory of a picked dialog path.
+func (c *Controller) rememberDialogPath(selected string) {
+	c.mu.Lock()
+	store := c.store
+	c.mu.Unlock()
+	if store != nil {
+		store.RememberDialogPath(selected)
+	}
+}
+
 // --- pane refresh ---
 
 // refreshRemote lists a remote dir on a goroutine and merges the
@@ -647,6 +668,9 @@ func (c *Controller) SFTPUploadFileDialog(w *gui.Window, sessID string) {
 	if s != nil {
 		startDir = s.LocalDir
 	}
+	if startDir == "" {
+		startDir = c.lastDialogDir()
+	}
 	w.NativeOpenDialog(gui.NativeOpenDialogCfg{
 		Title:         i18n.T("sftp.upload_file"),
 		StartDir:      startDir,
@@ -655,6 +679,7 @@ func (c *Controller) SFTPUploadFileDialog(w *gui.Window, sessID string) {
 			if res.Status != gui.DialogOK || len(res.PathStrings()) == 0 {
 				return
 			}
+			c.rememberDialogPath(res.PathStrings()[0])
 			c.SFTPUploadLocalPaths(w, sessID, res.PathStrings())
 		},
 	})
@@ -668,6 +693,9 @@ func (c *Controller) SFTPUploadFolderDialog(w *gui.Window, sessID string) {
 	if s != nil {
 		startDir = s.LocalDir
 	}
+	if startDir == "" {
+		startDir = c.lastDialogDir()
+	}
 	w.NativeFolderDialog(gui.NativeFolderDialogCfg{
 		Title:    i18n.T("sftp.upload_folder"),
 		StartDir: startDir,
@@ -676,6 +704,7 @@ func (c *Controller) SFTPUploadFolderDialog(w *gui.Window, sessID string) {
 			if res.Status != gui.DialogOK || len(paths) == 0 {
 				return
 			}
+			c.rememberDialogPath(paths[0])
 			c.SFTPUploadLocalPaths(w, sessID, paths)
 		},
 	})

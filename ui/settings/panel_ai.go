@@ -163,11 +163,13 @@ func aiToolsBody(d *Deps, st *State) gui.View {
 		OnClick: func(ctx gui.EventCtx) {
 			ctx.Consume()
 			ctx.Window.NativeFolderDialog(gui.NativeFolderDialogCfg{
-				Title: i18n.T("settings.ai.filesystem_title"),
+				Title:    i18n.T("settings.ai.filesystem_title"),
+				StartDir: d.Store.LastDialogDir(),
 				OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
 					if res.Status != gui.DialogOK || len(res.Paths) == 0 {
 						return
 					}
+					d.Store.RememberDialogPath(res.Paths[0].Path)
 					if err := addAllowedDir(gui.State[State](win), res.Paths[0].Path); err != nil {
 						toastErr(win, err)
 					}

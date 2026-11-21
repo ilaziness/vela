@@ -580,7 +580,8 @@ func runImport(w *gui.Window, d *Deps, groupName string) {
 	st.ImportError = ""
 	gen := st.ImportGen
 	w.NativeOpenDialog(gui.NativeOpenDialogCfg{
-		Title: i18n.T("bookmark.import_dialog_title"),
+		Title:    i18n.T("bookmark.import_dialog_title"),
+		StartDir: d.Store.LastDialogDir(),
 		OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
 			s := gui.State[State](win)
 			if s.ImportGen != gen {
@@ -591,6 +592,7 @@ func runImport(w *gui.Window, d *Deps, groupName string) {
 				s.ImportBusy = false
 				return
 			}
+			d.Store.RememberDialogPath(res.Paths[0].Path)
 			path := res.Paths[0].Path
 			go func() {
 				result, err := d.Bookmarks.ImportOpenSSH(path, groupName)
@@ -712,12 +714,14 @@ func runExport(w *gui.Window, d *Deps, groupName string) {
 			}
 			win.NativeSaveDialog(gui.NativeSaveDialogCfg{
 				Title:            i18n.T("bookmark.export_dialog_title"),
+				StartDir:         d.Store.LastDialogDir(),
 				DefaultName:      "config",
 				ConfirmOverwrite: true,
 				OnDone: func(res gui.NativeDialogResult, w2 *gui.Window) {
 					if res.Status != gui.DialogOK || len(res.Paths) == 0 {
 						return
 					}
+					d.Store.RememberDialogPath(res.Paths[0].Path)
 					path := res.Paths[0].Path
 					if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 						toastErrText(w2, i18n.Tf("bookmark.export_failed", err.Error()))

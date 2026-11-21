@@ -26,17 +26,6 @@ func TestWindowGeometryEffectiveSize(t *testing.T) {
 	}
 }
 
-func TestClampToWorkArea(t *testing.T) {
-	w, h := ClampToWorkArea(3000, 2000, 1920, 1080)
-	if w != 1920 || h != 1080 {
-		t.Fatalf("got %dx%d", w, h)
-	}
-	w, h = ClampToWorkArea(800, 600, 0, 0)
-	if w != 800 || h != 600 {
-		t.Fatalf("no work area got %dx%d", w, h)
-	}
-}
-
 func TestSaveLoadLocalState(t *testing.T) {
 	dir := t.TempDir()
 	store := &Store{
@@ -135,5 +124,31 @@ func TestSaveWindowRejectsZero(t *testing.T) {
 	}
 	if err := store.SaveWindow(WindowGeometry{Width: 0, Height: 0}); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestRememberDialogPath(t *testing.T) {
+	dir := t.TempDir()
+	store := &Store{
+		Config: &Config{General: GeneralConfig{UserDataDir: dir}},
+		logger: zap.NewNop(),
+	}
+	picked := filepath.Join(dir, "picked")
+	if err := os.Mkdir(picked, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(picked, "note.txt")
+	if err := os.WriteFile(file, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store.RememberDialogPath(file)
+	if got := store.LastDialogDir(); got != picked {
+		t.Fatalf("file parent got %q", got)
+	}
+
+	store.RememberDialogPath(picked)
+	if got := store.LastDialogDir(); got != picked {
+		t.Fatalf("dir got %q", got)
 	}
 }

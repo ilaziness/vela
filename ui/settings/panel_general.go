@@ -75,6 +75,9 @@ func panelGeneral(d *Deps, st *State) gui.View {
 			func(ctx gui.EventCtx) {
 				ctx.Consume()
 				start := gui.State[State](ctx.Window).General.UserDataDir
+				if start == "" {
+					start = d.Store.LastDialogDir()
+				}
 				ctx.Window.NativeFolderDialog(gui.NativeFolderDialogCfg{
 					Title:    i18n.T("settings.general.user_data_dir"),
 					StartDir: start,
@@ -82,6 +85,7 @@ func panelGeneral(d *Deps, st *State) gui.View {
 						if res.Status != gui.DialogOK || len(res.Paths) == 0 {
 							return
 						}
+						d.Store.RememberDialogPath(res.Paths[0].Path)
 						gui.State[State](win).General.UserDataDir = res.Paths[0].Path
 					},
 				})

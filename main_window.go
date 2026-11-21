@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/tools"
 	"github.com/ilaziness/vela/internal/vaultcheck"
 	"github.com/ilaziness/vela/ui/app"
@@ -29,6 +30,47 @@ type windowDeps struct {
 	Bookmarks *bookmarks.Deps
 	Tools     *toolsui.Deps
 	Backup    *backup.Deps
+}
+
+// windowStateSaver persists the main window's normal size and maximised
+// flag. Saves are debounced so a resize drag writes once at the end.
+type windowStateSaver struct {
+	store  *config.Store
+	logger *zap.Logger
+	timer  *time.Timer
+}
+
+const windowStateDebounce = 400 * time.Millisecond
+
+// schedule saves after the resize burst ends. Both callers run on the
+// UI thread, so the timer field needs no lock.
+func (s *windowStateSaver) schedule(w *gui.Window) {
+	if s.timer != nil {
+		s.timer.Stop()
+	}
+	s.timer = time.AfterFunc(windowStateDebounce, func() {
+		// WindowSize/Maximize getters belong to the UI thread.
+		w.QueueCommand(func(win *gui.Window) { s.save(win) })
+	})
+}
+
+// flush stops a pending save and writes the current geometry now.
+func (s *windowStateSaver) flush(w *gui.Window) {
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	s.save(w)
+}
+
+func (s *windowStateSaver) save(w *gui.Window) {
+	st := config.WindowGeometry{Maximised: w.IsMaximized() || w.IsFullscreen()}
+	if !st.Maximised {
+		st.Width, st.Height = w.WindowSize()
+	}
+	if err := s.store.SaveWindow(st); err != nil {
+		s.logger.Debug("save window state failed", zap.Error(err))
+	}
 }
 
 func newWindowDeps(rt *app.Runtime, guiApp *gui.App) *windowDeps {
@@ -81,10 +123,13 @@ func newWindowDeps(rt *app.Runtime, guiApp *gui.App) *windowDeps {
 }
 
 func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
+	saved := rt.Store.Window()
+	width, height := saved.EffectiveSize()
+	saver := &windowStateSaver{store: rt.Store, logger: rt.Logger}
 	return gui.NewWindow(gui.WindowCfg{
 		Title:       "Vela",
-		Width:       1280,
-		Height:      800,
+		Width:       width,
+		Height:      height,
 		IconPNG:     appIconPNG,
 		State:       &app.State{},
 		Decorations: chrome.Decoration(rt.Store.Config.General.Frameless),
@@ -92,12 +137,18 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 			rt.BindWindow(w)
 			installKeybindCommands(w, rt)
 			watchKeybindChanges(w, rt)
+			if saved.Maximised {
+				w.Maximize()
+			}
 			frameless := rt.Store.Config.General.Frameless
 			gui.State[app.State](w).Frameless = frameless
-			if frameless {
+			if frameless && !saved.Maximised {
 				chrome.CenterOnScreen(w)
 			}
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
+				if e.Type == gui.EventResized {
+					saver.schedule(w)
+				}
 				st := gui.State[app.State](w)
 				if !buildinfo.IsRelease() && (e.Type == gui.EventChar || e.Type == gui.EventKeyDown) {
 					fields := []zap.Field{
@@ -154,12 +205,14 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 				Probe:       probe,
 				OnUnlocked:  func(*gui.Window) { mountShell() },
 				OnQuit: func(win *gui.Window) {
+					saver.flush(win)
 					rt.Ctrl.Shutdown()
 					win.Close()
 				},
 			})
 		},
 		OnCloseRequest: func(w *gui.Window) {
+			saver.flush(w)
 			rt.Ctrl.Shutdown()
 			w.Close()
 		},

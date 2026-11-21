@@ -295,12 +295,14 @@ func exportKey(w *gui.Window, d *Deps, k sshkey.Info) {
 func pickExportPath(w *gui.Window, d *Deps, k sshkey.Info, passphrase string) {
 	w.NativeSaveDialog(gui.NativeSaveDialogCfg{
 		Title:            i18n.T("settings.keys.export_private_title"),
+		StartDir:         d.Store.LastDialogDir(),
 		DefaultName:      sshkey.DefaultFileName(k.Algorithm),
 		ConfirmOverwrite: true,
 		OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
 			if res.Status != gui.DialogOK || len(res.Paths) == 0 {
 				return
 			}
+			d.Store.RememberDialogPath(res.Paths[0].Path)
 			path := res.Paths[0].Path
 			go func() {
 				pem, err := d.Keys.PrivatePEM(k.ID)
