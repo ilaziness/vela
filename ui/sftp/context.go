@@ -44,7 +44,9 @@ func remoteItemMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e sftp
 	}
 	items = append(items,
 		gui.MenuItemCfg{ID: "download", Text: i18n.T("sftp.download"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-			ctrl.SFTPDownloadRemotePaths(ctx.Window, sessID, targetPaths())
+			// The row menu asks for a target folder; the transfer column
+			// button keeps downloading into the local pane dir.
+			ctrl.SFTPDownloadRemotePathsDialog(ctx.Window, sessID, targetPaths())
 		}},
 		gui.MenuItemCfg{ID: "copy_path", Text: i18n.T("sftp.copy_path"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 			copyPaths(ctx, targetPaths())

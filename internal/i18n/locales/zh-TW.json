@@ -665,6 +665,7 @@
   "sftp.chmod": "chmod",
   "sftp.chmod_example": "例如 755",
   "sftp.chmod_title": "修改權限",
+  "sftp.choose_save_dir": "選擇下載目錄",
   "sftp.chown": "chown",
   "sftp.chown_requires_privilege": "變更「%s」擁有者可能需要更高權限",
   "sftp.chown_title": "變更擁有者",

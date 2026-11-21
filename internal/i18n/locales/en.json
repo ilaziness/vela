@@ -665,6 +665,7 @@
   "sftp.chmod": "Chmod",
   "sftp.chmod_example": "e.g. 755",
   "sftp.chmod_title": "Change permissions",
+  "sftp.choose_save_dir": "Choose download folder",
   "sftp.chown": "Chown",
   "sftp.chown_requires_privilege": "Changing owner of “%s” may require elevated privileges",
   "sftp.chown_title": "Change owner",

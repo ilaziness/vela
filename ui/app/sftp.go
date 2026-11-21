@@ -600,6 +600,49 @@ func (c *Controller) enqueueUpload(w *gui.Window, sessID string, localPaths []st
 // SFTPDownloadRemotePaths enqueues downloads of remote paths into the
 // local pane dir, prompting on conflicts.
 func (c *Controller) SFTPDownloadRemotePaths(w *gui.Window, sessID string, remotePaths []string) {
+	st := gui.State[State](w)
+	s := st.SFTP[sessID]
+	if s == nil || len(remotePaths) == 0 {
+		return
+	}
+	localDir := s.LocalDir
+	if localDir == "" {
+		localDir = c.initialLocalDir()
+	}
+	c.downloadRemotePathsTo(w, sessID, remotePaths, localDir)
+}
+
+// SFTPDownloadRemotePathsDialog asks for a target folder, then downloads
+// the remote paths there. The transfer column keeps using the local pane
+// dir via SFTPDownloadRemotePaths.
+func (c *Controller) SFTPDownloadRemotePathsDialog(w *gui.Window, sessID string, remotePaths []string) {
+	st := gui.State[State](w)
+	s := st.SFTP[sessID]
+	if s == nil || len(remotePaths) == 0 {
+		return
+	}
+	startDir := s.LocalDir
+	if startDir == "" {
+		startDir = c.lastDialogDir()
+	}
+	paths := append([]string(nil), remotePaths...)
+	w.NativeFolderDialog(gui.NativeFolderDialogCfg{
+		Title:    i18n.T("sftp.choose_save_dir"),
+		StartDir: startDir,
+		OnDone: func(res gui.NativeDialogResult, w *gui.Window) {
+			dirs := res.PathStrings()
+			if res.Status != gui.DialogOK || len(dirs) == 0 {
+				return
+			}
+			c.rememberDialogPath(dirs[0])
+			c.downloadRemotePathsTo(w, sessID, paths, dirs[0])
+		},
+	})
+}
+
+// downloadRemotePathsTo enqueues downloads of remote paths into an
+// explicit local dir, prompting on conflicts.
+func (c *Controller) downloadRemotePathsTo(w *gui.Window, sessID string, remotePaths []string, localDir string) {
 	mgr := c.SFTPManager()
 	st := gui.State[State](w)
 	s := st.SFTP[sessID]
@@ -609,10 +652,6 @@ func (c *Controller) SFTPDownloadRemotePaths(w *gui.Window, sessID string, remot
 	if transfersBusy(s) {
 		c.toast(gui.ToastInfo, "", i18n.T("sftp.please_wait"))
 		return
-	}
-	localDir := s.LocalDir
-	if localDir == "" {
-		localDir = c.initialLocalDir()
 	}
 	go func() {
 		conflicts, err := mgr.DownloadConflicts(sessID, localDir, remotePaths)
