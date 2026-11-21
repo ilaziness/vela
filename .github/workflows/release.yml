@@ -19,16 +19,22 @@ jobs:
           - goos: windows
             goarch: amd64
             runs-on: windows-latest
+            cgo: "0"
+            ldflags_extra: "-H windowsgui"
             artifact: Vela.exe
             archive: Vela_${{ github.ref_name }}_windows_amd64.zip
           - goos: linux
             goarch: amd64
             runs-on: ubuntu-latest
+            cgo: "0"
+            ldflags_extra: ""
             artifact: Vela
             archive: Vela_${{ github.ref_name }}_linux_amd64.tar.gz
           - goos: darwin
             goarch: arm64
             runs-on: macos-latest
+            cgo: "1"
+            ldflags_extra: ""
             artifact: Vela
             archive: Vela_${{ github.ref_name }}_darwin_arm64.tar.gz
     steps:
@@ -45,10 +51,11 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
         shell: bash
         run: |
           mkdir -p bin
-          go build -trimpath -ldflags "-s -w -X github.com/ilaziness/vela/internal/buildinfo.Version=${{ github.ref_name }} -X github.com/ilaziness/vela/internal/buildinfo.Mode=release -X github.com/ilaziness/vela/internal/buildinfo.GitInfo=$(git rev-parse --short=12 HEAD) -X github.com/ilaziness/vela/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "bin/${{ matrix.artifact }}" .
+          go build -tags prod -trimpath -ldflags "-s -w ${{ matrix.ldflags_extra }} -X github.com/ilaziness/vela/internal/buildinfo.Version=${{ github.ref_name }} -X github.com/ilaziness/vela/internal/buildinfo.Mode=release -X github.com/ilaziness/vela/internal/buildinfo.GitInfo=$(git rev-parse --short=12 HEAD) -X github.com/ilaziness/vela/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "bin/${{ matrix.artifact }}" .
 
       - name: Archive (zip)
         if: matrix.goos == 'windows'
@@ -75,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -86,7 +93,7 @@ jobs:
           sha256sum Vela_* > SHA256SUMS
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/**
           generate_release_notes: true
