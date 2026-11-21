@@ -131,6 +131,27 @@ Host target
 	}
 }
 
+func TestStandardDirectivesDoNotWarn(t *testing.T) {
+	// Standard OpenSSH options without a bookmark equivalent are skipped
+	// quietly; only functionality that cannot be imported should warn.
+	src := `
+Host github.com
+  HostName github.com
+  PreferredAuthentications publickey
+  IdentitiesOnly yes
+  HostKeyAlgorithms ssh-ed25519
+  PubkeyAcceptedKeyTypes ssh-ed25519
+  ServerAliveInterval 30
+`
+	_, warns, err := Parse(strings.NewReader(src), ".", "test", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Fatalf("warnings = %v", warns)
+	}
+}
+
 func TestWriteRoundTrip(t *testing.T) {
 	yes := true
 	entries := []HostEntry{{

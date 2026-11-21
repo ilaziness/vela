@@ -2,6 +2,7 @@ package bookmarks
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -10,6 +11,23 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/usererr"
 )
+
+// sshDialogStartDir 返回 SSH 配置导入/导出对话框的起始目录：
+// 优先使用记忆目录；否则在 ~/.ssh 存在时用它；都不满足则返回空走系统默认目录。
+func sshDialogStartDir(d *Deps) string {
+	if dir := d.Store.LastDialogDir(); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".ssh")
+	if st, err := os.Stat(dir); err == nil && st.IsDir() {
+		return dir
+	}
+	return ""
+}
 
 func reload(w *gui.Window, d *Deps) {
 	st := gui.State[State](w)
@@ -587,7 +605,7 @@ func runImport(w *gui.Window, d *Deps, groupName string) {
 	gen := st.ImportGen
 	w.NativeOpenDialog(gui.NativeOpenDialogCfg{
 		Title:    i18n.T("bookmark.import_dialog_title"),
-		StartDir: d.Store.LastDialogDir(),
+		StartDir: sshDialogStartDir(d),
 		OnDone: func(res gui.NativeDialogResult, win *gui.Window) {
 			s := gui.State[State](win)
 			if s.ImportGen != gen {
@@ -720,7 +738,7 @@ func runExport(w *gui.Window, d *Deps, groupName string) {
 			}
 			win.NativeSaveDialog(gui.NativeSaveDialogCfg{
 				Title:            i18n.T("bookmark.export_dialog_title"),
-				StartDir:         d.Store.LastDialogDir(),
+				StartDir:         sshDialogStartDir(d),
 				DefaultName:      "config",
 				ConfirmOverwrite: true,
 				OnDone: func(res gui.NativeDialogResult, w2 *gui.Window) {

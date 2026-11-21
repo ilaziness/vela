@@ -97,8 +97,8 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	idToTitle := map[string]string{}
-	var bookmarks []Bookmark
+	byID := map[string]Bookmark{}
+	var order []string
 	for _, g := range groups {
 		if g == nil {
 			continue
@@ -107,22 +107,48 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 			continue
 		}
 		for _, b := range g.Bookmarks {
-			idToTitle[b.ID] = b.Title
-			bookmarks = append(bookmarks, b)
+			byID[b.ID] = b
+			order = append(order, b.ID)
 		}
 	}
-	if len(bookmarks) == 0 {
+	// Pull in jump hosts outside the exported selection so every ProxyJump
+	// alias has a matching Host block in the generated file.
+	for i := 0; i < len(order); i++ {
+		id := byID[order[i]].ProxyJumpID
+		for id != "" {
+			if _, ok := byID[id]; ok {
+				break
+			}
+			jump, err := s.Get(id)
+			if err != nil || !exportableSSH(*jump) {
+				break
+			}
+			byID[id] = *jump
+			order = append(order, id)
+			warnings = append(warnings, fmt.Sprintf("jump host %q included because it is referenced by an exported bookmark", jump.Title))
+			id = jump.ProxyJumpID
+		}
+	}
+	if len(order) == 0 {
 		return "", []string{"no bookmarks to export"}, nil
 	}
 
-	entries := make([]sshconfig.HostEntry, 0, len(bookmarks))
-	for _, b := range bookmarks {
-		if proto, ok := termio.ParseProtocol(b.Protocol); ok && proto != termio.ProtocolSSH {
+	aliases, aliasWarnings := exportAliases(order, byID)
+	warnings = append(warnings, aliasWarnings...)
+
+	entries := make([]sshconfig.HostEntry, 0, len(order))
+	for _, id := range order {
+		b := byID[id]
+		if !exportableSSH(b) {
 			warnings = append(warnings, fmt.Sprintf("%s: skipped non-SSH bookmark", b.Title))
 			continue
 		}
+		alias := aliases[id]
+		if alias == "" {
+			continue
+		}
 		e := sshconfig.HostEntry{
-			Alias:         b.Title,
+			Alias:         alias,
 			HostName:      b.Host,
 			User:          b.User,
 			Port:          b.Port,
@@ -141,7 +167,7 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 			e.ForwardAgent = &yes
 		}
 		if b.ProxyJumpID != "" {
-			if chain := s.exportProxyJumpChain(b.ProxyJumpID, idToTitle); chain != "" {
+			if chain := exportProxyJumpChain(b.ProxyJumpID, byID, aliases); chain != "" {
 				e.ProxyJump = chain
 			} else {
 				warnings = append(warnings, fmt.Sprintf("%s: jump bookmark missing; ProxyJump not exported", b.Title))
@@ -170,30 +196,60 @@ func (s *Service) ExportOpenSSH(groupName string) (string, []string, error) {
 	return buf.String(), warnings, nil
 }
 
-func (s *Service) exportProxyJumpChain(jumpID string, idToTitle map[string]string) string {
+// exportableSSH reports whether b becomes a Host block. Unknown protocol
+// strings are treated as SSH for compatibility with older rows.
+func exportableSSH(b Bookmark) bool {
+	proto, ok := termio.ParseProtocol(b.Protocol)
+	return !ok || proto == termio.ProtocolSSH
+}
+
+// exportAliases assigns a unique Host alias per exported bookmark. Titles are
+// only unique per group, so exporting several groups may collide; suffix the
+// duplicates instead of emitting ambiguous Host blocks.
+func exportAliases(order []string, byID map[string]Bookmark) (map[string]string, []string) {
+	aliases := make(map[string]string, len(order))
+	used := make(map[string]bool, len(order))
+	var warnings []string
+	for _, id := range order {
+		b := byID[id]
+		if !exportableSSH(b) {
+			continue
+		}
+		base := strings.TrimSpace(b.Title)
+		if base == "" {
+			base = strings.TrimSpace(b.Host)
+		}
+		if base == "" {
+			continue
+		}
+		alias := base
+		for i := 2; used[alias]; i++ {
+			alias = fmt.Sprintf("%s-%d", base, i)
+		}
+		if alias != base {
+			warnings = append(warnings, fmt.Sprintf("%s: host alias already used; exported as %q", base, alias))
+		}
+		used[alias] = true
+		aliases[id] = alias
+	}
+	return aliases, warnings
+}
+
+func exportProxyJumpChain(jumpID string, byID map[string]Bookmark, aliases map[string]string) string {
 	// vela: target.proxy_jump_id = nearest jump. OpenSSH ProxyJump a,b = client→a→b→target.
 	var hops []string
 	seen := map[string]bool{}
-	id := jumpID
-	for id != "" && !seen[id] {
+	for id := jumpID; id != "" && !seen[id]; {
 		seen[id] = true
-		b, err := s.Get(id)
-		if err != nil {
-			if t := idToTitle[id]; t != "" {
-				hops = append(hops, t)
-			}
+		alias := aliases[id]
+		if alias == "" {
 			break
 		}
-		title := idToTitle[id]
-		if title == "" {
-			title = b.Title
-			idToTitle[id] = title
-		}
-		hops = append(hops, title)
-		id = b.ProxyJumpID
+		hops = append(hops, alias)
 		if len(hops) > 5 {
 			break
 		}
+		id = byID[id].ProxyJumpID
 	}
 	for i, j := 0, len(hops)-1; i < j; i, j = i+1, j-1 {
 		hops[i], hops[j] = hops[j], hops[i]
