@@ -60,10 +60,6 @@ _直观的文件管理界面_
 ![书签](screenshots/bookmark.png)
 _服务器连接配置管理_
 
-### 命令库
-
-![命令库](screenshots/command.png)
-
 ### AI 助手
 
 ![AI 助手](screenshots/ai.png)
