@@ -130,3 +130,4 @@ jobs:
         with:
           files: dist/**
           generate_release_notes: true
+          draft: true
