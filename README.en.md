@@ -21,35 +21,20 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 
 ## ✨ Features
 
-**Connection & auth**
-
-- SSH login with password, private key, certificate, 2FA, or SSH Agent
-- Local serial consoles in the same terminal tabs as SSH
+- Support for SSH and serial protocols
+- SSH login: password, private key, certificate, 2FA, SSH Agent
 - Jump hosts, HTTP / SOCKS proxies, and local / remote / dynamic port forwarding
-- Generate keys in-app; protect secrets with a master password
-- Keepalive and manual reconnect; confirm and manage host keys
+- In-app key management; master password protects secrets and private keys
 - Import and export OpenSSH config
-
-**Terminal**
-
-- Multiple tabs shared by SSH and serial sessions
-- In-terminal search, encodings, and session log
-- Zmodem (rz / sz) file transfer on SSH sessions
-- Command history hints as you type
-
-**SFTP & bookmarks**
-
-- Dual-pane local and remote files, with drag-and-drop transfer
-- Resume and retry; unfinished jobs are still there next time
-- Edit remote files in place; change permissions and ownership
-- Bookmark groups for SSH hosts and serial devices
-
-**Workflow**
-
-- Command library: send a snippet to many sessions at once
-- Sidebar AI: advice for the current session, remote exec after approval; local files, web search, MCP, and Skills
-- Encrypt backups on the machine, then store them on your own server, WebDAV, or S3
-- English, Simplified Chinese, and Traditional Chinese; light / dark / eye-care themes; automatic updates
+- Multi-tab terminal, in-terminal search, terminal recording and playback
+- SSH sessions support Zmodem (rz / sz) file transfer
+- Dual-pane SFTP panel
+- Bookmark management
+- Backup & restore: master password encryption and compression, upload to self-hosted storage, WebDAV, or S3
+- AI assistant: local file read/write, web search, remote command execution, MCP and Skills
+- Multi-language: English, Simplified Chinese, Traditional Chinese
+- Multiple themes available for app and terminal
+- Automatic update check, download, and installation
 
 ---
 
