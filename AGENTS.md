@@ -158,14 +158,16 @@
 
 ```bash
 # 编译（-s -w 去掉符号表/调试信息，减小体积）
-go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe .
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe . #windows
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela . #linux
 # 或
 make build
 
 # 修改后验证
 go fmt ./...
 golangci-lint run
-go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe .
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe . #windows
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela . #linux
 ```
 
 ### UI 无头验证（改界面必须出图 + 量几何）
