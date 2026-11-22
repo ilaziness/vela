@@ -36,10 +36,10 @@ jobs:
             cgo: "1"
             ldflags_extra: ""
             artifact: Vela
-            archive: Vela_${{ github.ref_name }}_darwin_arm64.tar.gz
+            archive: Vela_${{ github.ref_name }}_darwin_arm64.zip
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Setup Go
         uses: actions/setup-go@v7
@@ -57,6 +57,29 @@ jobs:
           mkdir -p bin
           go build -tags prod -trimpath -ldflags "-s -w ${{ matrix.ldflags_extra }} -X github.com/ilaziness/vela/internal/buildinfo.Version=${{ github.ref_name }} -X github.com/ilaziness/vela/internal/buildinfo.Mode=release -X github.com/ilaziness/vela/internal/buildinfo.GitInfo=$(git rev-parse --short=12 HEAD) -X github.com/ilaziness/vela/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "bin/${{ matrix.artifact }}" .
 
+      - name: Install buildapp
+        if: matrix.goos == 'darwin'
+        run: |
+          GO_GUI_VERSION=$(go list -m -f '{{.Version}}' github.com/go-gui-org/go-gui)
+          go install github.com/go-gui-org/go-gui/cmd/buildapp@${GO_GUI_VERSION}
+
+      - name: Package macOS .app
+        if: matrix.goos == 'darwin'
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          buildapp -platform darwin -o bin -name Vela \
+            -id github.com.ilaziness.vela \
+            -icon build/darwin/icons.icns \
+            -version "$VERSION" \
+            bin/Vela
+
+      - name: Archive (zip) for macOS
+        if: matrix.goos == 'darwin'
+        run: |
+          cd bin
+          zip -r "${{ matrix.archive }}" Vela.app
+
       - name: Archive (zip)
         if: matrix.goos == 'windows'
         shell: bash
@@ -65,12 +88,12 @@ jobs:
           7z a "${{ matrix.archive }}" "${{ matrix.artifact }}"
 
       - name: Archive (tar)
-        if: matrix.goos != 'windows'
+        if: matrix.goos == 'linux'
         run: |
           tar -C bin -czf "bin/${{ matrix.archive }}" "${{ matrix.artifact }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/${{ matrix.archive }}
@@ -82,7 +105,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           path: dist
           merge-multiple: true
@@ -93,7 +116,7 @@ jobs:
           sha256sum Vela_* > SHA256SUMS
 
       - name: Create release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v3.0.4
         with:
           files: dist/**
           generate_release_notes: true
