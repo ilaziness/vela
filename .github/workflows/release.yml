@@ -62,6 +62,7 @@ jobs:
         run: |
           GO_GUI_VERSION=$(go list -m -f '{{.Version}}' github.com/go-gui-org/go-gui)
           go install github.com/go-gui-org/go-gui/cmd/buildapp@${GO_GUI_VERSION}
+          echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Package macOS .app
         if: matrix.goos == 'darwin'
