@@ -50,9 +50,6 @@ func Open(d *Deps) {
 			st := gui.State[State](w)
 			st.ensureLoaded()
 			st.Lang = i18n.Language()
-			if frameless {
-				chrome.CenterOnScreen(w)
-			}
 			w.SetView(func(win *gui.Window) gui.View {
 				return Root(win, deps)
 			})

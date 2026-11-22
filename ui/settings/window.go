@@ -47,9 +47,6 @@ func Open(d *Deps) {
 			mu.Unlock()
 			st := gui.State[State](w)
 			st.ensureLoaded(deps)
-			if frameless {
-				chrome.CenterOnScreen(w)
-			}
 			w.SetView(func(win *gui.Window) gui.View {
 				return Root(win, deps)
 			})

@@ -70,10 +70,10 @@ func TestDialHTTPConnect(t *testing.T) {
 					return
 				}
 				defer upstream.Close()
-				errCh := make(chan error, 2)
-				go func() { _, err := io.Copy(upstream, br); errCh <- err }()
-				go func() { _, err := io.Copy(c, upstream); errCh <- err }()
-				<-errCh // copy errors are expected on teardown; we only wait for the first direction to end
+				done := make(chan struct{}, 2)
+				go func() { _, _ = io.Copy(upstream, br); done <- struct{}{} }()
+				go func() { _, _ = io.Copy(c, upstream); done <- struct{}{} }()
+				<-done // copy errors are expected on teardown; we only wait for the first direction to end
 			}(c)
 		}
 	}()

@@ -142,9 +142,6 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 			}
 			frameless := rt.Store.Config.General.Frameless
 			gui.State[app.State](w).Frameless = frameless
-			if frameless && !saved.Maximised {
-				chrome.CenterOnScreen(w)
-			}
 			w.OnEvent = func(e *gui.Event, w *gui.Window) {
 				if e.Type == gui.EventResized {
 					saver.schedule(w)
