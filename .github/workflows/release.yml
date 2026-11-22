@@ -58,11 +58,12 @@ jobs:
           go build -tags prod -trimpath -ldflags "-s -w ${{ matrix.ldflags_extra }} -X github.com/ilaziness/vela/internal/buildinfo.Version=${{ github.ref_name }} -X github.com/ilaziness/vela/internal/buildinfo.Mode=release -X github.com/ilaziness/vela/internal/buildinfo.GitInfo=$(git rev-parse --short=12 HEAD) -X github.com/ilaziness/vela/internal/buildinfo.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "bin/${{ matrix.artifact }}" .
 
       - name: Install buildapp
-        if: matrix.goos == 'darwin'
+        if: matrix.goos == 'darwin' || matrix.goos == 'windows'
+        shell: bash
         run: |
           GO_GUI_VERSION=$(go list -m -f '{{.Version}}' github.com/go-gui-org/go-gui)
           go install github.com/go-gui-org/go-gui/cmd/buildapp@${GO_GUI_VERSION}
-          echo "$HOME/go/bin" >> $GITHUB_PATH
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Package macOS .app
         if: matrix.goos == 'darwin'
@@ -81,12 +82,20 @@ jobs:
           cd bin
           zip -r "${{ matrix.archive }}" Vela.app
 
-      - name: Archive (zip)
+      - name: Package Windows exe with icon
         if: matrix.goos == 'windows'
         shell: bash
         run: |
-          cd bin
-          7z a "${{ matrix.archive }}" "${{ matrix.artifact }}"
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          buildapp -platform windows -o bin -name Vela \
+            -id github.com.ilaziness.vela \
+            -icon build/windows/icon.ico \
+            -version "$VERSION" \
+            bin/Vela.exe
+          # buildapp 生成 zip，找到并重命名为期望的文件名
+          ls bin/*.zip
+          mv bin/*.zip "bin/${{ matrix.archive }}"
 
       - name: Archive (tar)
         if: matrix.goos == 'linux'
