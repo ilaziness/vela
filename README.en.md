@@ -25,11 +25,9 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 - SSH login: password, private key, certificate, 2FA, SSH Agent
 - Jump hosts, HTTP / SOCKS proxies, and local / remote / dynamic port forwarding
 - In-app key management; master password protects secrets and private keys
-- Import and export OpenSSH config
-- Multi-tab terminal, in-terminal search, terminal recording and playback
+- Multi-tab terminal, in-terminal search, terminal recording and playback, terminal supports single-screen, dual-screen and quad-screen modes
 - SSH sessions support Zmodem (rz / sz) file transfer
-- Dual-pane SFTP panel
-- Bookmark management
+- Dual-pane SFTP panel, bookmark management, import and export OpenSSH config
 - Backup & restore: master password encryption and compression, upload to self-hosted storage, WebDAV, or S3
 - AI assistant: local file read/write, web search, remote command execution, MCP and Skills
 - Multi-language: English, Simplified Chinese, Traditional Chinese
@@ -59,10 +57,6 @@ _File management_
 
 ![Bookmarks](screenshots/bookmark.png)
 _Saved connection settings_
-
-### Command library
-
-![Command library](screenshots/command.png)
 
 ### AI assistant
 
@@ -102,13 +96,13 @@ open ~/Downloads/Vela.app
 
 ---
 
-## AI: MCP and Skills
+## AI: MCP and Skills Configuration
 
 Config lives in the **user data directory** (**Settings → General → User data directory**, default `data` next to the app).
 
 You can also open the files or folders, toggle enablement, and refresh the list under **Settings → AI → MCP / Skills**.
 
-### MCP
+### Configure MCP
 
 The format matches common Cursor / Claude Code `mcp.json`: a top-level `mcpServers` object keyed by server name.
 
@@ -158,7 +152,7 @@ Secrets in `mcp.json` are stored in plaintext. Keep that file private.
 }
 ```
 
-### Skills
+### Configure Skills
 
 1. Create a `skills` folder in the user data directory (or use **Open skills directory** on the settings page).
 2. One subfolder per skill, with a `SKILL.md` inside, for example:
