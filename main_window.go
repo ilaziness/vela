@@ -16,6 +16,7 @@ import (
 	"github.com/ilaziness/vela/ui/backup"
 	"github.com/ilaziness/vela/ui/bookmarks"
 	"github.com/ilaziness/vela/ui/chrome"
+	commandui "github.com/ilaziness/vela/ui/command"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/settings"
 	"github.com/ilaziness/vela/ui/shell"
@@ -29,6 +30,7 @@ type windowDeps struct {
 	Settings  *settings.Deps
 	Bookmarks *bookmarks.Deps
 	Tools     *toolsui.Deps
+	Command   *commandui.Deps
 	Backup    *backup.Deps
 }
 
@@ -96,6 +98,12 @@ func newWindowDeps(rt *app.Runtime, guiApp *gui.App) *windowDeps {
 			DB:      rt.DB,
 			IconPNG: appIconPNG,
 			Update:  updateDeps,
+			OnLanguageChanged: func(lang string) {
+				if err := rt.Commands.ReloadBuiltin(lang); err != nil {
+					rt.Logger.Warn("reload builtin commands failed",
+						zap.String("language", lang), zap.Error(err))
+				}
+			},
 		},
 		Bookmarks: &bookmarks.Deps{
 			App:       guiApp,
@@ -112,6 +120,13 @@ func newWindowDeps(rt *app.Runtime, guiApp *gui.App) *windowDeps {
 			Core:    tools.New(),
 			Store:   rt.Store,
 			IconPNG: appIconPNG,
+		},
+		Command: &commandui.Deps{
+			App:      guiApp,
+			Commands: rt.Commands,
+			Hub:      rt.Hub,
+			Store:    rt.Store,
+			IconPNG:  appIconPNG,
 		},
 		Backup: &backup.Deps{
 			Store:  rt.Store,
@@ -135,8 +150,9 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 		Decorations: chrome.Decoration(rt.Store.Config.General.Frameless),
 		OnInit: func(w *gui.Window) {
 			rt.BindWindow(w)
-			installKeybindCommands(w, rt)
-			watchKeybindChanges(w, rt)
+			onCommand := func() { commandui.Toggle(d.Command) }
+			installKeybindCommands(w, rt, onCommand)
+			watchKeybindChanges(w, rt, onCommand)
 			if saved.Maximised {
 				w.Maximize()
 			}
@@ -171,6 +187,7 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 						OnBookmarks: func() { bookmarks.Open(d.Bookmarks) },
 						OnSettings:  func() { settings.Open(d.Settings) },
 						OnTools:     func() { toolsui.Open(d.Tools) },
+						OnCommand:   func() { commandui.Toggle(d.Command) },
 						OnBackup:    func() { backup.Start(w, d.Backup) },
 					})
 				})

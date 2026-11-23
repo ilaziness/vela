@@ -11,6 +11,7 @@ type Chrome struct {
 	OnBookmarks func()
 	OnSettings  func()
 	OnTools     func()
+	OnCommand   func()
 	OnBackup    func()
 }
 

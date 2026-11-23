@@ -27,4 +27,7 @@ type Deps struct {
 	DB      *database.Database
 	IconPNG []byte
 	Update  *update.Deps
+	// OnLanguageChanged fires after a language save so services holding
+	// localized builtin data (command palette) can reload.
+	OnLanguageChanged func(lang string)
 }

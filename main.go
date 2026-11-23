@@ -1,7 +1,7 @@
 package main
 
 import (
-	_ "embed"
+	"embed"
 	"log"
 	"os"
 
@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/command"
 	"github.com/ilaziness/vela/internal/updater"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/fonts"
@@ -18,6 +19,9 @@ import (
 //go:embed assets/appicon.png
 var appIconPNG []byte
 
+//go:embed data/commands/*.json
+var commandsFS embed.FS
+
 func main() {
 	if handled, err := updater.RunApplyMode(os.Args[1:]); handled {
 		if err != nil {
@@ -25,7 +29,7 @@ func main() {
 		}
 		return
 	}
-	rt, err := app.Bootstrap()
+	rt, err := app.Bootstrap(command.LoaderFromFS(commandsFS, "data/commands"))
 	if err != nil {
 		log.Fatal(err)
 	}

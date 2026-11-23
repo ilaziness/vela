@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/applog"
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/command"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/keybind"
@@ -23,6 +24,7 @@ import (
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
 	"github.com/ilaziness/vela/internal/updater"
+	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/ui/protocol"
 	serialui "github.com/ilaziness/vela/ui/protocol/serial"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -48,10 +50,11 @@ type Runtime struct {
 	Bookmarks *bookmark.Service
 	Tunnels   *tunnel.Manager
 	Updater   *updater.Manager
+	Commands  *command.Service
 }
 
 // Bootstrap constructs engines and the protocol registry.
-func Bootstrap() (*Runtime, error) {
+func Bootstrap(commandsLoader command.LocaleLoader) (*Runtime, error) {
 	logger := applog.New()
 	store, err := config.Load(logger)
 	if err != nil {
@@ -164,6 +167,26 @@ func Bootstrap() (*Runtime, error) {
 		_ = db.Close()
 	})
 
+	// Command palette: builtin snippets come from the embed FS, user
+	// commands and history live in SQLite; Send writes the line straight
+	// into the session's stdin (serial consoles want CR, shells want LF).
+	commands := command.New(logger, db, commandsLoader, func(sessionID, cmd string) error {
+		sess, ok := hub.Get(sessionID)
+		if !ok || sess == nil {
+			return usererr.Coded("session.not_found", "Session not found")
+		}
+		stdin := sess.Stdin()
+		if stdin == nil {
+			return usererr.Coded("ssh.stdin_unavailable", "Standard input is not available")
+		}
+		ending := "\n"
+		if sess.Protocol() == termio.ProtocolSerial {
+			ending = "\r"
+		}
+		_, err := stdin.Write([]byte(cmd + ending))
+		return err
+	})
+
 	upd := updater.NewManager(logger, buildinfo.Version, updater.NewGitHub())
 
 	return &Runtime{
@@ -184,6 +207,7 @@ func Bootstrap() (*Runtime, error) {
 		Tunnels:   tunnelMgr,
 		Updater:   upd,
 		Agent:     agentSvc,
+		Commands:  commands,
 	}, nil
 }
 

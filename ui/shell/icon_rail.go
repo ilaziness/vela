@@ -25,6 +25,7 @@ const (
 	navBookmarks    = "bookmarks"
 	navBackup       = "backup"
 	navTools        = "tools"
+	navCommand      = "command"
 	navSettings     = "settings"
 )
 
@@ -72,6 +73,13 @@ func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 		}
 	})
 
+	commandBtn := railBtn(navCommand, gui.IconTerminal, i18n.T("header.command_palette"), th, false, func(ctx gui.EventCtx) {
+		ctx.Consume()
+		if chrome.OnCommand != nil {
+			chrome.OnCommand()
+		}
+	})
+
 	settingsBtn := railBtn(navSettings, gui.IconGear, i18n.T("header.settings"), th, false, func(ctx gui.EventCtx) {
 		ctx.Consume()
 		if chrome.OnSettings != nil {
@@ -98,6 +106,7 @@ func IconRail(w *gui.Window, ctrl *app.Controller, chrome Chrome) gui.View {
 					agentBtn,
 					backupBtn,
 					toolsBtn,
+					commandBtn,
 					settingsBtn,
 				},
 			})),

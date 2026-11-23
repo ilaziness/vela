@@ -165,21 +165,6 @@ func NewCommandHistoryRepository(db *sql.DB, logger *zap.Logger) *CommandHistory
 	return &CommandHistoryRepository{db: db, logger: logger}
 }
 
-// GetLatestHistory returns the most recent history row, or nil if empty.
-func (r *CommandHistoryRepository) GetLatestHistory() (*CommandHistoryDB, error) {
-	query := `SELECT id, command, timestamp FROM command_history ORDER BY timestamp DESC LIMIT 1`
-	row := r.db.QueryRow(query)
-	var h CommandHistoryDB
-	err := row.Scan(&h.ID, &h.Command, &h.Timestamp)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf(errQuery, tableNameCommandHistory, err)
-	}
-	return &h, nil
-}
-
 // GetHistory 获取命令历史（最新 100 条）
 func (r *CommandHistoryRepository) GetHistory() ([]*CommandHistoryDB, error) {
 	query := `SELECT id, command, timestamp FROM command_history ORDER BY timestamp DESC LIMIT 100`
@@ -252,6 +237,33 @@ func (r *CommandHistoryRepository) InsertHistory(history *CommandHistoryDB) (int
 
 	r.logger.Debug("command history inserted", zap.Int64("id", id))
 	return id, nil
+}
+
+// TouchHistory refreshes the timestamp of an existing command row.
+// It reports whether a row matched so callers can insert on a miss.
+func (r *CommandHistoryRepository) TouchHistory(command string, ts time.Time) (bool, error) {
+	res, err := r.db.Exec(
+		`UPDATE command_history SET timestamp = ? WHERE command = ?`,
+		ts, command,
+	)
+	if err != nil {
+		return false, fmt.Errorf("update command history failed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("command history rows affected failed: %w", err)
+	}
+	return n > 0, nil
+}
+
+// DeleteHistoryByCommand removes every row with the given command text.
+func (r *CommandHistoryRepository) DeleteHistoryByCommand(command string) error {
+	_, err := r.db.Exec(`DELETE FROM command_history WHERE command = ?`, command)
+	if err != nil {
+		return fmt.Errorf(errDeleteQuery, tableNameCommandHistory, err)
+	}
+	r.logger.Debug("command history deleted")
+	return nil
 }
 
 // ClearHistory 清空命令历史

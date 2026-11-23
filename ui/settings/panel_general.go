@@ -132,6 +132,9 @@ func saveGeneral(w *gui.Window, d *Deps) {
 			s.General = draft
 			i18n.SetLanguage(draft.Language)
 			app.ApplyGUILocale()
+			if d.OnLanguageChanged != nil {
+				d.OnLanguageChanged(draft.Language)
+			}
 			fonts.Apply(d.Store.Config)
 			refreshTitle(win)
 			toastOK(win, i18n.T("settings.general.save_success"))
