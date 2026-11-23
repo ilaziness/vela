@@ -32,8 +32,8 @@ func formRow(id, label, text, placeholder string, password bool, onChange func(s
 	})
 }
 
-// secretPlaceholder matches old Wails secret fields: show a mask when a
-// value is already stored encrypted and the draft plaintext is empty.
+// secretPlaceholder shows a mask when a value is already stored encrypted
+// and the draft plaintext is empty.
 func secretPlaceholder(plain, encrypted, fallback string) string {
 	if strings.TrimSpace(plain) == "" && strings.TrimSpace(encrypted) != "" {
 		return "••••••••"
@@ -41,8 +41,7 @@ func secretPlaceholder(plain, encrypted, fallback string) string {
 	return fallback
 }
 
-// formRowHelp is formRow plus a secondary helper line under the field
-// (old Wails FormHelperText / helperText).
+// formRowHelp is formRow plus a secondary helper line under the field.
 func formRowHelp(id, label, text, placeholder, help string, password bool, onChange func(string)) gui.View {
 	return gui.Column(layout.Flush(gui.ContainerCfg{
 		Sizing:  gui.FillFit,
@@ -65,7 +64,7 @@ func actionsRight(btns ...gui.View) gui.View {
 	}))
 }
 
-// saveBtn right-aligns the primary action like the old Wails settings.
+// saveBtn right-aligns the primary action.
 func saveBtn(id, label string, busy bool, onClick func(gui.EventCtx)) gui.View {
 	return actionsRight(gui.Button(gui.ButtonCfg{
 		ID:       id,

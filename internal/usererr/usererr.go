@@ -17,7 +17,7 @@ const StorageErrorCode = "error.storage"
 // i18n is unavailable (e.g. persisted chat history).
 const StorageErrorText = "Something went wrong. Please try again."
 
-// Payload is the JSON shape returned via error.Error() for Wails RPC.
+// Payload is the JSON shape returned via error.Error() so the UI can parse it.
 type Payload struct {
 	Code    string   `json:"code"`
 	Params  []string `json:"params,omitempty"`

@@ -86,7 +86,7 @@ func (f *Filter) BindStdin(w io.WriteCloser) {
 	f.stdin = w
 }
 
-// WrapStdin returns a WriteCloser for termws / SendToSession.
+// WrapStdin returns a WriteCloser for SendToSession.
 // Idle: pass-through. Pending/active: drop user keystrokes.
 func (f *Filter) WrapStdin() io.WriteCloser {
 	return &userStdin{f: f}

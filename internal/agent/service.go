@@ -28,7 +28,7 @@ import (
 
 const EventAIStreamChunk = "eventAIStreamChunk"
 
-// AIStreamChunkData is the Wails event payload for agent streaming (MUI-aligned).
+// AIStreamChunkData is the event payload for agent streaming.
 type AIStreamChunkData struct {
 	SessionID  string `json:"sessionId"`
 	Type       string `json:"type"`

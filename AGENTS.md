@@ -22,7 +22,7 @@
 ├── main.go                 # 应用入口（go-gui + embed logo）
 ├── main_window.go          # 主窗口装配
 ├── assets/                 # 应用图标等静态资源（appicon.png）
-├── ui/                     # 桌面 UI（禁止 import Wails；壳层不绑死某协议）
+├── ui/                     # 桌面 UI（壳层不绑死某协议）
 │   ├── app/                # 组合根、State、Controller
 │   ├── shell/              # 三栏布局：图标轨 / 侧栏 / 主区
 │   ├── session/            # Tab、表单宿主、终端面板、状态栏
@@ -46,7 +46,6 @@
 ├── internal/               # 引擎与基础设施（禁止 import ui）
 │   ├── termio/             # Protocol + Session + Hub
 │   ├── termstream/         # termio.Session → go-term Stream
-│   ├── termws/             # 终端 WebSocket 服务
 │   ├── termcharset/        # 终端字符集处理
 │   ├── ssh/                # 连接、会话、agent forward、proxy resolve、usererr map
 │   ├── serial/             # 串口引擎

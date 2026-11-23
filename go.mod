@@ -3,7 +3,6 @@ module github.com/ilaziness/vela
 go 1.27.3
 
 require (
-	github.com/coder/websocket v1.8.15
 	github.com/firebase/genkit/go v1.14.0
 	github.com/go-gui-org/go-charts v0.33.0
 	github.com/go-gui-org/go-gui v0.98.0
@@ -37,6 +36,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.6.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.2 // indirect

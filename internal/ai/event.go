@@ -2,7 +2,7 @@ package ai
 
 import "github.com/ilaziness/vela/internal/ai/event"
 
-// Re-export stream events for services / Wails bindings stability.
+// Re-export stream events for services / UI consumers.
 const (
 	EventTextDelta           = event.EventTextDelta
 	EventReasoningDelta      = event.EventReasoningDelta
