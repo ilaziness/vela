@@ -371,7 +371,7 @@ func (s *Service) wireProxyJump(targetID, raw string, aliasToID map[string]strin
 		prev := chain[i-1]
 		if cur != targetID {
 			existing, err := s.db.BookmarkRepo.GetBookmarkByID(cur)
-			if err == nil && existing.ProxyJumpID != "" && existing.ProxyJumpID != prev {
+			if err == nil && existing != nil && existing.ProxyJumpID != "" && existing.ProxyJumpID != prev {
 				title := existing.Title
 				warnings = append(warnings, fmt.Sprintf(
 					"jump %q already has a different ProxyJump; multi-hop chain left unchanged (bookmark %s)", title, shortID(targetID)))
@@ -441,6 +441,8 @@ func (s *Service) setProxyJumpID(bookmarkID, jumpID string) error {
 func (s *Service) ensureGroup(name string) error {
 	if _, err := s.db.BookmarkRepo.GetGroupByName(name); err == nil {
 		return nil
+	} else if !database.IsNotFound(err) {
+		return err
 	}
 	return s.AddGroup(name)
 }

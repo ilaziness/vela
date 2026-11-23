@@ -29,6 +29,7 @@
 │   ├── settings/           # 设置窗口（各 panel + State/Deps）
 │   ├── vaultprompt/        # 可复用 Vault 解锁对话框（遮罩密码）
 │   ├── layout/             # 即时模式布局辅助（Flush 等）
+│   ├── errtext/            # 统一错误文案（usererr/i18n + 存储错误兜底）
 │   ├── fonts/              # 字体枚举
 │   ├── protocol/           # 协议插件接口 + Registry
 │   │   ├── ssh/            # SSH 表单 / Connector / HostKey / Keyboard

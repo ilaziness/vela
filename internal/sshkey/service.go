@@ -1,8 +1,6 @@
 package sshkey
 
 import (
-	"database/sql"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -110,7 +108,7 @@ func (s *Service) Get(id string) (Info, error) {
 }
 
 func mapSSHKeyGetError(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
+	if database.IsNotFound(err) {
 		return usererr.Coded("sshkey.not_found", "SSH key not found")
 	}
 	return err

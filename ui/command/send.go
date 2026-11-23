@@ -9,6 +9,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -77,7 +78,7 @@ func historySection(w *gui.Window, d *Deps, st *State) gui.View {
 						ctx.Consume()
 						s := gui.State[State](ctx.Window)
 						if err := d.Commands.DeleteHistory(cmd); err != nil {
-							toastErr(ctx.Window, i18n.Tf("command.delete_failed", errText(err)))
+							toastErr(ctx.Window, i18n.Tf("command.delete_failed", errtext.Text(err)))
 							return
 						}
 						s.reload(d)
@@ -284,7 +285,7 @@ func sendCommand(w *gui.Window, d *Deps) {
 		return
 	}
 	if err := d.Commands.Send(cmd, ids); err != nil {
-		toastErr(w, i18n.Tf("command.send_failed", errText(err)))
+		toastErr(w, i18n.Tf("command.send_failed", errtext.Text(err)))
 		return
 	}
 	st.input = ""
@@ -300,7 +301,7 @@ func confirmClearHistory(w *gui.Window, d *Deps) {
 		DefaultButton: gui.DialogButtonNo,
 		OnOkYes: func(win *gui.Window) {
 			if err := d.Commands.ClearHistory(); err != nil {
-				toastErr(win, i18n.Tf("command.clear_history_failed", errText(err)))
+				toastErr(win, i18n.Tf("command.clear_history_failed", errtext.Text(err)))
 				return
 			}
 			gui.State[State](win).reload(d)

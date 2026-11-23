@@ -6,6 +6,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/sync"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -185,7 +186,7 @@ func loadRestorePage(w *gui.Window, d *Deps, st *restoreState, page int) {
 			st.loading = false
 			if err != nil {
 				d.Logger.Error("failed to load backups", zap.Error(err))
-				st.loadErr = i18n.Tf("settings.sync.load_backups_failed", errText(err))
+				st.loadErr = i18n.Tf("settings.sync.load_backups_failed", errtext.Text(err))
 				return
 			}
 			if page == 0 {
@@ -259,7 +260,7 @@ func runRestore(w *gui.Window, d *Deps, name string) {
 				win.DialogDismiss()
 				if err != nil {
 					d.Logger.Error("backup restore failed", zap.Error(err))
-					toastErrMsg(win, i18n.Tf("settings.sync.download_failed", errText(err)))
+					toastErrMsg(win, i18n.Tf("settings.sync.download_failed", errtext.Text(err)))
 					return
 				}
 				showRestart(win)

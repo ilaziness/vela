@@ -15,6 +15,7 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/utils"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/protocol"
@@ -92,7 +93,7 @@ func (c *Controller) ShowRecordingPicker(w *gui.Window, tabID string) {
 	dir, err := c.recordingDir()
 	if err != nil {
 		c.logger.Error("resolve recording dir", zap.Error(err))
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	items, err := c.listRecordings(dir)
@@ -282,7 +283,7 @@ func (c *Controller) PlayRecording(w *gui.Window, path, targetTabID string) {
 	})
 	if err != nil {
 		c.logger.Error("open recording replay", zap.String("path", path), zap.Error(err))
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	c.mu.Lock()
@@ -298,7 +299,7 @@ func (c *Controller) PlayRecording(w *gui.Window, path, targetTabID string) {
 		delete(c.terms, sessID)
 		c.mu.Unlock()
 		_ = tm.Close()
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	tabID := tab.ID

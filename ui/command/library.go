@@ -8,6 +8,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/command"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -158,7 +159,7 @@ func confirmDelete(w *gui.Window, d *Deps, st *State) {
 		DefaultButton: gui.DialogButtonNo,
 		OnOkYes: func(win *gui.Window) {
 			if err := d.Commands.DeleteUser(cat, name); err != nil {
-				toastErr(win, i18n.Tf("command.delete_failed", errText(err)))
+				toastErr(win, i18n.Tf("command.delete_failed", errtext.Text(err)))
 				return
 			}
 			st.selCat, st.selName, st.selCustom = "", "", false

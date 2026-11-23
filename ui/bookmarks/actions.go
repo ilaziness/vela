@@ -10,6 +10,7 @@ import (
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 // sshDialogStartDir 返回 SSH 配置导入/导出对话框的起始目录：
@@ -33,7 +34,7 @@ func reload(w *gui.Window, d *Deps) {
 	st := gui.State[State](w)
 	groups, err := d.Bookmarks.ListGrouped()
 	if err != nil {
-		toastErrText(w, i18n.Tf("bookmark.load_failed", errText(err)))
+		toastErrText(w, i18n.Tf("bookmark.load_failed", errtext.Text(err)))
 		return
 	}
 	st.Groups = groups
@@ -195,7 +196,7 @@ func doTest(w *gui.Window, d *Deps) {
 				s := gui.State[State](win)
 				s.Busy = false
 				if err != nil {
-					toastErrText(win, i18n.Tf("bookmark.test_failed", errText(err)))
+					toastErrText(win, i18n.Tf("bookmark.test_failed", errtext.Text(err)))
 					return
 				}
 				toastOK(win, i18n.T("bookmark.test_success"))
@@ -330,7 +331,7 @@ func promptAddGroup(w *gui.Window, d *Deps) {
 
 func doAddGroup(w *gui.Window, d *Deps, name string) {
 	if err := d.Bookmarks.AddGroup(name); err != nil {
-		toastErrText(w, i18n.Tf("bookmark.add_group_failed", errText(err)))
+		toastErrText(w, i18n.Tf("bookmark.add_group_failed", errtext.Text(err)))
 		return
 	}
 	reload(w, d)
@@ -409,7 +410,7 @@ func doRenameGroup(w *gui.Window, d *Deps, oldName, newName string) {
 		}
 	}
 	if err := d.Bookmarks.UpdateGroup(oldName, newName, icon); err != nil {
-		toastErrText(w, i18n.Tf("bookmark.rename_group_failed", errText(err)))
+		toastErrText(w, i18n.Tf("bookmark.rename_group_failed", errtext.Text(err)))
 		return
 	}
 	reload(w, d)
@@ -440,7 +441,7 @@ func confirmDeleteGroup(w *gui.Window, d *Deps) {
 			Body:       body,
 			OnOkYes: func(win *gui.Window) {
 				if err := d.Bookmarks.DeleteGroup(name); err != nil {
-					toastErrText(win, i18n.Tf("bookmark.delete_group_failed", errText(err)))
+					toastErrText(win, i18n.Tf("bookmark.delete_group_failed", errtext.Text(err)))
 					return
 				}
 				reload(win, d)
@@ -476,7 +477,7 @@ func confirmDeleteBookmark(w *gui.Window, d *Deps) {
 		Body:       title,
 		OnOkYes: func(win *gui.Window) {
 			if err := d.Bookmarks.Delete(id); err != nil {
-				toastErrText(win, i18n.Tf("bookmark.delete_failed", errText(err)))
+				toastErrText(win, i18n.Tf("bookmark.delete_failed", errtext.Text(err)))
 				return
 			}
 			reload(win, d)
@@ -499,7 +500,7 @@ func doCopyBookmark(w *gui.Window, d *Deps) {
 	confirmIfDirty(w, func() {
 		copied, err := d.Bookmarks.Copy(id)
 		if err != nil {
-			toastErrText(w, i18n.Tf("bookmark.copy_failed", errText(err)))
+			toastErrText(w, i18n.Tf("bookmark.copy_failed", errtext.Text(err)))
 			return
 		}
 		reload(w, d)
@@ -633,7 +634,7 @@ func runImport(w *gui.Window, d *Deps, groupName string) {
 					s2.Busy = false
 					s2.ImportBusy = false
 					if err != nil {
-						s2.ImportError = i18n.Tf("bookmark.import_failed", errText(err))
+						s2.ImportError = i18n.Tf("bookmark.import_failed", errtext.Text(err))
 						return
 					}
 					w2.DialogDismiss()
@@ -716,7 +717,7 @@ func runExport(w *gui.Window, d *Deps, groupName string) {
 			s := gui.State[State](win)
 			s.Busy = false
 			if err != nil {
-				toastErrText(win, i18n.Tf("bookmark.export_failed", errText(err)))
+				toastErrText(win, i18n.Tf("bookmark.export_failed", errtext.Text(err)))
 				return
 			}
 			if strings.TrimSpace(content) == "" {
@@ -748,7 +749,7 @@ func runExport(w *gui.Window, d *Deps, groupName string) {
 					d.Store.RememberDialogPath(res.Paths[0].Path)
 					path := res.Paths[0].Path
 					if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-						toastErrText(w2, i18n.Tf("bookmark.export_failed", err.Error()))
+						toastErrText(w2, i18n.Tf("bookmark.export_failed", errtext.Text(err)))
 						return
 					}
 					toastOK(w2, i18n.T("bookmark.export_success"))

@@ -144,7 +144,7 @@ func (r *UserCommandRepository) GetCommandByCategoryAndName(category, name strin
 	err := row.Scan(&cmd.ID, &cmd.Category, &cmd.Name, &cmd.Command, &cmd.Description, &cmd.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("command not found")
+			return nil, sql.ErrNoRows
 		}
 		return nil, fmt.Errorf(errQuery, "command by category and name", err)
 	}

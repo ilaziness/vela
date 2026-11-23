@@ -9,6 +9,7 @@ import (
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/sync"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -233,7 +234,7 @@ func loadSyncBackups(w *gui.Window, d *Deps) {
 			s.SyncBackupsLoading = false
 			s.SyncBackupsLoaded = true
 			if err != nil {
-				s.SyncBackupsErr = i18n.Tf("settings.sync.backup_load_failed", errText(err))
+				s.SyncBackupsErr = i18n.Tf("settings.sync.backup_load_failed", errtext.Text(err))
 				return
 			}
 			s.SyncBackups = list
@@ -276,7 +277,7 @@ func runDeleteSyncBackup(w *gui.Window, d *Deps, name string) {
 			}
 			w.QueueCommand(func(w2 *gui.Window) {
 				if err != nil {
-					toastErr(w2, usererr.Coded("settings.sync.delete_backup_failed", "%s", errText(err)))
+					toastErr(w2, usererr.Coded("settings.sync.delete_backup_failed", "%s", errtext.Text(err)))
 					return
 				}
 				toastOK(w2, i18n.T("settings.sync.delete_backup_success"))

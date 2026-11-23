@@ -405,9 +405,18 @@ func (s *Service) CreateSession() (*AISession, error) {
 func (s *Service) GetSession(id string) (*AISession, error) {
 	session, err := s.sessionRepo.GetSession(context.Background(), id)
 	if err != nil {
-		return nil, err
+		return nil, mapSessionNotFound(err)
 	}
 	return toAISession(session), nil
+}
+
+// mapSessionNotFound converts a repository miss into the user-facing error
+// code; other errors pass through unchanged.
+func mapSessionNotFound(err error) error {
+	if database.IsNotFound(err) {
+		return usererr.Coded("session.not_found", "Session not found")
+	}
+	return err
 }
 func (s *Service) ListSessions(limit int) ([]*AISession, error) {
 	sessions, err := s.sessionRepo.ListSessions(context.Background(), limit)
@@ -422,7 +431,7 @@ func (s *Service) ListSessions(limit int) ([]*AISession, error) {
 }
 func (s *Service) DeleteSession(id string) error {
 	_ = s.StopGeneration(id)
-	err := s.sessionRepo.DeleteSession(context.Background(), id)
+	err := mapSessionNotFound(s.sessionRepo.DeleteSession(context.Background(), id))
 	if dir := s.userDataDir(); dir != "" {
 		if rmErr := ai.RemoveSessionAttachments(dir, id); rmErr != nil {
 			s.logger.Error("remove session attachments",
@@ -462,10 +471,11 @@ func (s *Service) listSealedChatMessages(sessionID string) ([]ai.ChatMessage, er
 }
 
 func (s *Service) UpdateSession(session *AISession) error {
-	return s.sessionRepo.UpdateSession(context.Background(), &database.AISession{
+	err := s.sessionRepo.UpdateSession(context.Background(), &database.AISession{
 		ID: session.ID, Title: session.Title,
 		CreatedAt: time.Unix(session.CreatedAt, 0), UpdatedAt: time.Unix(session.UpdatedAt, 0),
 	})
+	return mapSessionNotFound(err)
 }
 
 func (s *Service) Chat(req *ChatRequest) (*ChatResponse, error) {
@@ -820,6 +830,9 @@ func persistableChatErrorText(err error) string {
 	}
 	if p, ok := usererr.Parse(err.Error()); ok {
 		return persistableUserError(p.Code, p.Message)
+	}
+	if database.IsStorageError(err) {
+		return persistableUserError(usererr.StorageErrorCode, usererr.StorageErrorText)
 	}
 	return err.Error()
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 // Remote file-operation dialogs: rename, create, chmod, chown. Native
@@ -52,7 +53,7 @@ func (c *Controller) doRenameRemote(w *gui.Window, sessID, remotePath, newName s
 		err := mgr.RenameFile(sessID, remotePath, newPath)
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			}
 			c.SFTPRefreshRemote(w, sessID)
 		})
@@ -105,7 +106,7 @@ func (c *Controller) doCreateRemote(w *gui.Window, sessID string, isDir bool, na
 		}
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			}
 			c.SFTPRefreshRemote(w, sessID)
 		})
@@ -150,7 +151,7 @@ func (c *Controller) doChmodRemote(w *gui.Window, sessID, remotePath, input stri
 		err := mgr.Chmod(sessID, remotePath, bits)
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			}
 			c.SFTPRefreshRemote(w, sessID)
 		})
@@ -273,7 +274,7 @@ func (c *Controller) doChownRemote(w *gui.Window, sessID, remotePath, uidStr, gi
 		err := mgr.Chown(sessID, remotePath, uid, gid)
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			}
 			c.SFTPRefreshRemote(w, sessID)
 		})

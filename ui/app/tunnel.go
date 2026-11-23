@@ -17,6 +17,7 @@ import (
 	"github.com/ilaziness/vela/internal/tunnel"
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/utils"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 // TunnelDraft is the raw create-form input (strings straight from the
@@ -183,7 +184,7 @@ func (c *Controller) refreshTunnelRules(w *gui.Window, bookmarkID string) {
 		errMsg := ""
 		if err != nil {
 			c.logger.Warn("list tunnel rules failed", zap.String("bookmark", bookmarkID), zap.Error(err))
-			errMsg = errText(err)
+			errMsg = errtext.Text(err)
 		}
 		c.mu.Lock()
 		rc.items = items
@@ -198,7 +199,7 @@ func (c *Controller) refreshTunnelRules(w *gui.Window, bookmarkID string) {
 // localized message ("" when valid) for inline dialog display.
 func ValidateTunnelDraft(d TunnelDraft) string {
 	if _, err := tunnelArgsFromDraft(d); err != nil {
-		return errText(err)
+		return errtext.Text(err)
 	}
 	return ""
 }
@@ -216,7 +217,7 @@ func (c *Controller) StartTunnel(w *gui.Window, tabID string, draft TunnelDraft)
 	bookmarkID := tab.BookmarkID
 	args, err := tunnelArgsFromDraft(draft)
 	if err != nil {
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	mgr := c.TunnelManager()
@@ -228,7 +229,7 @@ func (c *Controller) StartTunnel(w *gui.Window, tabID string, draft TunnelDraft)
 		_, err := startTunnelByType(mgr, sessID, args)
 		if err != nil {
 			w.QueueCommand(func(w *gui.Window) {
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 			})
 			return
 		}
@@ -266,7 +267,7 @@ func (c *Controller) StartTunnelRule(w *gui.Window, tabID string, rule TunnelRul
 	sessID := tab.SessID
 	args := TunnelArgs{Type: rule.Type, LocalAddr: rule.LocalAddr, RemoteAddr: rule.RemoteAddr, RemotePort: rule.RemotePort}
 	if err := validateTunnelArgs(args); err != nil {
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	if c.TunnelRuleActive(sessID, rule) {
@@ -281,7 +282,7 @@ func (c *Controller) StartTunnelRule(w *gui.Window, tabID string, rule TunnelRul
 		_, err := startTunnelByType(mgr, sessID, args)
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				return
 			}
 			w.Toast(gui.ToastCfg{
@@ -305,7 +306,7 @@ func (c *Controller) StopTunnel(w *gui.Window, tunnelID string) {
 		err := mgr.StopByID(tunnelID)
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				return
 			}
 			w.Toast(gui.ToastCfg{Body: i18n.T("tunnel.stop_success"), Severity: gui.ToastSuccess, Duration: 3 * time.Second})
@@ -338,7 +339,7 @@ func (c *Controller) DeleteTunnelRule(w *gui.Window, tabID string, rule TunnelRu
 				}
 				win.QueueCommand(func(win *gui.Window) {
 					if err != nil {
-						win.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+						win.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 						return
 					}
 					win.Toast(gui.ToastCfg{Body: i18n.T("tunnel.rule_deleted"), Severity: gui.ToastSuccess, Duration: 3 * time.Second})

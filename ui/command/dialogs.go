@@ -7,6 +7,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/command"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -122,7 +123,7 @@ func saveAddCommand(w *gui.Window, d *Deps) {
 		Description: strings.TrimSpace(st.addDesc),
 	})
 	if err != nil {
-		toastErr(w, i18n.Tf("command.add_failed", errText(err)))
+		toastErr(w, i18n.Tf("command.add_failed", errtext.Text(err)))
 		return
 	}
 	st.addCat, st.addName, st.addDesc, st.addCmd = "", "", "", ""

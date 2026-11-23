@@ -9,6 +9,14 @@ import (
 	"fmt"
 )
 
+// StorageErrorCode is the catalog key for storage-layer failures surfaced to
+// users. Driver details belong in logs only.
+const StorageErrorCode = "error.storage"
+
+// StorageErrorText is the English fallback for StorageErrorCode, used where
+// i18n is unavailable (e.g. persisted chat history).
+const StorageErrorText = "Something went wrong. Please try again."
+
 // Payload is the JSON shape returned via error.Error() for Wails RPC.
 type Payload struct {
 	Code    string   `json:"code"`

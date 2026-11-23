@@ -25,8 +25,8 @@ import (
 	"github.com/ilaziness/vela/internal/termstream"
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
-	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/zmodem"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -184,28 +184,6 @@ func (c *Controller) toast(sev gui.ToastSeverity, title, body string) {
 	})
 }
 
-// errText formats errors for toast. usererr.Error() is JSON (Wails RPC
-// contract); native UI shows the coded message in the current language.
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	if ue, ok := usererr.As(err); ok {
-		if ue.Code != "" {
-			if len(ue.Params) == 0 {
-				return i18n.T(ue.Code)
-			}
-			args := make([]any, len(ue.Params))
-			for i, p := range ue.Params {
-				args[i] = p
-			}
-			return i18n.Tf(ue.Code, args...)
-		}
-		return ue.Message
-	}
-	return err.Error()
-}
-
 // Connect implements protocol.Bus.
 func (c *Controller) Connect(draft protocol.Draft) {
 	c.runConnect(draft, false)
@@ -257,7 +235,7 @@ func (c *Controller) dialFailed(w *gui.Window, target paneRef, err error) {
 		for i := range tab.Panes {
 			if tab.Panes[i].Status == TabStatusConnecting {
 				tab.Panes[i].Status = TabStatusDisconnected
-				tab.Panes[i].ConnErr = errText(err)
+				tab.Panes[i].ConnErr = errtext.Text(err)
 				break
 			}
 		}
@@ -309,7 +287,7 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 				st.Busy = false
 				st.BusyOp = ""
 				if err != nil {
-					w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+					w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 					return
 				}
 				w.Toast(gui.ToastCfg{
@@ -327,7 +305,7 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 				st.Busy = false
 				st.BusyOp = ""
 				c.dialFailed(w, target, err)
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 			})
 			return
 		}
@@ -338,7 +316,7 @@ func (c *Controller) runConnect(draft protocol.Draft, testOnly bool) {
 			st.BusyOp = ""
 			if err := c.attachSession(w, st, sess, target, req); err != nil {
 				c.dialFailed(w, target, err)
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				_ = sess.Close()
 				c.hub.Unregister(sess.ID())
 				return

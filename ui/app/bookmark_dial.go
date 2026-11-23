@@ -17,6 +17,7 @@ import (
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/vaultcheck"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/vaultprompt"
 )
 
@@ -61,7 +62,7 @@ func (c *Controller) ReloadBookmarkGroups(w *gui.Window) {
 	if err != nil {
 		logger.Error("reload bookmark groups", zap.Error(err))
 		w.Toast(gui.ToastCfg{
-			Body:     i18n.Tf("bookmark.load_failed", errText(err)),
+			Body:     i18n.Tf("bookmark.load_failed", errtext.Text(err)),
 			Severity: gui.ToastError,
 			Duration: 4 * time.Second,
 		})
@@ -130,7 +131,7 @@ func (c *Controller) beginBookmarkConnect(w *gui.Window, target paneRef, id stri
 			clearBusy(win)
 			c.dialFailed(win, target, err)
 			win.Toast(gui.ToastCfg{
-				Body:     errText(err),
+				Body:     errtext.Text(err),
 				Severity: gui.ToastError,
 				Duration: 4 * time.Second,
 			})
@@ -157,7 +158,7 @@ func (c *Controller) runConnectBookmark(w *gui.Window, target paneRef, id string
 		if err != nil {
 			c.dialFailed(win, target, err)
 			win.Toast(gui.ToastCfg{
-				Body:     errText(err),
+				Body:     errtext.Text(err),
 				Severity: gui.ToastError,
 				Duration: 4 * time.Second,
 			})
@@ -167,7 +168,7 @@ func (c *Controller) runConnectBookmark(w *gui.Window, target paneRef, id string
 		if err := c.attachSession(win, st, sess, target, req); err != nil {
 			c.dialFailed(win, target, err)
 			win.Toast(gui.ToastCfg{
-				Body:     errText(err),
+				Body:     errtext.Text(err),
 				Severity: gui.ToastError,
 				Duration: 4 * time.Second,
 			})

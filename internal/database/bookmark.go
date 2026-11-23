@@ -157,7 +157,7 @@ func (r *BookmarkRepository) GetBookmarkByID(id string) (*BookmarkDB, error) {
 	b, err := scanBookmark(r.db.QueryRow(query, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("bookmark not found")
+			return nil, sql.ErrNoRows
 		}
 		return nil, fmt.Errorf(errQuery, "bookmark by id", err)
 	}
@@ -170,7 +170,7 @@ func (r *BookmarkRepository) GetBookmarkByTitleAndGroup(title string, groupID in
 	b, err := scanBookmark(r.db.QueryRow(query, title, groupID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("bookmark not found")
+			return nil, sql.ErrNoRows
 		}
 		return nil, fmt.Errorf(errQuery, "bookmark by title and group", err)
 	}
@@ -275,7 +275,7 @@ func (r *BookmarkRepository) GetGroupByID(id int) (*BookmarkGroupDB, error) {
 	err := row.Scan(&g.ID, &g.Name, &g.Icon, &g.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("group not found")
+			return nil, sql.ErrNoRows
 		}
 		return nil, fmt.Errorf(errQuery, "group by id", err)
 	}
@@ -292,7 +292,7 @@ func (r *BookmarkRepository) GetGroupByName(name string) (*BookmarkGroupDB, erro
 	err := row.Scan(&g.ID, &g.Name, &g.Icon, &g.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("group not found")
+			return nil, sql.ErrNoRows
 		}
 		return nil, fmt.Errorf(errQuery, "group by name", err)
 	}

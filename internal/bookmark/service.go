@@ -228,8 +228,11 @@ func (s *Service) decryptBookmark(b Bookmark) (Bookmark, error) {
 
 func (s *Service) Get(id string) (*Bookmark, error) {
 	dbBookmark, err := s.db.BookmarkRepo.GetBookmarkByID(id)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return nil, usererr.Coded("bookmark.not_found", "Bookmark not found")
+	}
+	if err != nil {
+		return nil, err
 	}
 	groupName := ""
 	if group, _ := s.db.BookmarkRepo.GetGroupByID(dbBookmark.GroupID); group != nil {
@@ -435,6 +438,9 @@ func (s *Service) Save(b Bookmark) (string, error) {
 	normalizeMeta(&b)
 	if b.ID != "" {
 		existing, err := s.db.BookmarkRepo.GetBookmarkByID(b.ID)
+		if err != nil && !database.IsNotFound(err) {
+			return "", err
+		}
 		if err == nil && existing != nil {
 			return b.ID, s.update(b, existing)
 		}
@@ -518,8 +524,11 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 	groupID := existing.GroupID
 	if b.GroupName != "" {
 		g, err := s.db.BookmarkRepo.GetGroupByName(b.GroupName)
-		if err != nil {
+		if database.IsNotFound(err) {
 			return usererr.Coded("bookmark.group_not_found", "Group '%s' not found", b.GroupName)
+		}
+		if err != nil {
+			return err
 		}
 		groupID = g.ID
 	}
@@ -528,7 +537,7 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 		if err == nil && dup.ID != b.ID {
 			return usererr.Coded("bookmark.title_exists", "Bookmark '%s' already exists in group '%s'", b.Title, b.GroupName)
 		}
-		if err != nil && err.Error() != "bookmark not found" {
+		if err != nil && !database.IsNotFound(err) {
 			return err
 		}
 	}
@@ -588,8 +597,11 @@ func (s *Service) insert(b Bookmark) (string, error) {
 		groupName = DefaultGroupName
 	}
 	group, err := s.db.BookmarkRepo.GetGroupByName(groupName)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return "", usererr.Coded("bookmark.group_not_found", "Group '%s' not found", groupName)
+	}
+	if err != nil {
+		return "", err
 	}
 	exists, err := s.titleExistsInGroup(b.Title, group.ID)
 	if err != nil {
@@ -673,6 +685,8 @@ func (s *Service) Delete(id string) error {
 func (s *Service) AddGroup(name string) error {
 	if _, err := s.db.BookmarkRepo.GetGroupByName(name); err == nil {
 		return usererr.Coded("bookmark.group_exists", "Group '%s' already exists", name)
+	} else if !database.IsNotFound(err) {
+		return err
 	}
 	if err := s.db.BookmarkRepo.InsertGroup(&database.BookmarkGroupDB{Name: name}); err != nil {
 		return err
@@ -691,6 +705,8 @@ func (s *Service) UpdateGroup(oldName, newName, icon string) error {
 	if newName != oldName {
 		if _, err := s.db.BookmarkRepo.GetGroupByName(newName); err == nil {
 			return usererr.Coded("bookmark.group_exists", "Group '%s' already exists", newName)
+		} else if !database.IsNotFound(err) {
+			return err
 		}
 	}
 	if err := s.db.BookmarkRepo.UpdateGroup(oldName, newName, icon); err != nil {
@@ -702,8 +718,11 @@ func (s *Service) UpdateGroup(oldName, newName, icon string) error {
 
 func (s *Service) Copy(id string) (*Bookmark, error) {
 	src, err := s.db.BookmarkRepo.GetBookmarkByID(id)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return nil, usererr.Coded("bookmark.not_found", "Bookmark not found")
+	}
+	if err != nil {
+		return nil, err
 	}
 	title, err := s.uniqueCopyTitle(src.Title, src.GroupID)
 	if err != nil {
@@ -749,7 +768,7 @@ func (s *Service) titleExistsInGroup(title string, groupID int) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if err.Error() == "bookmark not found" {
+	if database.IsNotFound(err) {
 		return false, nil
 	}
 	return false, err

@@ -19,6 +19,7 @@ import (
 	"github.com/ilaziness/vela/internal/system"
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 const (
@@ -393,14 +394,14 @@ func (c *Controller) finishEditDownload(ctx context.Context, ed *remoteEdit, tra
 		c.logger.Error("edit download failed",
 			zap.String("sessionID", ed.sessionID), zap.String("path", ed.remote), zap.Error(err))
 		c.abandonEdit(ed)
-		c.showEditError(i18n.Tf("sftp.download_failed", path.Base(ed.remote), errText(err)))
+		c.showEditError(i18n.Tf("sftp.download_failed", path.Base(ed.remote), errtext.Text(err)))
 		return
 	}
 	st, err := os.Stat(ed.local)
 	if err != nil {
 		c.logger.Error("stat edit temp file failed", zap.String("path", ed.local), zap.Error(err))
 		c.abandonEdit(ed)
-		c.showEditError(i18n.Tf("sftp.download_failed", path.Base(ed.remote), errText(err)))
+		c.showEditError(i18n.Tf("sftp.download_failed", path.Base(ed.remote), errtext.Text(err)))
 		return
 	}
 	ed.mu.Lock()
@@ -414,7 +415,7 @@ func (c *Controller) finishEditDownload(ctx context.Context, ed *remoteEdit, tra
 		ed.opened = false
 		ed.mu.Unlock()
 		c.abandonEdit(ed)
-		c.showEditError(i18n.Tf("sftp.open_failed", path.Base(ed.remote), errText(err)))
+		c.showEditError(i18n.Tf("sftp.open_failed", path.Base(ed.remote), errtext.Text(err)))
 		return
 	}
 	c.watchEdit(ctx, ed)
@@ -491,7 +492,7 @@ func (c *Controller) promptEditUpload(ctx context.Context, ed *remoteEdit, trigg
 		c.logger.Error("edit upload failed",
 			zap.String("sessionID", ed.sessionID), zap.String("path", ed.remote), zap.Error(err))
 		if !c.editStopped(ed) {
-			c.showEditError(i18n.Tf("sftp.upload_failed", path.Base(ed.remote), errText(err)))
+			c.showEditError(i18n.Tf("sftp.upload_failed", path.Base(ed.remote), errtext.Text(err)))
 		}
 	}
 	c.refreshRemoteAfterEdit(ed.sessionID)

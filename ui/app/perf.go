@@ -10,6 +10,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 const (
@@ -242,7 +243,7 @@ func (c *Controller) runPerfPoll(
 		if err != nil {
 			logger.Debug("perf poll failed",
 				zap.String("sessID", sessID), zap.Error(err))
-			pm.setError(errText(err))
+			pm.setError(errtext.Text(err))
 			return true
 		}
 		if !res.Supported {

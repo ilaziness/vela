@@ -140,12 +140,15 @@ func (s *Service) UserCommands() []UserCommand {
 
 func (s *Service) SaveUser(cmd UserCommand) error {
 	existing, err := s.db.UserCommandRepo.GetCommandByCategoryAndName(cmd.Category, cmd.Name)
+	if err != nil && !database.IsNotFound(err) {
+		return err
+	}
 	cmd.CreatedAt = time.Now().UnixNano() / 1000000
 	dbCmd := &database.UserCommandDB{
 		Category: cmd.Category, Name: cmd.Name, Command: cmd.Command,
 		Description: cmd.Description, CreatedAt: time.Unix(cmd.CreatedAt/1000, 0),
 	}
-	if err == nil && existing != nil {
+	if existing != nil {
 		dbCmd.ID = existing.ID
 		return s.db.UserCommandRepo.UpdateCommand(dbCmd)
 	}
@@ -155,8 +158,11 @@ func (s *Service) SaveUser(cmd UserCommand) error {
 
 func (s *Service) DeleteUser(category, name string) error {
 	cmd, err := s.db.UserCommandRepo.GetCommandByCategoryAndName(category, name)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return usererr.Coded("command.not_found", "Command not found: %s / %s", category, name)
+	}
+	if err != nil {
+		return err
 	}
 	return s.db.UserCommandRepo.DeleteCommand(cmd.ID)
 }

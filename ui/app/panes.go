@@ -9,6 +9,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/protocol"
 )
 
@@ -92,7 +93,7 @@ func (c *Controller) restorePaneAfterDial(tab *Tab, idx int, err error) {
 	if hasReq {
 		p.Status = TabStatusDisconnected
 		if err != nil {
-			p.ConnErr = errText(err)
+			p.ConnErr = errtext.Text(err)
 		}
 		return
 	}
@@ -542,7 +543,7 @@ func (c *Controller) ReconnectPane(w *gui.Window, tabID string, paneIdx int) {
 			s.BusyOp = ""
 			if err != nil {
 				c.dialFailed(w, target, err)
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				return
 			}
 			if s.TabByID(tabID) == nil {
@@ -555,7 +556,7 @@ func (c *Controller) ReconnectPane(w *gui.Window, tabID string, paneIdx int) {
 				_ = sess.Close()
 				c.hub.Unregister(sess.ID())
 				c.dialFailed(w, target, err)
-				w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+				w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 				return
 			}
 			w.Toast(gui.ToastCfg{

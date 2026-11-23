@@ -5,6 +5,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 func showConfirmUpload(w *gui.Window, d *Deps) {
@@ -30,7 +31,7 @@ func runUpload(w *gui.Window, d *Deps) {
 				win.DialogDismiss()
 				if err != nil {
 					d.Logger.Error("backup upload failed", zap.Error(err))
-					toastErrMsg(win, i18n.Tf("header.upload_failed", errText(err)))
+					toastErrMsg(win, i18n.Tf("header.upload_failed", errtext.Text(err)))
 					return
 				}
 				toastOK(win, i18n.T("header.upload_success"))

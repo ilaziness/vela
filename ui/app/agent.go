@@ -12,6 +12,7 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/termio"
 	agentmodel "github.com/ilaziness/vela/ui/agent/model"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 // SetAgent injects the agent service during bootstrap.
@@ -253,7 +254,7 @@ func (c *Controller) AgentSend(text string) {
 			}
 			chat.EndRun(cancelled)
 			if err != nil && !cancelled {
-				c.toast(gui.ToastError, i18n.T("ai.chat.load_failed"), errText(err))
+				c.toast(gui.ToastError, i18n.T("ai.chat.load_failed"), errtext.Text(err))
 			}
 			c.agentRefreshSessions(w)
 		})

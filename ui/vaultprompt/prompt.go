@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -161,7 +162,7 @@ func submitPassword(w *gui.Window, reply, failMsg *string, cfg PromptCfg) {
 	if cfg.Validate != nil {
 		if err := cfg.Validate(text); err != nil {
 			if cfg.InlineFail {
-				*failMsg = failText(err)
+				*failMsg = errtext.Text(err)
 			}
 			if cfg.OnFail != nil {
 				cfg.OnFail(w, err)
@@ -173,13 +174,6 @@ func submitPassword(w *gui.Window, reply, failMsg *string, cfg PromptCfg) {
 	if cfg.OnOK != nil {
 		cfg.OnOK(text, w)
 	}
-}
-
-func failText(err error) string {
-	if ue, ok := usererr.As(err); ok && ue.Code != "" {
-		return i18n.T(ue.Code)
-	}
-	return err.Error()
 }
 
 // UnlockCfg configures vault unlock.

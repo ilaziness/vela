@@ -17,6 +17,7 @@ import (
 	"github.com/ilaziness/vela/internal/system"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 // SFTPPanelID is the go-gui focus/effective ID of the SFTP panel
@@ -170,7 +171,7 @@ func (c *Controller) initSFTP(w *gui.Window, sessID, ownerKey string) {
 				return
 			}
 			s.Status = SFTPError
-			s.Err = errText(err)
+			s.Err = errtext.Text(err)
 		})
 		return
 	}
@@ -265,7 +266,7 @@ func (c *Controller) refreshRemote(w *gui.Window, sessID, dir string) {
 				if s.Status == SFTPLoading {
 					s.Status = SFTPError
 				}
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 				return
 			}
 			sortRemoteEntries(files)
@@ -305,7 +306,7 @@ func (c *Controller) refreshLocal(w *gui.Window, sessID, dir string) {
 			}
 			s.LocalNav = ""
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 				return
 			}
 			s.LocalDir = listing.Dir
@@ -562,7 +563,7 @@ func (c *Controller) SFTPUploadLocalPaths(w *gui.Window, sessID string, localPat
 				return
 			}
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 				return
 			}
 			if len(conflicts) > 0 {
@@ -591,7 +592,7 @@ func (c *Controller) enqueueUpload(w *gui.Window, sessID string, localPaths []st
 	go func() {
 		if err := mgr.UploadPaths(sessID, remoteDir, paths); err != nil {
 			w.QueueCommand(func(w *gui.Window) {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			})
 		}
 	}()
@@ -662,7 +663,7 @@ func (c *Controller) downloadRemotePathsTo(w *gui.Window, sessID string, remoteP
 				return
 			}
 			if err != nil {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 				return
 			}
 			if len(conflicts) > 0 {
@@ -691,7 +692,7 @@ func (c *Controller) enqueueDownload(w *gui.Window, sessID string, remotePaths [
 	go func() {
 		if err := mgr.DownloadPaths(sessID, localDir, paths); err != nil {
 			w.QueueCommand(func(w *gui.Window) {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			})
 		}
 	}()
@@ -770,7 +771,7 @@ func (c *Controller) SFTPDeleteRemote(w *gui.Window, sessID string, remotePaths 
 				err := mgr.DeleteFiles(sessID, paths)
 				w.QueueCommand(func(w *gui.Window) {
 					if err != nil {
-						c.toast(gui.ToastError, "", errText(err))
+						c.toast(gui.ToastError, "", errtext.Text(err))
 					}
 					c.SFTPRefreshRemote(w, sessID)
 				})
@@ -784,7 +785,7 @@ func (c *Controller) SFTPEditRemote(w *gui.Window, sessID, remotePath string) {
 	go func() {
 		if err := c.EditRemoteFile(sessID, remotePath); err != nil {
 			w.QueueCommand(func(w *gui.Window) {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			})
 		}
 	}()
@@ -793,7 +794,7 @@ func (c *Controller) SFTPEditRemote(w *gui.Window, sessID, remotePath string) {
 // SFTPOpenLocal opens a local path with the OS default handler.
 func (c *Controller) SFTPOpenLocal(localPath string) {
 	if err := system.OpenPath(localPath); err != nil {
-		c.toast(gui.ToastError, "", errText(err))
+		c.toast(gui.ToastError, "", errtext.Text(err))
 	}
 }
 
@@ -850,7 +851,7 @@ func (c *Controller) SFTPCancelTransfer(w *gui.Window, sessID, id string) {
 	go func() {
 		if err := mgr.CancelTransfer(id); err != nil {
 			w.QueueCommand(func(w *gui.Window) {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			})
 		}
 	}()
@@ -865,7 +866,7 @@ func (c *Controller) SFTPRetryTransfer(w *gui.Window, sessID, id string) {
 	go func() {
 		if err := mgr.RetryTransfer(sessID, id); err != nil {
 			w.QueueCommand(func(w *gui.Window) {
-				c.toast(gui.ToastError, "", errText(err))
+				c.toast(gui.ToastError, "", errtext.Text(err))
 			})
 		}
 	}()

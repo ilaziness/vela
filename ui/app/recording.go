@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/errtext"
 )
 
 // ToggleSessionRecording starts a .gtr session recording on the session's
@@ -30,7 +31,7 @@ func (c *Controller) ToggleSessionRecording(w *gui.Window, sessID string) {
 	if tm.Recording() {
 		if err := tm.StopRecording(); err != nil {
 			c.logger.Error("stop session recording", zap.String("sess", sessID), zap.Error(err))
-			w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+			w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 			return
 		}
 		w.Toast(gui.ToastCfg{
@@ -43,12 +44,12 @@ func (c *Controller) ToggleSessionRecording(w *gui.Window, sessID string) {
 	path, err := c.recordingPath(sessID)
 	if err != nil {
 		c.logger.Error("resolve recording path", zap.String("sess", sessID), zap.Error(err))
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	if err := tm.StartRecording(path); err != nil {
 		c.logger.Error("start session recording", zap.String("sess", sessID), zap.Error(err))
-		w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+		w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 		return
 	}
 	w.Toast(gui.ToastCfg{

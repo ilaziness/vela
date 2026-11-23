@@ -7,8 +7,8 @@ import (
 
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/i18n"
-	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/vaultcheck"
+	"github.com/ilaziness/vela/ui/errtext"
 	"github.com/ilaziness/vela/ui/layout"
 	"github.com/ilaziness/vela/ui/vaultprompt"
 )
@@ -117,7 +117,7 @@ func toastOK(w *gui.Window, body string) {
 }
 
 func toastErr(w *gui.Window, err error) {
-	w.Toast(gui.ToastCfg{Body: errText(err), Severity: gui.ToastError, Duration: 4 * time.Second})
+	w.Toast(gui.ToastCfg{Body: errtext.Text(err), Severity: gui.ToastError, Duration: 4 * time.Second})
 }
 
 func toastErrText(w *gui.Window, body string) {
@@ -126,26 +126,6 @@ func toastErrText(w *gui.Window, body string) {
 
 func toastInfo(w *gui.Window, body string) {
 	w.Toast(gui.ToastCfg{Body: body, Severity: gui.ToastInfo, Duration: 3 * time.Second})
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	if ue, ok := usererr.As(err); ok {
-		if ue.Code != "" {
-			if len(ue.Params) == 0 {
-				return i18n.T(ue.Code)
-			}
-			args := make([]any, len(ue.Params))
-			for i, p := range ue.Params {
-				args[i] = p
-			}
-			return i18n.Tf(ue.Code, args...)
-		}
-		return ue.Message
-	}
-	return err.Error()
 }
 
 func withVault(w *gui.Window, d *Deps, reason string, fn func(), onAbort func(*gui.Window)) {
