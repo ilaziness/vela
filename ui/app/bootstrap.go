@@ -115,6 +115,8 @@ func Bootstrap() (*Runtime, error) {
 	ctrl.SetTermTheme(store.Config.Terminal.Theme)
 	ctrl.SetTermConfig(store.Config.Terminal)
 
+	sshMgr.SetZmodem(&zmodemPickerImpl{ctrl})
+
 	// SFTP rides on the live SSH sessions: the manager reuses the
 	// existing ssh client per session, so opening the panel never
 	// touches the terminal's PTY.

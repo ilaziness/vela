@@ -1189,5 +1189,7 @@
   "pane.single": "单屏",
   "pane.empty_title": "空闲窗格",
   "pane.empty_hint": "点击激活后可连接；也可将会话标签拖到此处",
-  "pane.target_gone": "目标窗格已不可用"
+  "pane.target_gone": "目标窗格已不可用",
+  "zmodem.open_file": "选择要发送的文件",
+  "zmodem.save_directory": "选择保存目录"
 }

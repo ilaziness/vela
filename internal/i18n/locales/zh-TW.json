@@ -1189,5 +1189,7 @@
   "pane.single": "單屏",
   "pane.empty_title": "閒置窗格",
   "pane.empty_hint": "點擊啟用後可連線；也可將工作階段標籤拖到此處",
-  "pane.target_gone": "目標窗格已不可用"
+  "pane.target_gone": "目標窗格已不可用",
+  "zmodem.open_file": "選擇要發送的檔案",
+  "zmodem.save_directory": "選擇儲存目錄"
 }

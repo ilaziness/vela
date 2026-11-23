@@ -1189,5 +1189,7 @@
   "pane.single": "Single pane",
   "pane.empty_title": "Idle pane",
   "pane.empty_hint": "Click to activate, then connect here — or drop a session tab onto it",
-  "pane.target_gone": "The target pane is no longer available"
+  "pane.target_gone": "The target pane is no longer available",
+  "zmodem.open_file": "Select file to send",
+  "zmodem.save_directory": "Select save directory"
 }

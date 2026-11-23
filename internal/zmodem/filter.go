@@ -18,7 +18,7 @@ const protoBufMax = 4 << 20 // 4 MiB
 // ErrCancelled is returned when the user dismisses a file/directory dialog.
 var ErrCancelled = errors.New("zmodem: cancelled")
 
-// FilePicker selects local paths for Zmodem transfers. Implemented in services.
+// FilePicker selects local paths for Zmodem transfers. Implemented by the app layer.
 type FilePicker interface {
 	PickSaveDirectory(ctx context.Context, sessionID string) (string, error)
 	PickOpenFile(ctx context.Context, sessionID string) (string, error)
@@ -56,9 +56,13 @@ type Filter struct {
 	mu         sync.Mutex
 	state      filterState
 	lookbehind []byte
-	stdin      io.WriteCloser
-	queue      *byteQueue
-	cancel     context.CancelFunc
+	// ooPending is set after a receive: the remote sz terminates with "OO",
+	// and bytes arriving after the session ended are shown as literal text.
+	ooPending bool
+	ooHeldO   bool // first 'O' of a split "OO", withheld until the next chunk
+	stdin     io.WriteCloser
+	queue     *byteQueue
+	cancel    context.CancelFunc
 }
 
 // NewFilter creates a session-scoped filter.
@@ -123,6 +127,11 @@ func (f *Filter) FeedOut(data []byte) []byte {
 }
 
 func (f *Filter) feedIdleLocked(data []byte) []byte {
+	data = f.stripOverAndOutLocked(data)
+	if len(data) == 0 {
+		return nil
+	}
+
 	combined := data
 	lbLen := len(f.lookbehind)
 	if lbLen > 0 {
@@ -145,22 +154,61 @@ func (f *Filter) feedIdleLocked(data []byte) []byte {
 	return echo
 }
 
+// stripOverAndOutLocked removes the leading "OO" (over-and-out) that a remote
+// sz writes after the receiver's ZFIN when those bytes reach the PTY only after
+// the session has ended. It matches at the head of the post-session stream
+// only, so normal output and a chained rz/sz autostart are untouched.
+// "OO" may be split across chunks; ooHeldO carries a lone leading 'O'.
+func (f *Filter) stripOverAndOutLocked(data []byte) []byte {
+	if !f.ooPending {
+		return data
+	}
+	if f.ooHeldO {
+		f.ooPending, f.ooHeldO = false, false
+		if data[0] == 'O' {
+			return data[1:]
+		}
+		out := make([]byte, 0, len(data)+1)
+		out = append(append(out, 'O'), data...)
+		return out
+	}
+	if data[0] != 'O' {
+		f.ooPending = false
+		return data
+	}
+	if len(data) == 1 {
+		f.ooHeldO = true
+		return nil
+	}
+	if data[1] != 'O' {
+		f.ooPending = false
+		return data
+	}
+	f.ooPending = false
+	return data[2:]
+}
+
 func (f *Filter) startTransferLocked(dir Direction, initial []byte) {
-	f.queue = newByteQueue(protoBufMax)
-	if err := f.queue.tryWrite(initial); err != nil {
+	f.ooPending, f.ooHeldO = false, false
+	q := newByteQueue(protoBufMax)
+	if err := q.tryWrite(initial); err != nil {
 		f.logger.Warn("zmodem failed to queue initial frame", zap.Error(err))
-		f.queue = nil
 		return
 	}
+	f.queue = q
 	ctx, cancel := context.WithCancel(context.Background())
 	f.cancel = cancel
 	f.state = statePending
 
-	system.SafeGo(func() { f.runTransfer(ctx, dir) })
+	system.SafeGo(func() { f.runTransfer(ctx, dir, q) })
 }
 
-func (f *Filter) runTransfer(ctx context.Context, dir Direction) {
-	defer f.finish()
+// runTransfer owns one transfer; q identifies it so a stale goroutine cannot
+// adopt or reset a newer transfer's state.
+func (f *Filter) runTransfer(ctx context.Context, dir Direction, q *byteQueue) {
+	// A completed receive ends with the peer's "OO"; see ooPending.
+	expectOO := false
+	defer func() { f.finishWithOO(q, expectOO) }()
 
 	var (
 		saveDir string
@@ -173,7 +221,9 @@ func (f *Filter) runTransfer(ctx context.Context, dir Direction) {
 		f.emitLine("Zmodem: receiving — choose save directory…")
 		saveDir, err = f.picker.PickSaveDirectory(ctx, f.sessionID)
 		if err != nil {
-			f.handlePickErr(err)
+			if ctx.Err() == nil { // cancelled (session closed) is not a pick failure
+				f.handlePickErr(err)
+			}
 			return
 		}
 	case DirectionSend:
@@ -181,7 +231,9 @@ func (f *Filter) runTransfer(ctx context.Context, dir Direction) {
 		var path string
 		path, err = f.picker.PickOpenFile(ctx, f.sessionID)
 		if err != nil {
-			f.handlePickErr(err)
+			if ctx.Err() == nil {
+				f.handlePickErr(err)
+			}
 			return
 		}
 		offer, err = openFileOffer(path)
@@ -198,12 +250,12 @@ func (f *Filter) runTransfer(ctx context.Context, dir Direction) {
 	}
 
 	f.mu.Lock()
-	if f.state != statePending {
+	if f.state != statePending || f.queue != q {
 		f.mu.Unlock()
 		return
 	}
 	f.state = stateActive
-	bridge := &duplexBridge{q: f.queue, w: f.stdin}
+	bridge := &duplexBridge{q: q, w: f.stdin}
 	f.mu.Unlock()
 
 	handler := &fileHandler{
@@ -239,6 +291,7 @@ func (f *Filter) runTransfer(ctx context.Context, dir Direction) {
 	if !handler.completedOK {
 		f.emitLine("Zmodem: done")
 	}
+	expectOO = dir == DirectionReceive
 }
 
 func (f *Filter) handlePickErr(err error) {
@@ -271,6 +324,7 @@ func (f *Filter) Reset() {
 	}
 	f.mu.Lock()
 	w := f.abortLocked()
+	f.ooPending, f.ooHeldO = false, false
 	f.mu.Unlock()
 	writeAbort(w)
 }
@@ -294,9 +348,16 @@ func (f *Filter) abortLocked() (stdin io.WriteCloser) {
 	return w
 }
 
-func (f *Filter) finish() {
+// finishWithOO releases the transfer identified by q; expectOO arms the
+// post-receive "OO" strip. A stale q leaves a newer transfer untouched.
+func (f *Filter) finishWithOO(q *byteQueue, expectOO bool) {
 	f.mu.Lock()
+	if f.queue != q {
+		f.mu.Unlock()
+		return
+	}
 	_ = f.abortLocked()
+	f.ooPending, f.ooHeldO = expectOO, false
 	f.mu.Unlock()
 }
 

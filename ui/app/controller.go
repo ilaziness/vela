@@ -26,6 +26,7 @@ import (
 	"github.com/ilaziness/vela/internal/transfer"
 	"github.com/ilaziness/vela/internal/tunnel"
 	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/internal/zmodem"
 	"github.com/ilaziness/vela/ui/fonts"
 	"github.com/ilaziness/vela/ui/protocol"
 	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
@@ -793,4 +794,73 @@ func transferRemove(list []transfer.ProgressData, id string) []transfer.Progress
 // Statusf is a small helper for formatted toast messages.
 func (c *Controller) Statusf(format string, args ...any) {
 	c.SetStatus(fmt.Sprintf(format, args...))
+}
+
+// zmodemPickerImpl implements zmodem.FilePicker for rz/sz file transfers.
+type zmodemPickerImpl struct {
+	ctrl *Controller
+}
+
+func (p *zmodemPickerImpl) PickSaveDirectory(ctx context.Context, _ string) (string, error) {
+	return p.pick(ctx, i18n.T("zmodem.save_directory"), false)
+}
+
+func (p *zmodemPickerImpl) PickOpenFile(ctx context.Context, _ string) (string, error) {
+	return p.pick(ctx, i18n.T("zmodem.open_file"), true)
+}
+
+// pick runs a native dialog on the UI thread and waits for the result. The
+// caller is a session-scoped transfer goroutine, so blocking here is fine.
+func (p *zmodemPickerImpl) pick(ctx context.Context, title string, openFile bool) (string, error) {
+	w := p.ctrl.Window()
+	if w == nil {
+		return "", errors.New("window not available")
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
+	answer := make(chan zmodemDialogAnswer, 1)
+	onDone := func(res gui.NativeDialogResult) {
+		paths := res.PathStrings()
+		if res.Status != gui.DialogOK || len(paths) == 0 {
+			answer <- zmodemDialogAnswer{err: zmodem.ErrCancelled}
+			return
+		}
+		p.ctrl.rememberDialogPath(paths[0])
+		answer <- zmodemDialogAnswer{path: paths[0]}
+	}
+
+	w.QueueCommand(func(w *gui.Window) {
+		startDir := p.ctrl.lastDialogDir()
+		handle := func(res gui.NativeDialogResult, _ *gui.Window) { onDone(res) }
+		if openFile {
+			w.NativeOpenDialog(gui.NativeOpenDialogCfg{
+				Title:    title,
+				StartDir: startDir,
+				OnDone:   handle,
+			})
+			return
+		}
+		w.NativeFolderDialog(gui.NativeFolderDialogCfg{
+			Title:    title,
+			StartDir: startDir,
+			OnDone:   handle,
+		})
+	})
+
+	select {
+	case res := <-answer:
+		return res.path, res.err
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-p.ctrl.shutdownDone():
+		return "", zmodem.ErrCancelled
+	}
+}
+
+// zmodemDialogAnswer is one native dialog outcome.
+type zmodemDialogAnswer struct {
+	path string
+	err  error
 }
