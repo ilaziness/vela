@@ -39,18 +39,35 @@ func headerID(remote bool) string {
 	return "sftp-local-head"
 }
 
+// blankMinHeight is the empty band kept at the bottom of the scrollable
+// file list so the blank-area context menu stays reachable after
+// scrolling to the end (~4 rows).
+const blankMinHeight float32 = 4 * rowHeight
+
+// listBlankSpacer is the trailing fill child of the file list: it
+// absorbs leftover viewport space on short lists and keeps a minimum
+// blank band at the content bottom on long ones.
+func listBlankSpacer(id string) gui.View {
+	return gui.Column(layout.Flush(gui.ContainerCfg{
+		ID:        id,
+		Sizing:    gui.FillFill,
+		MinHeight: blankMinHeight,
+	}))
+}
+
 // remoteFileList renders the remote pane's scrollable rows. The whole
 // list is wrapped in the blank-area context menu; rows carry their own
 // menu which wins on right-click.
 func remoteFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFTPState) gui.View {
 	th := gui.CurrentTheme()
-	rows := make([]gui.View, 0, len(s.RemoteEntries)+1)
+	rows := make([]gui.View, 0, len(s.RemoteEntries)+2)
 	for i, e := range s.RemoteEntries {
 		rows = append(rows, remoteRow(w, ctrl, tab, s, e, i))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, emptyRow(th))
 	}
+	rows = append(rows, listBlankSpacer("sftp-remote-list-blank"))
 	list := gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:         "sftp-remote-list",
 		Sizing:     gui.FillFill,
@@ -73,13 +90,14 @@ func remoteFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SF
 // on right-click.
 func localFileList(w *gui.Window, ctrl *app.Controller, tab *app.Tab, s *app.SFTPState) gui.View {
 	th := gui.CurrentTheme()
-	rows := make([]gui.View, 0, len(s.LocalEntries)+1)
+	rows := make([]gui.View, 0, len(s.LocalEntries)+2)
 	for i, e := range s.LocalEntries {
 		rows = append(rows, localRow(w, ctrl, tab, s, e, i))
 	}
 	if len(rows) == 0 {
 		rows = append(rows, emptyRow(th))
 	}
+	rows = append(rows, listBlankSpacer("sftp-local-list-blank"))
 	list := gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:         "sftp-local-list",
 		Sizing:     gui.FillFill,
