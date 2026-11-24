@@ -71,13 +71,21 @@ type Manager struct {
 	onQueued  func(sessionID string, count int)
 	clients   sync.Map
 	owners    sync.Map // sessionID -> ownerKey
+	// execFn runs remote shell commands (ssh.Manager.Exec); injectable
+	// for tests. execCancels tracks in-flight remote ops per session.
+	execFn      execFunc
+	execCancels sync.Map // sessionID -> context.CancelFunc
 }
 
 func NewManager(logger *zap.Logger, sshMgr *ssh.Manager, transfers *transfer.Registry, queue transfer.QueueStore) *Manager {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Manager{logger: logger, ssh: sshMgr, transfers: transfers, queue: queue}
+	m := &Manager{logger: logger, ssh: sshMgr, transfers: transfers, queue: queue}
+	if sshMgr != nil {
+		m.execFn = sshMgr.Exec
+	}
+	return m
 }
 
 // SetOnQueued registers a callback after transfers are successfully enqueued.
@@ -950,6 +958,7 @@ func (sft *Manager) CloseSession(sessionID string) {
 }
 
 func (sft *Manager) interruptSession(sessionID string) {
+	sft.CancelRemoteOp(sessionID)
 	ids := sft.transfers.InterruptSession(sessionID)
 	if sft.queue == nil {
 		return
@@ -962,6 +971,7 @@ func (sft *Manager) interruptSession(sessionID string) {
 }
 
 func (sft *Manager) CloseAll() {
+	sft.cancelAllRemoteOps()
 	ids := sft.transfers.InterruptAll()
 	if sft.queue != nil {
 		for _, id := range ids {

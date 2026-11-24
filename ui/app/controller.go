@@ -94,6 +94,12 @@ type Controller struct {
 	// caches saved bookmark rules keyed by bookmark id.
 	tunnels     *tunnel.Manager
 	tunnelRules map[string]*tunnelRuleCache
+
+	// remoteOpRunning single-flights SFTP remote shell ops (copy/paste,
+	// compress/extract): the busy dialog is window-modal, so only one
+	// may run at a time or a late completion would dismiss another op's
+	// dialog.
+	remoteOpRunning bool
 }
 
 // reconnectReq is how a session tab reached its session: either a

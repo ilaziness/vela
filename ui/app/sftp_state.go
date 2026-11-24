@@ -76,6 +76,24 @@ type SFTPState struct {
 
 	// dlg is the open modal form/confirm, if any.
 	dlg sftpDialog
+
+	// Remote clipboard for copy/cut/paste within the remote pane.
+	ClipOp    sftpClipOp
+	ClipPaths []string
+}
+
+// sftpClipOp is the remote clipboard operation.
+type sftpClipOp int
+
+const (
+	clipNone sftpClipOp = iota
+	clipCopy
+	clipCut
+)
+
+// HasClipboard reports whether the remote clipboard holds paths.
+func (s *SFTPState) HasClipboard() bool {
+	return s.ClipOp != clipNone && len(s.ClipPaths) > 0
 }
 
 // newSFTPState builds a fresh panel state. localDir seeds the local

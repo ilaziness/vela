@@ -1,6 +1,7 @@
 package sftpui
 
 import (
+	"path"
 	"strings"
 	"time"
 
@@ -43,6 +44,28 @@ func remoteItemMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e sftp
 		}})
 	}
 	items = append(items,
+		gui.MenuItemCfg{ID: "copy", Text: i18n.T("common.copy"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPCopyRemote(ctx.Window, sessID, targetPaths())
+		}},
+		gui.MenuItemCfg{ID: "cut", Text: i18n.T("sftp.cut"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPCutRemote(ctx.Window, sessID, targetPaths())
+		}},
+	)
+	// Paste only appears while the remote clipboard holds paths.
+	if s.HasClipboard() {
+		items = append(items, gui.MenuItemCfg{ID: "paste", Text: i18n.T("sftp.paste"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPPasteRemote(ctx.Window, sessID)
+		}})
+	}
+	items = append(items,
+		gui.MenuSeparator(),
+		gui.MenuItemCfg{ID: "compress", Text: i18n.T("sftp.compress"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPCompressRemote(ctx.Window, sessID, entryNames(targetPaths()))
+		}},
+		gui.MenuItemCfg{ID: "decompress", Text: i18n.T("sftp.decompress"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPDecompressRemote(ctx.Window, sessID, targetPaths())
+		}},
+		gui.MenuSeparator(),
 		gui.MenuItemCfg{ID: "download", Text: i18n.T("sftp.download"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 			// The row menu asks for a target folder; the transfer column
 			// button keeps downloading into the local pane dir.
@@ -109,6 +132,15 @@ func remoteItemMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e sftp
 	}
 }
 
+// entryNames reduces full remote paths to basenames for archive members.
+func entryNames(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, path.Base(p))
+	}
+	return out
+}
+
 // localItemMenu builds the right-click menu for one local row.
 func localItemMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e localfs.Entry) gui.ContextMenuCfg {
 	sessID := tab.SessID
@@ -168,31 +200,38 @@ func localBlankMenu(ctrl *app.Controller, tab *app.Tab) gui.ContextMenuCfg {
 // remoteBlankMenu is the right-click menu on empty remote pane area.
 func remoteBlankMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState) gui.ContextMenuCfg {
 	sessID := tab.SessID
+	items := []gui.MenuItemCfg{}
+	if s.HasClipboard() {
+		items = append(items, gui.MenuItemCfg{ID: "paste", Text: i18n.T("sftp.paste"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPPasteRemote(ctx.Window, sessID)
+		}})
+	}
+	items = append(items,
+		gui.MenuItemCfg{ID: "deselect", Text: i18n.T("sftp.deselect"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			s.ClearRemoteSelection()
+		}},
+		gui.MenuItemCfg{ID: "refresh", Text: i18n.T("common.refresh"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPRefreshRemote(ctx.Window, sessID)
+		}},
+		gui.MenuSeparator(),
+		gui.MenuItemCfg{ID: "newfile", Text: i18n.T("sftp.new_file"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPCreateRemote(ctx.Window, sessID, false)
+		}},
+		gui.MenuItemCfg{ID: "newfolder", Text: i18n.T("sftp.new_folder"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPCreateRemote(ctx.Window, sessID, true)
+		}},
+		gui.MenuSeparator(),
+		gui.MenuItemCfg{ID: "uploadfile", Text: i18n.T("sftp.upload_file"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPUploadFileDialog(ctx.Window, sessID)
+		}},
+		gui.MenuItemCfg{ID: "uploadfolder", Text: i18n.T("sftp.upload_folder"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			ctrl.SFTPUploadFolderDialog(ctx.Window, sessID)
+		}},
+	)
 	return gui.ContextMenuCfg{
 		ID:      "sftp-remote-blank-menu",
 		Sizing:  gui.FillFill,
 		Padding: gui.PaddingNone,
-		Items: []gui.MenuItemCfg{
-			{ID: "deselect", Text: i18n.T("sftp.deselect"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				s.ClearRemoteSelection()
-			}},
-			{ID: "refresh", Text: i18n.T("common.refresh"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				ctrl.SFTPRefreshRemote(ctx.Window, sessID)
-			}},
-			gui.MenuSeparator(),
-			{ID: "newfile", Text: i18n.T("sftp.new_file"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				ctrl.SFTPCreateRemote(ctx.Window, sessID, false)
-			}},
-			{ID: "newfolder", Text: i18n.T("sftp.new_folder"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				ctrl.SFTPCreateRemote(ctx.Window, sessID, true)
-			}},
-			gui.MenuSeparator(),
-			{ID: "uploadfile", Text: i18n.T("sftp.upload_file"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				ctrl.SFTPUploadFileDialog(ctx.Window, sessID)
-			}},
-			{ID: "uploadfolder", Text: i18n.T("sftp.upload_folder"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				ctrl.SFTPUploadFolderDialog(ctx.Window, sessID)
-			}},
-		},
+		Items:   items,
 	}
 }
