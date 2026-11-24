@@ -51,6 +51,10 @@ func Open(d *Deps) {
 			st.ensureLoaded()
 			st.Lang = i18n.Language()
 			reload(w, deps)
+
+			// Route SSH trust / keyboard dialogs to this window.
+			st.ContextKey = deps.Ctrl.RegisterWindowPrompters(w)
+
 			w.SetView(func(win *gui.Window) gui.View {
 				return Root(win, deps)
 			})
@@ -63,22 +67,28 @@ func Open(d *Deps) {
 					Title:      i18n.T("bookmark.unsaved_title"),
 					Body:       i18n.T("bookmark.unsaved_body"),
 					OnOkYes: func(win *gui.Window) {
-						closeWindow(win)
+						closeWindow(win, deps)
 					},
 				})
 				return
 			}
-			closeWindow(w)
+			closeWindow(w, deps)
 		},
 	})
 }
 
-func closeWindow(w *gui.Window) {
+func closeWindow(w *gui.Window, d *Deps) {
 	mu.Lock()
 	if bmWin == w {
 		bmWin = nil
 	}
 	opening = false
 	mu.Unlock()
+
+	// Unregister prompters
+	if st := gui.State[State](w); st.ContextKey != "" {
+		d.Ctrl.UnregisterWindowPrompters(st.ContextKey)
+	}
+
 	w.Close()
 }

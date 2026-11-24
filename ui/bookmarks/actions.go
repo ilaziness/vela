@@ -191,7 +191,7 @@ func doTest(w *gui.Window, d *Deps) {
 			toastErr(w, err)
 			return
 		}
-		d.Ctrl.TestBookmark(b, func(err error) {
+		d.Ctrl.TestBookmark(b, st.ContextKey, func(err error) {
 			w.QueueCommand(func(win *gui.Window) {
 				s := gui.State[State](win)
 				s.Busy = false

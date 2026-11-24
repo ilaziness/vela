@@ -181,6 +181,16 @@ type Manager struct {
 	optsMu                sync.RWMutex
 	opts                  Options
 	zmodemPicker          zmodem.FilePicker
+	// Per-window prompters keyed by dial context; missing keys fall back
+	// to the default prompters bound to the main window.
+	prompters   map[string]dialPrompters
+	promptersMu sync.RWMutex
+}
+
+// dialPrompters are the prompters one window uses for its SSH dialogs.
+type dialPrompters struct {
+	hostKey  HostKeyPrompter
+	keyboard KeyboardInteractivePrompter
 }
 
 func NewManager(logger *zap.Logger, knownHostsPath string, prompter HostKeyPrompter, keyboard KeyboardInteractivePrompter) *Manager {
@@ -196,11 +206,54 @@ func NewManager(logger *zap.Logger, knownHostsPath string, prompter HostKeyPromp
 		sessions:         new(sync.Map),
 		hostKey:          newHostKeyStore(),
 		keyboard:         newKeyboardStore(),
+		prompters:        make(map[string]dialPrompters),
 		opts: Options{
 			ServerAliveInterval: 30 * time.Second,
 			DialTimeout:         30 * time.Second,
 		},
 	}
+}
+
+// RegisterWindowPrompters binds the prompters used by dials made with ctxKey.
+func (m *Manager) RegisterWindowPrompters(ctxKey string, hostKey HostKeyPrompter, keyboard KeyboardInteractivePrompter) {
+	m.promptersMu.Lock()
+	m.prompters[ctxKey] = dialPrompters{hostKey: hostKey, keyboard: keyboard}
+	m.promptersMu.Unlock()
+}
+
+// UnregisterWindowPrompters drops the prompters registered for ctxKey.
+func (m *Manager) UnregisterWindowPrompters(ctxKey string) {
+	m.promptersMu.Lock()
+	delete(m.prompters, ctxKey)
+	m.promptersMu.Unlock()
+}
+
+// getHostKeyPrompter returns the prompter for ctxKey, or the default one.
+func (m *Manager) getHostKeyPrompter(ctxKey string) HostKeyPrompter {
+	if ctxKey == "" {
+		return m.prompter
+	}
+	m.promptersMu.RLock()
+	p, ok := m.prompters[ctxKey]
+	m.promptersMu.RUnlock()
+	if ok {
+		return p.hostKey
+	}
+	return m.prompter
+}
+
+// getKeyboardPrompter returns the keyboard prompter for ctxKey, or the default one.
+func (m *Manager) getKeyboardPrompter(ctxKey string) KeyboardInteractivePrompter {
+	if ctxKey == "" {
+		return m.keyboardPrompter
+	}
+	m.promptersMu.RLock()
+	p, ok := m.prompters[ctxKey]
+	m.promptersMu.RUnlock()
+	if ok {
+		return p.keyboard
+	}
+	return m.keyboardPrompter
 }
 
 // SetZmodem enables rz/sz detection for new sessions. Nil disables.
@@ -308,6 +361,8 @@ func hopsClientKey(hops []Endpoint, proxy ProxyConfig) string {
 	return key
 }
 
+// Connect dials hops and opens a session, prompting through the default
+// (main window) prompters.
 func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 	if len(hops) == 0 {
 		return "", usererr.Coded("ssh.empty_hops", "Empty hop list")
@@ -325,7 +380,7 @@ func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 		m.logger.Debug("Using existing SSH client", zap.String("clientKey", clientKey))
 		client = v.(*hopClient).target
 	} else {
-		hc, err := m.dialHops(hops, m.dialTimeout(), proxy)
+		hc, err := m.dialHops(hops, m.dialTimeout(), proxy, "")
 		if err != nil {
 			return "", err
 		}
@@ -340,13 +395,15 @@ func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 	return sess.ID, nil
 }
 
-func (m *Manager) TestConnect(hops []Endpoint, proxy ProxyConfig) error {
+// TestConnect dials hops without opening a session. ctxKey selects the
+// window that owns trust / keyboard dialogs; empty uses the default prompters.
+func (m *Manager) TestConnect(hops []Endpoint, proxy ProxyConfig, ctxKey string) error {
 	if len(hops) == 0 {
 		return usererr.Coded("ssh.empty_hops", "Empty hop list")
 	}
 	target := hops[len(hops)-1]
 	m.logger.Debug("Testing SSH connection", zap.String("host", target.Host), zap.Int("port", target.Port))
-	hc, err := m.dialHops(hops, m.dialTimeout(), proxy)
+	hc, err := m.dialHops(hops, m.dialTimeout(), proxy, ctxKey)
 	if err != nil {
 		return err
 	}

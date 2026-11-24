@@ -58,6 +58,9 @@ type State struct {
 	ExportGroup string // "" = all
 	DialogName  string
 	ColorDraft  gui.Color
+
+	// ContextKey is the window's context key for SSH prompter registration.
+	ContextKey string
 }
 
 func (s *State) ensureLoaded() {

@@ -71,7 +71,7 @@ func (c *Connector) Test(_ context.Context, draft protocol.Draft) error {
 	if err != nil {
 		return ssh.MapUserError(err)
 	}
-	return ssh.MapUserError(c.mgr.TestConnect([]ssh.Endpoint{ep}, proxy))
+	return ssh.MapUserError(c.mgr.TestConnect([]ssh.Endpoint{ep}, proxy, ""))
 }
 
 func endpointFromDraft(draft protocol.Draft) (ssh.Endpoint, error) {

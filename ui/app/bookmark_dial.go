@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-gui-org/go-gui/gui"
@@ -18,6 +19,7 @@ import (
 	"github.com/ilaziness/vela/internal/usererr"
 	"github.com/ilaziness/vela/internal/vaultcheck"
 	"github.com/ilaziness/vela/ui/errtext"
+	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
 	"github.com/ilaziness/vela/ui/vaultprompt"
 )
 
@@ -48,6 +50,32 @@ func (c *Controller) SetBookmarkDial(d BookmarkDialDeps) {
 	}
 }
 
+// RegisterWindowPrompters binds SSH host-key and keyboard-interactive dialogs
+// to w. It returns the context key that dials started from that window must
+// pass to TestBookmark; release it with UnregisterWindowPrompters on close.
+func (c *Controller) RegisterWindowPrompters(w *gui.Window) string {
+	c.mu.Lock()
+	mgr := c.sshMgr
+	c.mu.Unlock()
+	if mgr == nil {
+		return ""
+	}
+	ctxKey := fmt.Sprintf("win-%d", w.PlatformID())
+	mgr.RegisterWindowPrompters(ctxKey, sshui.NewHostKeyPrompter(w, mgr), sshui.NewKeyboardPrompter(w, mgr))
+	return ctxKey
+}
+
+// UnregisterWindowPrompters releases prompters registered by RegisterWindowPrompters.
+func (c *Controller) UnregisterWindowPrompters(ctxKey string) {
+	if ctxKey == "" {
+		return
+	}
+	c.mu.Lock()
+	mgr := c.sshMgr
+	c.mu.Unlock()
+	mgr.UnregisterWindowPrompters(ctxKey)
+}
+
 // ReloadBookmarkGroups loads grouped bookmarks into window state.
 // Call only from event handlers (open side panel / refresh), not from View build.
 func (c *Controller) ReloadBookmarkGroups(w *gui.Window) {
@@ -73,9 +101,11 @@ func (c *Controller) ReloadBookmarkGroups(w *gui.Window) {
 
 // TestBookmark dials using the form draft (PrepareTest restores masked secrets).
 // It does not open a session tab. onDone runs on a background goroutine.
-func (c *Controller) TestBookmark(b bookmark.Bookmark, onDone func(error)) {
+// ctxKey selects the window that owns host-key / keyboard dialogs; empty
+// uses the main window.
+func (c *Controller) TestBookmark(b bookmark.Bookmark, ctxKey string, onDone func(error)) {
 	go func() {
-		err := c.testBookmarkSync(b)
+		err := c.testBookmarkSync(b, ctxKey)
 		if onDone != nil {
 			onDone(err)
 		}
@@ -282,7 +312,7 @@ func bookmarkTabLabel(b *bookmark.Bookmark) string {
 	return b.Title + "@" + b.User
 }
 
-func (c *Controller) testBookmarkSync(b bookmark.Bookmark) error {
+func (c *Controller) testBookmarkSync(b bookmark.Bookmark, ctxKey string) error {
 	c.mu.Lock()
 	svc := c.bookmarks
 	sshMgr := c.sshMgr
@@ -320,7 +350,7 @@ func (c *Controller) testBookmarkSync(b bookmark.Bookmark) error {
 		if err != nil {
 			return ssh.MapUserError(err)
 		}
-		return ssh.MapUserError(sshMgr.TestConnect(hops, proxy))
+		return ssh.MapUserError(sshMgr.TestConnect(hops, proxy, ctxKey))
 	case termio.ProtocolSerial:
 		if serialMgr == nil {
 			return errors.New("bookmark dial is not configured")

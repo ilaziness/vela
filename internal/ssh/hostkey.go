@@ -228,7 +228,16 @@ func checkKnownHostInFile(path, host, keyType, keyBase64 string) (found, mismatc
 	return false, false, "", "", nil
 }
 
-func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.PublicKey) error {
+// hostKeyCallback builds the host key verifier for one dial. The prompter is
+// resolved per verification, so closing the origin window mid-dial falls back
+// to the default prompter. A nil prompter means non-interactive.
+func (m *Manager) hostKeyCallback(ctxKey string) cryptossh.HostKeyCallback {
+	return func(host string, remote net.Addr, key cryptossh.PublicKey) error {
+		return m.verifyHostKey(host, remote, key, m.getHostKeyPrompter(ctxKey))
+	}
+}
+
+func (m *Manager) verifyHostKey(host string, remote net.Addr, key cryptossh.PublicKey, prompter HostKeyPrompter) error {
 	keyType := key.Type()
 	keyBase64 := base64.StdEncoding.EncodeToString(key.Marshal())
 	knownPath := m.knownHostsFile()
@@ -245,7 +254,7 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 	if found {
 		return nil
 	}
-	if m.prompter == nil {
+	if prompter == nil {
 		if mismatch {
 			return usererr.Coded("ssh.host_key_mismatch", "Host key mismatch for %s", host)
 		}
@@ -269,7 +278,7 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 		prompt.OldFingerprint = fingerprintFromBase64(oldBase64)
 	}
 
-	if err := m.prompter.Prompt(prompt); err != nil {
+	if err := prompter.Prompt(prompt); err != nil {
 		return err
 	}
 

@@ -115,7 +115,7 @@ func TestAutoPasswordAnswer(t *testing.T) {
 	got, err := m.answerKeyboardChallenge(ep, &used, func() net.Conn {
 		t.Fatal("auto answer should not touch the connection")
 		return nil
-	}, time.Second, time.Second, "", "", []string{"Password:"}, []bool{false})
+	}, time.Second, time.Second, prompter, "", "", []string{"Password:"}, []bool{false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +184,7 @@ func TestKeyboardChallengePromptAnswer(t *testing.T) {
 		func() net.Conn { return spy },
 		5*time.Second,
 		time.Second,
+		prompter,
 		"Duo",
 		"Enter the code",
 		[]string{"Verification code:"},
@@ -215,7 +216,7 @@ func TestKeyboardChallengeCancelAndTimeout(t *testing.T) {
 		}()
 		return nil
 	}
-	_, err := m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, nil, time.Second, time.Second, "", "info", nil, nil)
+	_, err := m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, nil, time.Second, time.Second, prompter, "", "info", nil, nil)
 	if !errors.Is(err, ErrAuthCancelled) {
 		t.Fatalf("err = %v", err)
 	}
@@ -224,7 +225,7 @@ func TestKeyboardChallengeCancelAndTimeout(t *testing.T) {
 	}
 
 	prompter.fn = func(KeyboardChallenge) error { return nil }
-	_, err = m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, nil, time.Second, 20*time.Millisecond, "", "", []string{"Code:"}, []bool{false})
+	_, err = m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, nil, time.Second, 20*time.Millisecond, prompter, "", "", []string{"Code:"}, []bool{false})
 	if !errors.Is(err, ErrAuthTimeout) {
 		t.Fatalf("err = %v", err)
 	}
@@ -242,7 +243,7 @@ func TestKeyboardChallengeEmptyRound(t *testing.T) {
 	got, err := m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, func() net.Conn {
 		t.Fatal("empty round should not touch the connection")
 		return nil
-	}, time.Second, time.Second, "  ", "\n", nil, nil)
+	}, time.Second, time.Second, prompter, "  ", "\n", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,13 +258,13 @@ func TestKeyboardChallengeRejectsBadRounds(t *testing.T) {
 		return nil
 	}}
 	m := NewManager(nil, "", nil, prompter)
-	_, err := m.answerKeyboardChallenge(Endpoint{}, nil, nil, time.Second, time.Second, "", "", []string{"Password:"}, nil)
+	_, err := m.answerKeyboardChallenge(Endpoint{}, nil, nil, time.Second, time.Second, prompter, "", "", []string{"Password:"}, nil)
 	if usererr.CodeOf(err) != "ssh.kex_invalid" {
 		t.Fatalf("err = %v", err)
 	}
 	questions := make([]string, maxKeyboardQuestions+1)
 	echos := make([]bool, len(questions))
-	_, err = m.answerKeyboardChallenge(Endpoint{}, nil, nil, time.Second, time.Second, "", "", questions, echos)
+	_, err = m.answerKeyboardChallenge(Endpoint{}, nil, nil, time.Second, time.Second, prompter, "", "", questions, echos)
 	if usererr.CodeOf(err) != "ssh.kex_too_many" {
 		t.Fatalf("err = %v", err)
 	}
@@ -280,7 +281,7 @@ func TestKeyboardChallengePromptError(t *testing.T) {
 	_, err := m.answerKeyboardChallenge(Endpoint{Host: "h"}, nil, func() net.Conn {
 		t.Fatal("prompt error should not touch the connection")
 		return nil
-	}, time.Second, time.Second, "", "", []string{"Code:"}, []bool{true})
+	}, time.Second, time.Second, prompter, "", "", []string{"Code:"}, []bool{true})
 	if err == nil || !strings.Contains(err.Error(), "emit failed") {
 		t.Fatalf("err = %v", err)
 	}
