@@ -495,13 +495,22 @@ type Term struct {
 	focused atomic.Bool
 
 	// focusID is a unique per-Term focus ID so multiple terminals
-	// in the same window don't compete for the same focus slot. It contains
-	// go-gui's scope separator (":") on purpose: an ID with a separator is
-	// treated as already absolute, so an embedder that nests the Term under
-	// ID-bearing ancestors (context menus, splitters, tab panels) does not
-	// re-scope it. go-gui's SetFocus takes the *effective* ID, and the Term
-	// can only know its leaf spelling, so the leaf must not be re-scoped.
+	// in the same window don't compete for the same focus slot.
 	focusID string
+
+	// effFocusID is focusID as the last layout generation resolved it: the
+	// leaf joined to the pane's ID-bearing ancestors ("tabs:term-3" inside a
+	// TabControl). go-gui's SetFocus takes this form, never the bare leaf
+	// (go-gui#1284). Empty until the first generation. Main goroutine only:
+	// written in termView.GenerateLayout, read there and in SetFocused's queued
+	// command, both on the main thread.
+	effFocusID string
+
+	// claimedFocusID is the effective ID this pane last asked go-gui to
+	// focus. It lets columnView tell "focus still parked on this pane under
+	// an old scope" apart from a foreign widget that happens to share the
+	// leaf spelling. Main goroutine only.
+	claimedFocusID string
 
 	// winFocused tracks whether the *window* has focus. It is fed only by the
 	// EventFocused/EventUnfocused pair in HandleWindowEvent, i.e. by real

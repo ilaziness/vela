@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.19.3] - 2026-11-22
+
+### Changed
+
+- The macOS `.dmg` is now Apple-silicon only. go-gui dropped Intel Macs, so
+  the amd64 half no longer links and there is nothing to fuse with `lipo`;
+  `build-macos` builds arm64 only. The `.dmg` keeps its filename, and Linux
+  and Windows still ship both architectures. (#320)
+
+## [0.19.2] - 2026-11-22
+
+### Fixed
+
+- **A Term inside an ID-bearing container takes keyboard input (go-gui#1284).**
+  A pane placed in a `gui.TabControl`, or in any container with an `ID`, did not
+  respond to the keyboard. That ID joins the pane's focus ID (`tabs:term-1`),
+  but `View` and `SetFocused` set focus with the bare leaf (`term-1`). No widget
+  had that ID, so go-gui moved focus to the first tab stop on every rebuild.
+  Focus now uses the effective ID. `View` builds its tree when go-gui generates
+  it, so the ID resolves in the correct scope also when a parent's `Content`
+  calls `tm.View(w)` directly. `FocusID` still returns the leaf; pass it through
+  `Window.ResolveID` to address the pane. (#315)
+
+### Changed
+
+- Bumped go-gui v0.98.0 → v0.99.1 and go-glyph v1.28.0 → v1.29.2 (#317, #318).
+
 ## [0.19.1] - 2026-11-19
 
 ### Changed

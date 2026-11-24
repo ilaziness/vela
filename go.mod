@@ -4,9 +4,9 @@ go 1.27.3
 
 require (
 	github.com/firebase/genkit/go v1.14.0
-	github.com/go-gui-org/go-charts v0.33.0
-	github.com/go-gui-org/go-gui v0.98.0
-	github.com/go-gui-org/go-term v0.19.1
+	github.com/go-gui-org/go-charts v0.34.0
+	github.com/go-gui-org/go-gui v0.99.1
+	github.com/go-gui-org/go-term v0.19.3
 	github.com/google/dotprompt/go v0.0.0-20261118215426-97751971e864
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/minio/minio-go/v7 v7.4.1
@@ -39,11 +39,11 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creack/pty v1.1.24 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
-	github.com/dlclark/regexp2/v2 v2.2.2 // indirect
+	github.com/dlclark/regexp2/v2 v2.13.2 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/go-gui-org/go-glyph v1.28.0 // indirect
+	github.com/go-gui-org/go-glyph v1.29.2 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
