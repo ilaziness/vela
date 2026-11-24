@@ -6,6 +6,7 @@ import (
 	"path"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/i18n"
 	"github.com/ilaziness/vela/internal/sftp"
@@ -64,6 +65,8 @@ func (c *Controller) SFTPPasteRemote(w *gui.Window, sessID string) {
 		conflicts, err := mgr.RemotePasteConflicts(sessID, destDir, paths)
 		w.QueueCommand(func(w *gui.Window) {
 			if err != nil {
+				c.logger.Warn("sftp paste conflict check failed",
+					zap.String("session", sessID), zap.Error(err))
 				c.toast(gui.ToastError, "", errtext.Text(err))
 				return
 			}
@@ -193,7 +196,7 @@ func (c *Controller) runRemoteOp(w *gui.Window, sessID, label string, fn func() 
 	c.remoteOpRunning = true
 	c.mu.Unlock()
 	mgr := c.SFTPManager()
-	layout.BusyDialog(w, label, "", func() {
+	layout.BusyDialog(w, label, func() {
 		if mgr != nil {
 			mgr.CancelRemoteOp(sessID)
 		}
@@ -214,6 +217,8 @@ func (c *Controller) runRemoteOp(w *gui.Window, sessID, label string, fn func() 
 			case errors.Is(err, context.Canceled):
 				c.toast(gui.ToastInfo, "", i18n.T("sftp.op_cancelled"))
 			default:
+				c.logger.Warn("sftp remote op failed",
+					zap.String("session", sessID), zap.String("op", label), zap.Error(err))
 				c.toast(gui.ToastError, "", errtext.Text(err))
 			}
 			c.SFTPRefreshRemote(w, sessID)

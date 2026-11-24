@@ -10,21 +10,13 @@ import (
 // Escape stays disabled; onCancel (when non-nil) renders a Cancel button
 // that invokes it. The caller dismisses the dialog when the operation
 // finishes (QueueCommand + DialogDismiss).
-func BusyDialog(w *gui.Window, title, detail string, onCancel func()) {
-	th := w.Theme()
+func BusyDialog(w *gui.Window, title string, onCancel func()) {
 	content := []gui.View{
 		gui.SvgSpinner(gui.SvgSpinnerCfg{
 			Kind:   gui.SvgSpinner90Ring,
 			Width:  36,
 			Height: 36,
 		}),
-	}
-	if detail != "" {
-		content = append(content, gui.Text(gui.TextCfg{
-			Text:      detail,
-			TextStyle: th.TextStyleSecondary,
-			Mode:      gui.TextModeWrap,
-		}))
 	}
 	if onCancel != nil {
 		content = append(content, gui.Button(gui.ButtonCfg{

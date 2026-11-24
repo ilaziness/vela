@@ -7,5 +7,5 @@ import (
 )
 
 func showBusy(w *gui.Window, message string) {
-	layout.BusyDialog(w, message, "", nil)
+	layout.BusyDialog(w, message, nil)
 }
