@@ -127,6 +127,7 @@ func mainPane(w *gui.Window, ctrl *app.Controller, st *app.State) gui.View {
 	if st.AgentOpen {
 		cfg.Ratio = gui.SomeF(ratio)
 		cfg.Second.Content = []gui.View{agentui.Panel(w, ctrl)}
+		cfg.HandleSize = gui.SomeF(4)
 		cfg.OnChange = func(r float32, _ gui.SplitterCollapsed, ctx gui.EventCtx) {
 			r = f32Clamp01(r)
 			if r < 0.4 {
