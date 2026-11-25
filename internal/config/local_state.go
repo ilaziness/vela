@@ -40,17 +40,6 @@ func (w WindowGeometry) EffectiveSize() (width, height int) {
 	return w.Width, w.Height
 }
 
-// ClampToWorkArea shrinks size so it fits within workW×workH when those are positive.
-func ClampToWorkArea(width, height, workW, workH int) (int, int) {
-	if workW > 0 && width > workW {
-		width = workW
-	}
-	if workH > 0 && height > workH {
-		height = workH
-	}
-	return width, height
-}
-
 func isExistingDir(path string) bool {
 	if path == "" {
 		return false
@@ -158,6 +147,21 @@ func (s *Store) SetLastDialogDir(dir string) error {
 	}
 	s.local.LastDialogDir = dir
 	return s.writeLocalStateLocked()
+}
+
+// RememberDialogPath stores the directory of a picked path, using the
+// parent when the selection is a file (or no longer exists).
+func (s *Store) RememberDialogPath(selected string) {
+	if selected == "" {
+		return
+	}
+	dir := selected
+	if st, err := os.Stat(selected); err != nil || !st.IsDir() {
+		dir = filepath.Dir(selected)
+	}
+	if err := s.SetLastDialogDir(dir); err != nil {
+		s.logger.Warn("persist dialog dir failed", zap.Error(err))
+	}
 }
 
 // SetLastSftpLocalDir persists the local SFTP browse directory when it exists.

@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/ilaziness/vela)](https://github.com/ilaziness/vela/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vela/releases)
 [![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
+[![go-gui](https://img.shields.io/badge/go--gui-native-0A7EA4)](https://github.com/go-gui-org/go-gui)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
 面向开发与运维的跨平台 SSH / SFTP / 串口桌面客户端，内置 AI 助手。
@@ -15,41 +15,25 @@
 
 ## 📖 简介
 
-**Vela** 是一款跨平台桌面客户端，用来做 SSH 远程登录、SFTP 文件管理、本机串口控制，以及侧栏里的 AI 助手。基于 Go 和 [Wails v3](https://wails.io) 构建，原生运行于 Windows、macOS 和 Linux。界面支持英语、简体中文和繁体中文。
+**Vela** 是一款跨平台桌面客户端，用来做 SSH 远程登录、SFTP 文件管理、本机串口控制，以及侧栏里的 AI 助手。基于 Go、[go-gui](https://github.com/go-gui-org/go-gui) 与 [go-term](https://github.com/go-gui-org/go-term) 构建，原生运行于 Windows、macOS 和 Linux。界面支持英语、简体中文和繁体中文。
 
 ---
 
 ## ✨ 特性
 
-**连接与认证**
-
+- 支持 SSH 和串口协议
 - SSH 登录：密码、私钥、证书、二次验证、SSH Agent
-- 本机串口直连，会话开在和 SSH 相同的终端标签里
-- 跳板、HTTP / SOCKS 代理，以及本地 / 远程 / 动态端口转发
-- 应用内生成密钥，主密码保护口令和私钥
-- 连接保活与自动重连，主机密钥可确认、可管理
-- 导入、导出 OpenSSH 配置
-
-**终端**
-
-- 多标签终端，SSH 与串口共用
-- 终端内搜索、中文编码、会话日志
+- ProxyJump、HTTP / SOCKS 代理，以及本地 / 远程 / 动态端口转发
+- 应用内密钥管理，主密码保护口令和私钥
+- 多标签终端、终端内搜索、终端录制和播放，终端支持单屏，双屏和四屏模式
 - SSH 会话支持 Zmodem（rz / sz）传文件
-- 输入时提示历史命令
-
-**SFTP 与书签**
-
-- 本机与远程左右分栏，拖拽传输
-- 断点续传、失败重试，未完成任务下次打开还在
-- 远程文件就地编辑，可改权限和属主
-- 书签分组，收藏 SSH 主机和串口设备
-
-**效率与运维**
-
-- 命令库：常用片段一次发到多个会话
-- 侧栏 AI 助手：针对当前会话给建议，远程执行需批准；可接本地文件、网络搜索、MCP 和 Skill
-- 备份在本机加密后存到自建服务、WebDAV 或 S3，换设备可恢复
-- 英语、简体中文、繁体中文；亮色 / 暗色 / 护眼主题；自动检查更新
+- 双栏SFTP面板，书签管理功能，导入、导出 OpenSSH 配置
+- 备份恢复：主密码加密压缩后上传，支持自建后端、WebDAV 或 S3协议存储
+- AI助手：支持本地读写、网络搜索、远程命令执行、MCP和Skill
+- 内置 MCP 服务器：暴露书签查询、SSH 命令执行等工具，供外部 MCP 客户端调用
+- 多语言：英语、简体中文、繁体中文
+- 应用和终端多主题可选
+- 自动检查下载安装更新
 
 ---
 
@@ -74,10 +58,6 @@ _直观的文件管理界面_
 
 ![书签](screenshots/bookmark.png)
 _服务器连接配置管理_
-
-### 命令库
-
-![命令库](screenshots/command.png)
 
 ### AI 助手
 

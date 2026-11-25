@@ -36,7 +36,7 @@ var migrations = []Migration{
 	{Version: 17, Name: "add ai_sessions plan_json", Up: migrateAddAISessionPlanJSON},
 	{Version: 18, Name: "i18n persist ids", Up: migrateI18nPersistIDs},
 	{Version: 19, Name: "add bookmark protocol serial", Up: migrateAddBookmarkProtocolSerial},
-	{Version: 20, Name: "add sftp transfer remote op", Up: migrateAddSftpTransferRemoteOp},
+	{Version: 20, Name: "add ssh tunnel rules", Up: migrateAddSSHTunnels},
 }
 
 // migrateInitSchema 初始化数据库表结构（幂等）
@@ -520,21 +520,25 @@ func migrateAddBookmarkProtocolSerial(db *sql.DB, logger *zap.Logger) error {
 	return nil
 }
 
-// migrateAddSftpTransferRemoteOp marks remote-internal operations
-// (paste / compress / extract) in the transfer queue (idempotent).
-func migrateAddSftpTransferRemoteOp(db *sql.DB, logger *zap.Logger) error {
-	var columnName string
-	err := db.QueryRow(`SELECT name FROM pragma_table_info('sftp_transfers') WHERE name = 'remote_op'`).Scan(&columnName)
-	if err == sql.ErrNoRows {
-		if _, err := db.Exec(`ALTER TABLE sftp_transfers ADD COLUMN remote_op INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("add column sftp_transfers.remote_op failed: %w", err)
-		}
-		logger.Debug("migration: added sftp_transfers.remote_op column")
-		return nil
-	}
+// migrateAddSSHTunnels creates the bookmark-scoped SSH tunnel rules table (idempotent).
+func migrateAddSSHTunnels(db *sql.DB, logger *zap.Logger) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS ssh_tunnels (
+			id TEXT PRIMARY KEY NOT NULL,
+			bookmark_id TEXT NOT NULL,
+			tunnel_type TEXT NOT NULL,
+			local_addr TEXT NOT NULL,
+			remote_addr TEXT NOT NULL DEFAULT '',
+			remote_port INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_ssh_tunnels_bookmark ON ssh_tunnels(bookmark_id);
+	`)
 	if err != nil {
-		return fmt.Errorf("check column sftp_transfers.remote_op failed: %w", err)
+		return fmt.Errorf("create ssh_tunnels failed: %w", err)
 	}
+	logger.Debug("migration: ssh_tunnels table ready")
 	return nil
 }
 

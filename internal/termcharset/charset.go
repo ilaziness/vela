@@ -152,7 +152,7 @@ func (s *Stream) transform(in []byte, atEOF bool) []byte {
 }
 
 // WriteCloser wraps an io.WriteCloser, encoding UTF-8 writes to the remote charset.
-// Writes are serialized so concurrent SendToSession / termws callers are safe.
+// Writes are serialized so concurrent SendToSession callers are safe.
 type WriteCloser struct {
 	mu  sync.Mutex
 	w   io.WriteCloser

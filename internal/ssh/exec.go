@@ -2,7 +2,6 @@ package ssh
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 	"unicode/utf8"
@@ -10,16 +9,6 @@ import (
 	"go.uber.org/zap"
 	cryptossh "golang.org/x/crypto/ssh"
 )
-
-// ExitStatus reports the remote exit status encoded in an exec error. ok is
-// false when err is not a remote exit error (channel or session level failure).
-func ExitStatus(err error) (int, bool) {
-	var exitErr *cryptossh.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitStatus(), true
-	}
-	return 0, false
-}
 
 const (
 	DefaultExecMaxOut = 64 * 1024 // 64KB

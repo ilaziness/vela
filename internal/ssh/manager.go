@@ -24,7 +24,7 @@ import (
 // ErrSessionNotFound is returned when a session id is unknown or has no client.
 var ErrSessionNotFound = errors.New("ssh: session not found")
 
-// CloseReason distinguishes clean shell exits from unexpected drops for auto-reconnect.
+// CloseReason distinguishes clean shell exits from unexpected drops.
 type CloseReason string
 
 const (
@@ -105,6 +105,7 @@ type Session struct {
 	stopOutputOnce sync.Once
 	manager        *Manager
 	label          string
+	endpoint       Endpoint
 	forwardAgent   bool
 	startupCmd     string
 	env            map[string]string
@@ -155,6 +156,7 @@ func (h *hopClient) Close() {
 // Options are runtime SSH client settings applied on next dial / new keepalive.
 type Options struct {
 	ServerAliveInterval time.Duration
+	ServerAliveCountMax int
 	DialTimeout         time.Duration
 }
 
@@ -164,7 +166,6 @@ type Manager struct {
 	knownHostsMu          sync.Mutex
 	prompter              HostKeyPrompter
 	keyboardPrompter      KeyboardInteractivePrompter
-	onClose               func(sessionID string, reason CloseReason)
 	onCwd                 func(sessionID, path string)
 	onSessionLogStopped   func(sessionID, reason string)
 	clients               *sync.Map
@@ -180,6 +181,16 @@ type Manager struct {
 	optsMu                sync.RWMutex
 	opts                  Options
 	zmodemPicker          zmodem.FilePicker
+	// Per-window prompters keyed by dial context; missing keys fall back
+	// to the default prompters bound to the main window.
+	prompters   map[string]dialPrompters
+	promptersMu sync.RWMutex
+}
+
+// dialPrompters are the prompters one window uses for its SSH dialogs.
+type dialPrompters struct {
+	hostKey  HostKeyPrompter
+	keyboard KeyboardInteractivePrompter
 }
 
 func NewManager(logger *zap.Logger, knownHostsPath string, prompter HostKeyPrompter, keyboard KeyboardInteractivePrompter) *Manager {
@@ -195,11 +206,54 @@ func NewManager(logger *zap.Logger, knownHostsPath string, prompter HostKeyPromp
 		sessions:         new(sync.Map),
 		hostKey:          newHostKeyStore(),
 		keyboard:         newKeyboardStore(),
+		prompters:        make(map[string]dialPrompters),
 		opts: Options{
 			ServerAliveInterval: 30 * time.Second,
 			DialTimeout:         30 * time.Second,
 		},
 	}
+}
+
+// RegisterWindowPrompters binds the prompters used by dials made with ctxKey.
+func (m *Manager) RegisterWindowPrompters(ctxKey string, hostKey HostKeyPrompter, keyboard KeyboardInteractivePrompter) {
+	m.promptersMu.Lock()
+	m.prompters[ctxKey] = dialPrompters{hostKey: hostKey, keyboard: keyboard}
+	m.promptersMu.Unlock()
+}
+
+// UnregisterWindowPrompters drops the prompters registered for ctxKey.
+func (m *Manager) UnregisterWindowPrompters(ctxKey string) {
+	m.promptersMu.Lock()
+	delete(m.prompters, ctxKey)
+	m.promptersMu.Unlock()
+}
+
+// getHostKeyPrompter returns the prompter for ctxKey, or the default one.
+func (m *Manager) getHostKeyPrompter(ctxKey string) HostKeyPrompter {
+	if ctxKey == "" {
+		return m.prompter
+	}
+	m.promptersMu.RLock()
+	p, ok := m.prompters[ctxKey]
+	m.promptersMu.RUnlock()
+	if ok {
+		return p.hostKey
+	}
+	return m.prompter
+}
+
+// getKeyboardPrompter returns the keyboard prompter for ctxKey, or the default one.
+func (m *Manager) getKeyboardPrompter(ctxKey string) KeyboardInteractivePrompter {
+	if ctxKey == "" {
+		return m.keyboardPrompter
+	}
+	m.promptersMu.RLock()
+	p, ok := m.prompters[ctxKey]
+	m.promptersMu.RUnlock()
+	if ok {
+		return p.keyboard
+	}
+	return m.keyboardPrompter
 }
 
 // SetZmodem enables rz/sz detection for new sessions. Nil disables.
@@ -213,6 +267,9 @@ func (m *Manager) SetOptions(opts Options) {
 	}
 	if opts.ServerAliveInterval < 0 {
 		opts.ServerAliveInterval = 0
+	}
+	if opts.ServerAliveCountMax <= 0 {
+		opts.ServerAliveCountMax = defaultServerAliveCountMax
 	}
 	m.optsMu.Lock()
 	m.opts = opts
@@ -234,8 +291,13 @@ func (m *Manager) aliveInterval() time.Duration {
 	return m.opts.ServerAliveInterval
 }
 
-func (m *Manager) SetOnClose(fn func(sessionID string, reason CloseReason)) {
-	m.onClose = fn
+func (m *Manager) aliveCountMax() int {
+	m.optsMu.RLock()
+	defer m.optsMu.RUnlock()
+	if m.opts.ServerAliveCountMax <= 0 {
+		return defaultServerAliveCountMax
+	}
+	return m.opts.ServerAliveCountMax
 }
 
 // SetOnCwd is the SFTP follow-cwd callback (OSC from PTY stdout). Must not block.
@@ -271,6 +333,12 @@ func (m *Manager) GetClient(sessionID string) (*cryptossh.Client, error) {
 	return sess.client, nil
 }
 
+// Endpoint returns the dial target (host/port/user) for this session.
+// Secret fields (Password, KeyPEM, ...) are populated; callers must not log them.
+func (s *Session) Endpoint() Endpoint {
+	return s.endpoint
+}
+
 func (m *Manager) HasSession(id string) bool {
 	_, ok := m.sessions.Load(id)
 	return ok
@@ -293,6 +361,8 @@ func hopsClientKey(hops []Endpoint, proxy ProxyConfig) string {
 	return key
 }
 
+// Connect dials hops and opens a session, prompting through the default
+// (main window) prompters.
 func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 	if len(hops) == 0 {
 		return "", usererr.Coded("ssh.empty_hops", "Empty hop list")
@@ -310,7 +380,7 @@ func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 		m.logger.Debug("Using existing SSH client", zap.String("clientKey", clientKey))
 		client = v.(*hopClient).target
 	} else {
-		hc, err := m.dialHops(hops, m.dialTimeout(), proxy)
+		hc, err := m.dialHops(hops, m.dialTimeout(), proxy, "")
 		if err != nil {
 			return "", err
 		}
@@ -325,13 +395,15 @@ func (m *Manager) Connect(hops []Endpoint, proxy ProxyConfig) (string, error) {
 	return sess.ID, nil
 }
 
-func (m *Manager) TestConnect(hops []Endpoint, proxy ProxyConfig) error {
+// TestConnect dials hops without opening a session. ctxKey selects the
+// window that owns trust / keyboard dialogs; empty uses the default prompters.
+func (m *Manager) TestConnect(hops []Endpoint, proxy ProxyConfig, ctxKey string) error {
 	if len(hops) == 0 {
 		return usererr.Coded("ssh.empty_hops", "Empty hop list")
 	}
 	target := hops[len(hops)-1]
 	m.logger.Debug("Testing SSH connection", zap.String("host", target.Host), zap.Int("port", target.Port))
-	hc, err := m.dialHops(hops, m.dialTimeout(), proxy)
+	hc, err := m.dialHops(hops, m.dialTimeout(), proxy, ctxKey)
 	if err != nil {
 		return err
 	}
@@ -355,14 +427,6 @@ func (m *Manager) Resize(id string, cols, rows int) error {
 		return err
 	}
 	return sess.Resize(cols, rows)
-}
-
-func (m *Manager) notifyClosed(id string, reason CloseReason) {
-	if m.onClose != nil {
-		m.onClose(id, reason)
-		return
-	}
-	_ = m.CloseSession(id)
 }
 
 func (m *Manager) CloseAll() {
@@ -432,6 +496,7 @@ func newSession(m *Manager, clientKey string, client *cryptossh.Client, target E
 		stopOutput:     make(chan struct{}),
 		outputBuffSize: 1024 * 10,
 		label:          sessionLabel(target),
+		endpoint:       target,
 		forwardAgent:   target.ForwardAgent,
 		startupCmd:     target.StartupCmd,
 		env:            target.Env,
@@ -565,7 +630,7 @@ func (sc *Session) Start(cols, rows int) error {
 				zap.String("reason", string(reason)),
 			)
 		}
-		sc.manager.notifyClosed(sc.ID, reason)
+		_ = sc.manager.CloseSession(sc.ID)
 	}()
 	return nil
 }

@@ -11,7 +11,9 @@ import (
 
 const maxIncludeDepth = 3
 
-// known keys we map; others generate warnings but do not drop the host.
+// mappedKeys are the directives imported into bookmark fields. Other directives
+// are skipped: a usable ssh_config only contains options OpenSSH itself accepts,
+// so warning on every unmapped option would just be noise.
 var mappedKeys = map[string]bool{
 	"hostname": true, "user": true, "port": true,
 	"identityfile": true, "certificatefile": true,
@@ -19,12 +21,14 @@ var mappedKeys = map[string]bool{
 	"remotecommand": true, "setenv": true,
 }
 
+// warnOnlyKeys are directives with a visible behavior we cannot import
+// (forwarding, proxy commands, control sockets); they warn during import.
 var warnOnlyKeys = map[string]bool{
 	"proxycommand": true, "localforward": true, "remoteforward": true,
 	"dynamicforward": true, "controlmaster": true, "controlpath": true,
 	"controlpersist": true, "sendenv": true, "requesttty": true,
 	"stricthostkeychecking": true, "userknownhostsfile": true,
-	"canonicalizename": true,
+	"canonicalizehostname": true,
 }
 
 // ParseFile reads an OpenSSH config file with Include expansion.
@@ -107,8 +111,6 @@ func Parse(r io.Reader, baseDir, source string, depth int) ([]RawHostBlock, []Wa
 		if !mappedKeys[lk] {
 			if warnOnlyKeys[lk] {
 				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: directive %s not imported (Host %s)", source, key, strings.Join(cur.Patterns, " "))})
-			} else {
-				warnings = append(warnings, Warning{Message: fmt.Sprintf("%s: unknown/unsupported directive %s (Host %s)", source, key, strings.Join(cur.Patterns, " "))})
 			}
 			continue
 		}

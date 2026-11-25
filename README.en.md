@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/ilaziness/vela)](https://github.com/ilaziness/vela/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/ilaziness/vela/releases)
 [![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
-[![Wails](https://img.shields.io/badge/Wails-v3-8A2BE2)](https://wails.io)
+[![go-gui](https://img.shields.io/badge/go--gui-native-0A7EA4)](https://github.com/go-gui-org/go-gui)
 [![License](https://img.shields.io/github/license/ilaziness/vela)](LICENSE)
 
 A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for developers and operators.
@@ -15,41 +15,25 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 
 ## 📖 Overview
 
-**Vela** is a cross-platform desktop client for SSH logins, SFTP file management, local serial consoles, and a sidebar AI assistant. It is built with Go and [Wails v3](https://wails.io) and runs natively on Windows, macOS, and Linux. The UI is available in English, Simplified Chinese, and Traditional Chinese.
+**Vela** is a cross-platform desktop client for SSH logins, SFTP file management, local serial consoles, and a sidebar AI assistant. It is built with Go, [go-gui](https://github.com/go-gui-org/go-gui), and [go-term](https://github.com/go-gui-org/go-term), and runs natively on Windows, macOS, and Linux. The UI is available in English, Simplified Chinese, and Traditional Chinese.
 
 ---
 
 ## ✨ Features
 
-**Connection & auth**
-
-- SSH login with password, private key, certificate, 2FA, or SSH Agent
-- Local serial consoles in the same terminal tabs as SSH
+- Support for SSH and serial protocols
+- SSH login: password, private key, certificate, 2FA, SSH Agent
 - Jump hosts, HTTP / SOCKS proxies, and local / remote / dynamic port forwarding
-- Generate keys in-app; protect secrets with a master password
-- Keepalive and auto-reconnect; confirm and manage host keys
-- Import and export OpenSSH config
-
-**Terminal**
-
-- Multiple tabs shared by SSH and serial sessions
-- In-terminal search, encodings, and session log
-- Zmodem (rz / sz) file transfer on SSH sessions
-- Command history hints as you type
-
-**SFTP & bookmarks**
-
-- Dual-pane local and remote files, with drag-and-drop transfer
-- Resume and retry; unfinished jobs are still there next time
-- Edit remote files in place; change permissions and ownership
-- Bookmark groups for SSH hosts and serial devices
-
-**Workflow**
-
-- Command library: send a snippet to many sessions at once
-- Sidebar AI: advice for the current session, remote exec after approval; local files, web search, MCP, and Skills
-- Encrypt backups on the machine, then store them on your own server, WebDAV, or S3
-- English, Simplified Chinese, and Traditional Chinese; light / dark / eye-care themes; automatic updates
+- In-app key management; master password protects secrets and private keys
+- Multi-tab terminal, in-terminal search, terminal recording and playback, terminal supports single-screen, dual-screen and quad-screen modes
+- SSH sessions support Zmodem (rz / sz) file transfer
+- Dual-pane SFTP panel, bookmark management, import and export OpenSSH config
+- Backup & restore: master password encryption and compression, upload to self-hosted storage, WebDAV, or S3
+- AI assistant: local file read/write, web search, remote command execution, MCP and Skills
+- Built-in MCP server: exposes bookmark lookup, SSH command execution and more for external MCP clients
+- Multi-language: English, Simplified Chinese, Traditional Chinese
+- Multiple themes available for app and terminal
+- Automatic update check, download, and installation
 
 ---
 
@@ -74,10 +58,6 @@ _File management_
 
 ![Bookmarks](screenshots/bookmark.png)
 _Saved connection settings_
-
-### Command library
-
-![Command library](screenshots/command.png)
 
 ### AI assistant
 
@@ -117,13 +97,13 @@ open ~/Downloads/Vela.app
 
 ---
 
-## AI: MCP and Skills
+## AI: MCP and Skills Configuration
 
 Config lives in the **user data directory** (**Settings → General → User data directory**, default `data` next to the app).
 
 You can also open the files or folders, toggle enablement, and refresh the list under **Settings → AI → MCP / Skills**.
 
-### MCP
+### Configure MCP
 
 The format matches common Cursor / Claude Code `mcp.json`: a top-level `mcpServers` object keyed by server name.
 
@@ -173,7 +153,7 @@ Secrets in `mcp.json` are stored in plaintext. Keep that file private.
 }
 ```
 
-### Skills
+### Configure Skills
 
 1. Create a `skills` folder in the user data directory (or use **Open skills directory** on the settings page).
 2. One subfolder per skill, with a `SKILL.md` inside, for example:

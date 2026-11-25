@@ -176,6 +176,103 @@ func waitIdle(t *testing.T, f *Filter) {
 	t.Fatal("filter did not return to idle")
 }
 
+// pendingOO mirrors the flag a completed receive arms, so the "OO" the remote
+// sz leaves behind is stripped from the next output chunk.
+func pendingOO(t *testing.T, f *Filter) {
+	t.Helper()
+	f.mu.Lock()
+	f.ooPending = true
+	f.mu.Unlock()
+}
+
+func TestFeedOutStripsLeadingOO(t *testing.T) {
+	f := NewFilter("s1", Deps{Picker: &stubPicker{}})
+	pendingOO(t, f)
+
+	out := f.FeedOut([]byte("OOtest@host:~$ "))
+	if string(out) != "test@host:~$ " {
+		t.Fatalf("got %q", out)
+	}
+	f.mu.Lock()
+	pending := f.ooPending
+	f.mu.Unlock()
+	if pending {
+		t.Fatal("ooPending should clear after a match")
+	}
+}
+
+func TestFeedOutKeepsOOInMiddle(t *testing.T) {
+	f := NewFilter("s1", Deps{Picker: &stubPicker{}})
+	pendingOO(t, f)
+
+	// Only the head is stripped, so ordinary output is untouched.
+	out := f.FeedOut([]byte("abcOOdef"))
+	if string(out) != "abcOOdef" {
+		t.Fatalf("got %q", out)
+	}
+}
+
+func TestFeedOutSplitOO(t *testing.T) {
+	f := NewFilter("s1", Deps{Picker: &stubPicker{}})
+	pendingOO(t, f)
+
+	// First chunk is a lone 'O' — withheld, not echoed.
+	out1 := f.FeedOut([]byte("O"))
+	if len(out1) != 0 {
+		t.Fatalf("out1=%q", out1)
+	}
+	// Second chunk completes "OO"; the rest passes through.
+	out2 := f.FeedOut([]byte("Otest@host:~$ "))
+	if string(out2) != "test@host:~$ " {
+		t.Fatalf("out2=%q", out2)
+	}
+}
+
+func TestFeedOutNoOOClearsPending(t *testing.T) {
+	f := NewFilter("s1", Deps{Picker: &stubPicker{}})
+	pendingOO(t, f)
+
+	out := f.FeedOut([]byte("normal output\r\n"))
+	if string(out) != "normal output\r\n" {
+		t.Fatalf("got %q", out)
+	}
+	f.mu.Lock()
+	pending := f.ooPending
+	f.mu.Unlock()
+	if pending {
+		t.Fatal("ooPending should clear on ordinary output")
+	}
+}
+
+func TestFeedOutHeldOThenNonO(t *testing.T) {
+	f := NewFilter("s1", Deps{Picker: &stubPicker{}})
+	pendingOO(t, f)
+
+	// Lone 'O' held, next chunk starts with 'X' → emit the withheld "OX".
+	out1 := f.FeedOut([]byte("O"))
+	if len(out1) != 0 {
+		t.Fatalf("out1=%q", out1)
+	}
+	out2 := f.FeedOut([]byte("Xmore"))
+	if string(out2) != "OXmore" {
+		t.Fatalf("out2=%q", out2)
+	}
+}
+
+func TestFeedOutChainedTransferAfterOO(t *testing.T) {
+	f := NewFilter("s1", Deps{Picker: &stubPicker{err: ErrCancelled}})
+	f.BindStdin(nopWriteCloser{new(bytes.Buffer)})
+	pendingOO(t, f)
+
+	// "OO" then a new autostart in the same chunk: strip OO and still detect.
+	frame := []byte{0x2a, 0x2a, 0x18, 0x42, '0', '0', '0', '0', '0', '0'}
+	out := f.FeedOut(append([]byte("OO"), frame...))
+	if len(out) != 0 {
+		t.Fatalf("out=%q", out)
+	}
+	waitIdle(t, f)
+}
+
 type stubPicker struct {
 	err  error
 	dir  string

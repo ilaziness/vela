@@ -360,7 +360,24 @@ func writeTestCert(t *testing.T, userSigner cryptossh.Signer, principals []strin
 		ValidAfter:      uint64(after.Unix()),
 		ValidBefore:     uint64(before.Unix()),
 	}
-	if err := cert.SignCert(rand.Reader, caSigner); err != nil {
+	if len(principals) == 0 {
+		// x/crypto 自 v0.59.0 起在 SignCert 中拒绝空 principals（线格式本身
+		// 允许，表示对所有用户有效），这里按相同线格式手工签名，以便覆盖
+		// certificateAllowsUser 对空 principals 的放行逻辑。
+		cert.Nonce = make([]byte, 32)
+		if _, err := rand.Read(cert.Nonce); err != nil {
+			t.Fatal(err)
+		}
+		cert.SignatureKey = caSigner.PublicKey()
+		unsigned := *cert
+		unsigned.Signature = nil
+		raw := unsigned.Marshal()
+		sig, err := caSigner.Sign(rand.Reader, raw[:len(raw)-4])
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert.Signature = sig
+	} else if err := cert.SignCert(rand.Reader, caSigner); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "user-cert.pub")

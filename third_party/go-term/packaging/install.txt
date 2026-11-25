@@ -1,0 +1,42 @@
+# Falcon — Linux install notes
+
+The tarball contains four files:
+
+| File          | Install to                                             |
+| ------------- | ------------------------------------------------------ |
+| `falcon`      | `/usr/local/bin/falcon` (or any `$PATH` directory)     |
+| `falcon.desktop` | `/usr/share/applications/falcon.desktop`            |
+| `falcon.png`  | `/usr/share/icons/hicolor/512x512/apps/falcon.png`     |
+| `install.txt` | this file                                              |
+
+## Install
+
+```sh
+sudo install -Dm755 falcon /usr/local/bin/falcon
+sudo install -Dm644 falcon.desktop /usr/share/applications/falcon.desktop
+sudo install -Dm644 falcon.png /usr/share/icons/hicolor/512x512/apps/falcon.png
+sudo update-desktop-database /usr/share/applications 2>/dev/null || true
+```
+
+User-only install works too: `~/.local/bin`, `~/.local/share/applications`,
+`~/.local/share/icons/hicolor/512x512/apps/`.
+
+## Runtime dependencies
+
+Falcon on Linux is a cgo-free Go binary (only the macOS build needs cgo, for
+the Metal backend): the ConPTY layer is pure-Go syscalls, go-glyph shapes in
+pure Go, and go-gui reaches GL through purego. There are no SDL2, FreeType,
+HarfBuzz, Pango, fontconfig, or GLib shared-library requirements. It needs an
+OpenGL-capable graphics driver and installed fonts.
+
+## Run
+
+```sh
+falcon
+```
+
+Without installing, run straight from the tarball:
+
+```sh
+./falcon
+```

@@ -29,7 +29,6 @@ func TestSftpTransferRepositoryCRUD(t *testing.T) {
 		Status:       transfer.StatusFailed,
 		Error:        "boom",
 		Overwrite:    true,
-		RemoteOp:     true,
 	}
 	if err := repo.Upsert(rec); err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -38,11 +37,11 @@ func TestSftpTransferRepositoryCRUD(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("Get: %v %#v", err, got)
 	}
-	if got.OwnerKey != "bookmark-a" || got.Status != transfer.StatusFailed || !got.Overwrite || !got.RemoteOp {
+	if got.OwnerKey != "bookmark-a" || got.Status != transfer.StatusFailed || !got.Overwrite {
 		t.Fatalf("unexpected record: %+v", got)
 	}
 	list, err := repo.ListByOwner("bookmark-a")
-	if err != nil || len(list) != 1 || !list[0].Overwrite || !list[0].RemoteOp {
+	if err != nil || len(list) != 1 || !list[0].Overwrite {
 		t.Fatalf("ListByOwner: %v %d", err, len(list))
 	}
 	if err := repo.SetStatus("t1", transfer.StatusInterrupted, "interrupted"); err != nil {

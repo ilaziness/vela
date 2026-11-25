@@ -52,8 +52,20 @@ func TestNormalizeColor(t *testing.T) {
 	if normalizeColor("  RED ") != "red" {
 		t.Fatal("case fold")
 	}
-	if normalizeColor("magenta") != "" || normalizeColor("#ff0000") != "" {
-		t.Fatal("unknown should clear")
+	if normalizeColor("magenta") != "" {
+		t.Fatal("unknown token should clear")
+	}
+	if normalizeColor("#ff0000") != "#ff0000" {
+		t.Fatal("hex rrggbb")
+	}
+	if normalizeColor("#abc") != "#aabbcc" {
+		t.Fatal("hex rgb expand")
+	}
+	if normalizeColor("#ff000080") != "#ff000080" {
+		t.Fatal("hex rrggbbaa")
+	}
+	if normalizeColor("#gg0000") != "" {
+		t.Fatal("invalid hex should clear")
 	}
 	if normalizeColor("") != "" {
 		t.Fatal("empty stays empty")

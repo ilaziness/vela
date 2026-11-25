@@ -1,0 +1,228 @@
+package app
+
+import (
+	"path/filepath"
+	"time"
+
+	"github.com/go-gui-org/go-gui/gui"
+	"go.uber.org/zap"
+
+	"github.com/ilaziness/vela/internal/agent"
+	"github.com/ilaziness/vela/internal/applog"
+	"github.com/ilaziness/vela/internal/bookmark"
+	"github.com/ilaziness/vela/internal/buildinfo"
+	"github.com/ilaziness/vela/internal/command"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/database"
+	"github.com/ilaziness/vela/internal/keybind"
+	"github.com/ilaziness/vela/internal/secret"
+	"github.com/ilaziness/vela/internal/serial"
+	"github.com/ilaziness/vela/internal/sftp"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/sshkey"
+	"github.com/ilaziness/vela/internal/termio"
+	"github.com/ilaziness/vela/internal/transfer"
+	"github.com/ilaziness/vela/internal/tunnel"
+	"github.com/ilaziness/vela/internal/updater"
+	"github.com/ilaziness/vela/internal/usererr"
+	"github.com/ilaziness/vela/ui/protocol"
+	serialui "github.com/ilaziness/vela/ui/protocol/serial"
+	sshui "github.com/ilaziness/vela/ui/protocol/ssh"
+)
+
+// Runtime holds process-wide dependencies for the native UI.
+type Runtime struct {
+	App       *gui.App
+	Logger    *zap.Logger
+	Store     *config.Store
+	Hub       *termio.Hub
+	SSH       *ssh.Manager
+	Serial    *serial.Manager
+	Registry  *protocol.Registry
+	Ctrl      *Controller
+	Agent     *agent.Service
+	HostKey   *sshui.HostKeyPrompter
+	Keyboard  *sshui.KeyboardPrompter
+	DB        *database.Database
+	Vault     *secret.Vault
+	Keys      *sshkey.Service
+	Keybind   *keybind.Manager
+	Bookmarks *bookmark.Service
+	Tunnels   *tunnel.Manager
+	Updater   *updater.Manager
+	Commands  *command.Service
+}
+
+// Bootstrap constructs engines and the protocol registry.
+func Bootstrap(commandsLoader command.LocaleLoader) (*Runtime, error) {
+	logger := applog.New()
+	store, err := config.Load(logger)
+	if err != nil {
+		return nil, err
+	}
+	config.BootstrapLanguage(store, logger)
+	ApplyGUILocale()
+
+	db := database.NewDatabase(store.UserDataDir(), logger)
+	if err := db.Initialize(); err != nil {
+		return nil, err
+	}
+	vault := secret.NewVault()
+	keys := sshkey.New(logger, db, func(reason string) (string, error) {
+		return vault.Get()
+	}, func() {
+		vault.Clear()
+	}, nil)
+	kb := keybind.New(store)
+
+	hub := termio.NewHub()
+	hostKey := sshui.NewHostKeyPrompter(nil, nil)
+	keyboard := sshui.NewKeyboardPrompter(nil, nil)
+	sshMgr := ssh.NewManager(
+		logger,
+		filepath.Join(store.UserDataDir(), "known_hosts"),
+		hostKey,
+		keyboard,
+	)
+	hostKey.Bind(nil, sshMgr)
+	keyboard.Bind(nil, sshMgr)
+	sshMgr.SetOptions(ssh.Options{
+		ServerAliveInterval: time.Duration(store.Config.SSH.ServerAliveInterval) * time.Second,
+		ServerAliveCountMax: store.Config.SSH.ServerAliveCountMax,
+		DialTimeout:         time.Duration(store.Config.SSH.DialTimeoutSec) * time.Second,
+	})
+
+	globalProxy := func() ssh.GlobalProxy {
+		c := store.Config.SSH
+		return ssh.GlobalProxy{
+			Type: c.ProxyType, Host: c.ProxyHost, Port: c.ProxyPort,
+			User: c.ProxyUser, Password: c.ProxyPassword,
+		}
+	}
+	serialMgr := serial.NewManager(logger)
+
+	reg := protocol.NewRegistry()
+	reg.Register(sshui.Entry(sshMgr, hub, logger, globalProxy))
+	reg.Register(serialui.Entry(serialMgr, hub))
+
+	bmSvc := bookmark.New(logger, db, func(reason string) (string, error) {
+		return vault.Get()
+	}, nil, func() {
+		vault.Clear()
+	}, func(id string) (string, error) {
+		return keys.PrivatePEM(id)
+	}, nil)
+
+	ctrl := NewController(hub, reg, logger)
+	ctrl.SetKeybind(kb)
+	ctrl.SetTermTheme(store.Config.Terminal.Theme)
+	ctrl.SetTermConfig(store.Config.Terminal)
+
+	sshMgr.SetZmodem(&zmodemPickerImpl{ctrl})
+
+	// SFTP rides on the live SSH sessions: the manager reuses the
+	// existing ssh client per session, so opening the panel never
+	// touches the terminal's PTY.
+	transfers := transfer.NewRegistry(ctrl.OnTransferProgress)
+	sftpMgr := sftp.NewManager(logger, sshMgr, transfers, db.SftpTransferRepo)
+	ctrl.SetSFTP(sftpMgr)
+	sftpMgr.SetOnQueued(ctrl.OnSFTPQueued)
+	sshMgr.SetOnCwd(ctrl.OnTerminalCwd)
+
+	// Port forwarding rides on the live SSH sessions like SFTP: the
+	// tunnel manager reuses each session's ssh client.
+	tunnelMgr := tunnel.NewManager(logger, sshMgr)
+	ctrl.SetTunnels(tunnelMgr)
+
+	ctrl.SetBookmarkDial(BookmarkDialDeps{
+		Bookmarks:   bmSvc,
+		SSH:         sshMgr,
+		Serial:      serialMgr,
+		GlobalProxy: globalProxy,
+		Vault:       vault,
+		Store:       store,
+		DB:          db,
+	})
+	agentSvc := agent.New(agent.Deps{
+		Logger:      logger,
+		Store:       store,
+		SSH:         sshMgr,
+		Serial:      serialMgr,
+		Hub:         hub,
+		Vault:       vault,
+		SessionRepo: db.AISessionRepo,
+		Emit: func(c agent.AIStreamChunkData) {
+			ctrl.AgentEmit(c)
+		},
+		Screen: func(linkID string, scrollbackLines int) (string, error) {
+			return ctrl.TermScreenText(linkID, scrollbackLines)
+		},
+		Bookmarks:   bmSvc,
+		Keys:        keys,
+		GlobalProxy: globalProxy,
+	})
+	ctrl.SetAgent(agentSvc)
+	agentSvc.RecoverOrphanTurns()
+	// Start the built-in MCP server when enabled in settings; it does not
+	// depend on the vault or the AI engine.
+	go agentSvc.SyncMCPServer()
+
+	ctrl.SetShutdown(func() {
+		sshMgr.CloseAll()
+		serialMgr.CloseAll()
+		hub.Clear()
+		agentSvc.FlushAndStop()
+		agentSvc.ShutdownMCP()
+		_ = db.Close()
+	})
+
+	// Command palette: builtin snippets come from the embed FS, user
+	// commands and history live in SQLite; Send writes the line straight
+	// into the session's stdin (serial consoles want CR, shells want LF).
+	commands := command.New(logger, db, commandsLoader, func(sessionID, cmd string) error {
+		sess, ok := hub.Get(sessionID)
+		if !ok || sess == nil {
+			return usererr.Coded("session.not_found", "Session not found")
+		}
+		stdin := sess.Stdin()
+		if stdin == nil {
+			return usererr.Coded("ssh.stdin_unavailable", "Standard input is not available")
+		}
+		ending := "\n"
+		if sess.Protocol() == termio.ProtocolSerial {
+			ending = "\r"
+		}
+		_, err := stdin.Write([]byte(cmd + ending))
+		return err
+	})
+
+	upd := updater.NewManager(logger, buildinfo.Version, updater.NewGitHub())
+
+	return &Runtime{
+		Logger:    logger,
+		Store:     store,
+		Hub:       hub,
+		SSH:       sshMgr,
+		Serial:    serialMgr,
+		Registry:  reg,
+		Ctrl:      ctrl,
+		HostKey:   hostKey,
+		Keyboard:  keyboard,
+		DB:        db,
+		Vault:     vault,
+		Keys:      keys,
+		Keybind:   kb,
+		Bookmarks: bmSvc,
+		Tunnels:   tunnelMgr,
+		Updater:   upd,
+		Agent:     agentSvc,
+		Commands:  commands,
+	}, nil
+}
+
+// BindWindow attaches the GUI window to prompters and controller.
+func (r *Runtime) BindWindow(w *gui.Window) {
+	r.Ctrl.SetWindow(w)
+	r.HostKey.SetWindow(w)
+	r.Keyboard.SetWindow(w)
+}

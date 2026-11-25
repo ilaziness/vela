@@ -1,8 +1,6 @@
 package sshkey
 
 import (
-	"database/sql"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -110,10 +108,32 @@ func (s *Service) Get(id string) (Info, error) {
 }
 
 func mapSSHKeyGetError(err error) error {
-	if errors.Is(err, sql.ErrNoRows) {
+	if database.IsNotFound(err) {
 		return usererr.Coded("sshkey.not_found", "SSH key not found")
 	}
 	return err
+}
+
+// Update renames a key and/or edits its comment. Private key material is untouched.
+func (s *Service) Update(id, name, comment string) (Info, error) {
+	if strings.TrimSpace(id) == "" {
+		return Info{}, usererr.Coded("sshkey.not_found", "SSH key not found")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Info{}, usererr.Coded("sshkey.name_required", "Name is required")
+	}
+	row, err := s.db.SSHKeyRepo.Get(id)
+	if err != nil {
+		return Info{}, mapSSHKeyGetError(err)
+	}
+	row.Name = name
+	row.Comment = sanitizeComment(comment)
+	if err := s.db.SSHKeyRepo.Update(row); err != nil {
+		s.logger.Error("update ssh key failed", zap.String("id", id), zap.Error(err))
+		return Info{}, err
+	}
+	return toInfo(row), nil
 }
 
 func (s *Service) Delete(id string) error {

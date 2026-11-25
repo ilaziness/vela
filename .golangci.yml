@@ -33,7 +33,7 @@ linters:
       require-explanation: true
       require-specific: true
     revive:
-      # Keep default revive rules; only disable ones that force Wails/API renames.
+      # Keep default revive rules; only disable ones that force API renames.
       rules:
         - name: exported
           disabled: true
@@ -71,7 +71,7 @@ linters:
       - legacy
       - std-error-handling
     paths:
-      # Wails platform scaffolding (not app business code).
+      # Platform packaging assets and scaffolding (not app business code).
       - ^build/
     rules:
       # Test fixtures often use dummy secrets/keys.

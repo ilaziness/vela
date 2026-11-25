@@ -13,7 +13,7 @@ import (
 	"github.com/ilaziness/vela/internal/usererr"
 )
 
-func (m *Manager) dialHops(hops []Endpoint, timeout time.Duration, proxy ProxyConfig) (*hopClient, error) {
+func (m *Manager) dialHops(hops []Endpoint, timeout time.Duration, proxy ProxyConfig, ctxKey string) (*hopClient, error) {
 	const maxDepth = 5
 	if len(hops) == 0 {
 		return nil, usererr.Coded("ssh.empty_hops", "Empty hop list")
@@ -47,7 +47,7 @@ func (m *Manager) dialHops(hops []Endpoint, timeout time.Duration, proxy ProxyCo
 		if i == 0 {
 			hopProxy = proxy
 		}
-		client, err := m.dialOne(hop, timeout, prev, hopProxy)
+		client, err := m.dialOne(hop, timeout, prev, hopProxy, ctxKey)
 		if err != nil {
 			closeOpened()
 			return nil, err
@@ -60,14 +60,17 @@ func (m *Manager) dialHops(hops []Endpoint, timeout time.Duration, proxy ProxyCo
 	return &hopClient{target: prev, jumps: jumps}, nil
 }
 
-func (m *Manager) dialOne(ep Endpoint, timeout time.Duration, via *cryptossh.Client, proxy ProxyConfig) (*cryptossh.Client, error) {
+func (m *Manager) dialOne(ep Endpoint, timeout time.Duration, via *cryptossh.Client, proxy ProxyConfig, ctxKey string) (*cryptossh.Client, error) {
+	// A nil keyboard prompter decides whether agent auth failures are survivable.
+	keyboardPrompter := m.getKeyboardPrompter(ctxKey)
+
 	var agentSigners []cryptossh.Signer
 	signers, cleanup, err := openAgentSigners()
 	if cleanup != nil {
 		defer cleanup()
 	}
 	if err != nil {
-		if agentUnavailableIsFatal(ep, m.keyboardPrompter != nil) {
+		if agentUnavailableIsFatal(ep, keyboardPrompter != nil) {
 			return nil, usererr.Wrap(err, "ssh.agent_unavailable", "SSH agent is unavailable: %s")
 		}
 		m.logger.Debug("ssh agent unavailable, continuing with other auth", zap.Error(err))
@@ -80,8 +83,8 @@ func (m *Manager) dialOne(ep Endpoint, timeout time.Duration, via *cryptossh.Cli
 	}
 	var conn net.Conn
 	var keyboard cryptossh.AuthMethod
-	if m.keyboardPrompter != nil {
-		keyboard = m.keyboardAuth(ep, func() net.Conn { return conn }, timeout)
+	if keyboardPrompter != nil {
+		keyboard = m.keyboardAuth(ep, func() net.Conn { return conn }, timeout, ctxKey)
 	}
 	methods, err = finalizeAuthMethods(methods, keyboard)
 	if err != nil {
@@ -90,7 +93,7 @@ func (m *Manager) dialOne(ep Endpoint, timeout time.Duration, via *cryptossh.Cli
 	cfg := &cryptossh.ClientConfig{
 		User:            ep.User,
 		Auth:            methods,
-		HostKeyCallback: m.hostKeyCallback,
+		HostKeyCallback: m.hostKeyCallback(ctxKey),
 		Timeout:         timeout,
 	}
 

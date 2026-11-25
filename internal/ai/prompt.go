@@ -122,7 +122,8 @@ func fallbackSystemPrompt(opts PromptOptions, uiLang string) string {
 	b.WriteString("Only answer operations-related questions (Linux/Unix, terminals, servers, networking, processes, services, logs, files, scripts, configs). If a message mixes topics, answer only the operations part. If unrelated, do not answer it, do not use tools, and reply briefly that you cannot answer.\n")
 	b.WriteString("upsert_plan: for ≥2 steps or probe→decide→execute, submit a full snapshot; empty tasks clears the plan. Mark a step running before work and done/failed as soon as that step finishes.\n")
 	if opts.EnableSSH {
-		b.WriteString("run_ssh_command: user approval required; one short command per call (preferably ≤300 characters, single-line JSON string); prefer read-only probes; call out risk before destructive commands.\n")
+		b.WriteString("run_ssh_command: user approval required; one short command per call (preferably ≤300 characters, single-line JSON string); prefer read-only probes; call out risk before destructive commands. The user may approve running it inside the terminal instead — then it runs visibly in the PTY and you get no captured output.\n")
+		b.WriteString("read_terminal: no approval needed; returns the bound terminal's current screen text plus optional scrollback_lines of history (max 2000). Use it to inspect terminal output instead of guessing.\n")
 	}
 	if opts.EnableFS {
 		b.WriteString("read_local_file / write_local_file / list_local_directory: stay in the allowlisted directories; each call needs chat approval; writes overwrite — state intent first.\n")
@@ -159,7 +160,7 @@ func appendCurrentSessionSection(b *strings.Builder, opts PromptOptions) {
 		b.WriteString(`
 
 ## Current session
-protocol=serial. Bound to a local serial port. run_ssh_command is not available. There is no remote system probe. Give terminal/serial advice for this device; upsert_plan remains available.
+protocol=serial. Bound to a local serial port. run_ssh_command is not available. There is no remote system probe. read_terminal can read the bound terminal's screen text (no approval needed). Give terminal/serial advice for this device; upsert_plan remains available.
 `)
 		if d := strings.TrimSpace(opts.Serial.Device); d != "" {
 			fmt.Fprintf(b, "- Device: %s\n", d)

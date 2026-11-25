@@ -6,6 +6,9 @@ type Protocol string
 const (
 	ProtocolSSH    Protocol = "ssh"
 	ProtocolSerial Protocol = "serial"
+	// ProtocolReplay marks a local .gtr playback pane. It is not dialable
+	// and must stay out of ParseProtocol.
+	ProtocolReplay Protocol = "replay"
 )
 
 // ParseProtocol returns a known protocol or false.

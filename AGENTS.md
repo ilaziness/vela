@@ -1,301 +1,219 @@
 # AGENTS.md
 
-本项目是一个基于 Go 语言与 Wails v3 框架构建的 SSH 桌面 GUI 应用，旨在为用户提供跨平台、安全、高效的终端连接体验。本文档描述了项目所采用的技术栈、架构规范、开发约定以及各模块职责。
+本项目是一个基于 Go 语言与 go-gui / go-term 构建的 SSH 桌面 GUI 应用，旨在为用户提供跨平台、安全、高效的终端连接体验。本文档描述了项目所采用的技术栈、架构规范、开发约定以及各模块职责。
 
 ---
 
 ## 1. 技术栈概览
 
-| 类别       | 技术/库           | 版本要求  |
-| ---------- | ----------------- | --------- |
-| 后端语言   | Go                | ≥ 1.27.3  |
-| 桌面框架   | Wails             | ≥ v3.1.0  |
-| 前端框架   | React             | v19.x     |
-| 前端 UI 库 | Material UI (MUI) | v9.1.x    |
-| 前端路由   | React Router      | v8.x      |
-| 终端模拟器 | XTerm.js          | v6.x      |
-| 构建工具   | Wails CLI + Vite  | Vite v8.x |
-| AI 框架    | Genkit            | ≥ v1.14.0 |
+| 类别     | 技术/库                     | 版本要求  |
+| -------- | --------------------------- | --------- |
+| 后端语言 | Go                          | ≥ 1.27.3  |
+| 桌面 UI  | go-gui（**禁止**本地定制）  | v0.97.x   |
+| 终端控件 | go-term（replace 本地补丁） | v0.19.x   |
+| 图表     | go-charts（go-gui 生态）    | v0.32.x   |
+| AI 框架  | Genkit                      | ≥ v1.14.0 |
 
 ---
 
 ## 2. 项目结构规范
 
-```
-├── services/                 # Wails 适配层（唯一允许 import Wails 的业务代码）
-│   ├── register.go           # 组合根：注入依赖、注册 Service、Shutdown
-│   ├── windows.go            # 多窗口生命周期
-│   ├── app_service.go        # 主窗口/对话框/更新/WS 地址
-│   ├── session_service.go    # 多协议 Connect/Resize/Close/日志/列串口；Hub 编排
-│   ├── ssh_service.go        # SSH 专属 RPC（hostkey/known_hosts/SFTP/metrics）
-│   ├── ssh_tunnel.go         # 隧道 RPC
-│   ├── sftp_service.go       # SFTP RPC 与系统对话框
-│   ├── bookmark_service.go   # 书签 RPC
-│   ├── command_service.go    # 命令 RPC
-│   ├── config_service.go     # 配置 RPC 与口令提示
-│   ├── sync_service.go       # 同步 RPC
-│   ├── ai_service.go         # AI RPC 与流式事件
-│   ├── tool_service.go       # 工具 RPC
-│   └── log_service.go        # 日志（持有 *zap.Logger）
-├── internal/                 # 引擎与基础设施（禁止 import services / Wails）
-│   ├── termio/               # Protocol + Session 接口 + Hub（终端会话 mux）
-│   ├── ssh/                  # 连接、会话、known_hosts、远程信息
-│   ├── serial/               # 串口引擎（go.bug.st/serial；同口互斥；无自动重连）
-│   ├── sftp/                 # SFTP 协议
-│   ├── tunnel/               # 端口转发
-│   ├── termws/               # 本机终端 WebSocket（经 Hub 取 Stdin/Output）
-│   ├── transfer/             # 传输进度
-│   ├── bookmark/             # 书签业务与跳板链解析（跳板仅 ssh）
-│   ├── command/              # 内置/用户命令
-│   ├── config/               # TOML 配置
-│   ├── secret/               # 加解密与进程内 Vault
-│   ├── ai/                   # Genkit 引擎、Agent 工具、流式事件模型
-│   ├── sync/                 # 同步客户端
-│   ├── tools/                # 编解码/哈希/端口
-│   ├── database/             # SQLite
-│   ├── i18n/                 # 多语言 leaf（embed 三语 JSON；T/Tf/Catalog/SetLanguage）
-│   ├── usererr/              # RPC 用户错误契约（code+params）
-│   ├── buildinfo/            # ldflags 构建信息
-│   ├── system/               # 可执行目录、SafeGo
-│   └── utils/
-├── sync-backend/             # 同步服务端（独立 go.mod，勿与桌面进程合并）
-│   ├── main.go               # 服务端入口
-│   ├── server.go             # HTTP 服务
-│   ├── config.go             # 服务端配置
-│   ├── handler.go            # HTTP 请求处理器
-│   ├── service.go            # 业务逻辑（版本管理/用户管理）
-│   ├── storage.go            # 文件存储管理
-│   ├── model.go              # 数据模型
-│   ├── db.go                 # 数据库连接
-│   └── rate.go               # 限流
-├── build/                    # 各平台构建配置（android/darwin/docker/ios/linux/windows）
-├── openspec/                 # OpenSpec 规范驱动开发配置
-│   ├── specs/                # 功能规格定义
-│   └── changes/              # 变更提案（含 archive/ 归档）
-├── docs/                     # 项目文档
-├── data/                     # 内置默认数据（如 commands/{en,zh-CN,zh-TW}.json）
-├── frontend/                 # 前端 React 项目
-│   ├── bindings/             # Go 绑定（wails3 generate bindings -ts 生成）
-│   │   └── github.com/ilaziness/vela/services/  # 暴露给前端的函数、类型等
-│   ├── public/               # 公共静态资源
-│   ├── src/
-│   │   ├── components/       # React UI 组件（MUI；按职责分目录）
-│   │   │   ├── session/      # SessionTabs / SessionTabBody
-│   │   │   ├── terminal/     # XTerm 终端
-│   │   │   ├── bookmark/     # 书签
-│   │   │   ├── sftp/         # SFTP
-│   │   │   ├── ssh/          # SSH 专属（隧道/hostkey/状态栏）
-│   │   │   ├── serial/       # 串口专用 UI
-│   │   │   ├── command/      # 命令管理
-│   │   │   ├── tools/        # 工具箱
-│   │   │   ├── common/       # Header / OpBar / ConnectionForm
-│   │   │   ├── ai/           # AI 助手（AISideBar、GenkitAdapter 等）
-│   │   │   ├── settings/     # 设置页子组件
-│   │   │   └── subwindow/    # 子窗口组件
-│   │   ├── func/             # 功能函数（decode、service、validation 等）
-│   │   ├── hooks/            # 自定义 React Hooks
-│   │   ├── i18n/             # 前端 catalog 缓存与 t()/tf()（唯一源在 Go embed）
-│   │   ├── pages/            # 页面级组件（配合 React Router）
-│   │   ├── stores/           # 状态管理（zustand；sessionTabs）
-│   │   ├── theme/            # 主题配色
-│   │   ├── types/            # TypeScript 类型定义（session.ts 协议/会话）
-│   │   ├── main.tsx          # 前端入口
-│   │   └── routes.ts         # 路由定义
-│   ├── index.html
-│   ├── vite.config.ts
-│   └── package.json
-├── main.go                   # 应用入口
-├── Taskfile.yml              # 构建任务
+```shell
+├── main.go                 # 应用入口（go-gui + embed logo）
+├── main_window.go          # 主窗口装配
+├── assets/                 # 应用图标等静态资源（appicon.png）
+├── ui/                     # 桌面 UI（壳层不绑死某协议）
+│   ├── app/                # 组合根、State、Controller
+│   ├── shell/              # 三栏布局：图标轨 / 侧栏 / 主区
+│   ├── session/            # Tab、表单宿主、终端面板、状态栏
+│   ├── settings/           # 设置窗口（各 panel + State/Deps）
+│   ├── vaultprompt/        # 可复用 Vault 解锁对话框（遮罩密码）
+│   ├── layout/             # 即时模式布局辅助（Flush 等）
+│   ├── errtext/            # 统一错误文案（usererr/i18n + 存储错误兜底）
+│   ├── fonts/              # 字体枚举
+│   ├── protocol/           # 协议插件接口 + Registry
+│   │   ├── ssh/            # SSH 表单 / Connector / HostKey / Keyboard
+│   │   └── serial/         # 串口表单 / Connector
+│   ├── bookmarks/          # 书签树 / 编辑器 / 侧栏
+│   ├── agent/              # AI Agent 面板（含 model/）
+│   ├── backup/             # 备份 / 恢复窗口
+│   ├── chrome/             # 自绘标题栏与窗口控制
+│   ├── sftp/               # SFTP 文件面板
+│   ├── tools/              # 工具箱（codec/net/ops/text/time）
+│   ├── transfer/           # 文件传输队列面板
+│   ├── tunnel/             # 端口转发面板
+│   └── update/             # 应用更新对话框
+├── internal/               # 引擎与基础设施（禁止 import ui）
+│   ├── termio/             # Protocol + Session + Hub
+│   ├── termstream/         # termio.Session → go-term Stream
+│   ├── termcharset/        # 终端字符集处理
+│   ├── ssh/                # 连接、会话、agent forward、proxy resolve、usererr map
+│   ├── serial/             # 串口引擎
+│   ├── sshconfig/          # ~/.ssh/config 解析 / 写入
+│   ├── sshkey/             # SSH 密钥生成与管理
+│   ├── sftp/ / tunnel/     # SFTP / 端口转发管理器
+│   ├── transfer/           # 传输队列引擎
+│   ├── zmodem/             # ZMODEM 检测与收发
+│   ├── bookmark/           # 书签业务（含 ValidateProxy、OpenSSH 导入）
+│   ├── agent/              # AI Agent 服务（MCP、持久化）
+│   ├── ai/                 # Genkit 引擎、历史、checkpoint、event/
+│   ├── command/            # 命令片段 / 行捕获
+│   ├── keybind/            # 快捷键目录与管理器
+│   ├── sync/               # 配置同步（store/：S3 / WebDAV / 自建）
+│   ├── updater/            # 应用更新（GitHub release、下载、重启）
+│   ├── tools/              # 内置工具集（转换、CIDR、cron、JWT 等）
+│   ├── localfs/            # 本地文件系统辅助
+│   ├── httpproxy/          # 系统代理探测（平台分文件）
+│   ├── system/             # 系统集成（打开路径等）
+│   ├── vaultcheck/         # Vault 状态校验
+│   ├── applog/             # 进程日志
+│   ├── config/             # TOML + BootstrapLanguage + local_state
+│   ├── database/           # SQLite 持久化与迁移
+│   ├── secret/             # 密钥 / Vault（Argon2id + AES-GCM）
+│   ├── i18n/               # leaf：embed 三语；禁止 import config
+│   ├── usererr/ / utils/ / buildinfo/   # 错误码 / 小工具 / ldflags 版本
+├── third_party/go-term/    # go-term 仅此例外：必须本地补丁（NewWithStream 等）
+├── build/                  # 图标与平台打包资源（appicon*、windows/icon.ico）
+├── data/commands/          # 内置默认命令片段
+├── testdata/               # 测试数据
+├── sync-backend/           # 同步服务端（独立 go.mod）
 ├── Makefile
 └── go.mod
 ```
+
+**第三方库定制硬规则**：
+
+- **禁止** 把 `go-gui` 复制到 `third_party/`、`replace` 到本地 fork，或在本仓库维护 go-gui 定制版。后续升级依赖官方发布版本。
+- go-gui 公开 API / 组件能力做不到的交互或视觉效果：直接说明「库目前不支持，只能这样」，用公开 API 能做到的折中；**不要**为对齐、样式等去 fork 改库。
+- `third_party/go-term` 是唯一允许的 UI 相关本地补丁（上游无远程 Stream API，业务必须补）；不要把「go-term 可以定制」推广到 go-gui。
 
 ---
 
 ## 3. 编码规范
 
-模块化，可复用，减少重复模块代码，分层合理，可扩展。
+模块化，可复用，减少重复；能在引擎层做的不要堆在 UI。
 
-能在后端go实现的功能，不要放到前端ts去实现，无用代码需要清理的要清理，不要留着。
+函数和关键代码需要合理注释，注释不要过多的代码逻辑描述，合理说明即可。
 
 分层硬规则：
 
-- `services/`：RPC 导出、Wails 事件、系统对话框、多窗口；把 UI 结果转成引擎入参。不写 SSH handshake、SFTP 拷贝循环、SQL。
-- `internal/`：禁止 import `services` 和 Wails。SSH 引擎只接收已解析的 hop 链（`[]ssh.Endpoint`），不认识书签 ID。
-- 禁止包级可变业务状态。允许：`embed`、ldflags（`internal/buildinfo`）、错误 sentinel、常量。
-- 日志：组合根创建 `*zap.Logger` 并注入 `NewXxx(logger)`；前端仍用 `LogService`。
-- 可单独封装的包放在 `internal` 下；不为小函数膨胀 `utils`。
-- 和前端交互的导出方法放在 `services`，方法名保持稳定。
+- `ui/shell`、`ui/session`：只认 `termio` / `termstream` / go-gui；**禁止** import `internal/ssh`、`internal/serial`。
+- `ui/protocol`：协议无关接口；具体引擎只出现在 `ui/protocol/<name>`。
+- `ui/app`：组合根，注册协议插件、持有 Hub。
+- `internal/`：禁止 import `ui`。SSH 引擎只接收已解析的 hop 链（`[]ssh.Endpoint`）。
+- `internal/i18n`：leaf，禁止 import `config` / `ui`。
+- 禁止包级可变业务状态。允许：`embed`、ldflags（`internal/buildinfo`）、sentinel、常量。
+- 日志：`internal/applog.New()` 创建 `*zap.Logger` 并注入。
 
 ### 0. 多语言（i18n）
 
-- 翻译唯一源：`internal/i18n/locales/{en,zh-CN,zh-TW}.json`（embed）；`internal/i18n` 为 leaf，禁止 import `config` / `services` / Wails。
-- 语言写入唯一路径：`ConfigService.SetLanguage`；`SaveGeneralConfig` 保留内存中的 `Language`（与 Theme 同理）。
-- 前端：`GetI18nBootstrap` 拉 catalog，本地 `t()`/`tf()` 查表；订阅 `eventLanguage` 再拉 bootstrap。禁止按 key 逐条 RPC。
-- 用户可见 RPC 错误：优先稳定 `code` + `params`（`internal/usererr`）；前端用 `translateServiceError`；原生对话框/窗体标题在 `services` 边界用 `i18n.T`。
+- 翻译唯一源：`internal/i18n/locales/{en,zh-CN,zh-TW}.json`
+- 语言启动：`config.BootstrapLanguage`（在 `config.Load` 之后）
+- 用户可见错误：优先 `usererr` 的 `code` + `params`；SSH 侧可用 `ssh.MapUserError`
 
-适当位置添加注释，不要太多。
+### 1. 日志
 
-### 1. 日志记录
+- 全局日志：`internal/applog` 提供进程级共享 logger，`applog.L()` 返回全局 `*zap.Logger`（`applog.New()` 创建时即安装为全局实例；`L()` 首次调用会懒初始化）。新增需要打日志的代码直接用 `applog.L()`，**不要**再为此新增 `*zap.Logger` 参数注入。
+- 已有 `*zap.Logger` 注入签名的调用链保持不变，不做批量替换。
+- 不要新增包级 `Logger` 变量（`applog.L()` 是唯一共享入口）。
+- 错误要落日志，不要只展示在 UI。
+- 开发过程中需要增加一些合理的debug日志来辅助开发调试，错误类的根据具体情况添加warn或者error级别的日志
 
-- 前端记录日志使用 go 绑定的 `LogService` 方法。
-- Go 内部记录日志使用注入的 `*zap.Logger`，不要新增包级 `Logger`。
-- 错误日志需要使用日志组件记录，不要只返回给前端展示，导致不可再次查看。
+### 2. 终端桥接
 
-### 2. AI集成
+- go-term 公开 API 仅本地 PTY；本仓库经 `third_party/go-term` 导出 `NewWithStream`。
+- `internal/termstream` 把任意 `termio.Session` 接到 Stream（惰性 Start、Resize 行列转序）。
 
-- 使用 `Genkit` 实现，禁止直接调用 LLM 厂商 API，AI后端功能使用`Genkit`提供的功能组件实现，前端UI使用`MUI X Chat`提供的功能组件实现，尽量不要另外自行单独造。
-- `internal/ai`：引擎 Init、`Run`（Genkit `ToolApproval` interrupt → `WithResume` 循环、共享剩余 `MaxTurns`）、`plugins/mcp`、磁盘 `Skills`（`SkillPaths` + enabled overlay，不用 `SkillFS`）、工具定义与 `tool.Fail`、结构化流事件；会话按 Genkit Message（`user` / `model` / `tool`）落库并原样回放，不 flatten。通过 `SSHExecutor` 访问 SSH，不 import `services`。
-- `services/ai_service`：`Chat` 作为 Genkit application 在 RPC 内 Resume；流事件、`RespondToolApproval`（含冷恢复 Resume）/ `StopGeneration`（soft-deny 未决 interrupt）；适配 SSH `Exec` 与终端注解回显。不向前端暴露 `ResumeGeneration`。
-- 前端：`MUI X Chat` + `GenkitAdapter`（同流 `tool-approval-request` → `addToolApprovalResponse`）；首条用户消息即时写侧栏标题；冷恢复 `listMessages` 还原 `approval-requested`。不自造聊天协议。
-- `run_ssh_command` 走独立 Exec 回传模型，经 Genkit ToolApproval 须用户批准；`echo_ssh_commands`（默认关）仅向终端 `OutputChan` 写注解，不写 Stdin、不重复执行。
-- 前端UI/交互尽量使用`MUI X Chat`内置提供支持的功能，不要自己重复造。
+### 3. AI（引擎保留）
+
+- 使用 Genkit；禁止直接调厂商 API。UI 侧 AI 面板后续再接 go-gui。
 
 ---
 
-## 4. 前端集成规范
+## 4. UI 规范（go-gui）
 
-安装依赖使用`npm install`命令，卸载依赖使用`npm uninstall`命令，不要之间便更加`package.json`文件。
-
-React开发时启用了严格模式StrictMode。
-
-Go绑定到前端的方法和数据类型在`frontend\bindings\github.com\ilaziness\vela\services`。
-
-搜索代码应该排除`dist`目录。
-
-前端调用go生成的绑定方法需要catch错误，例如：
-
-```typescript
-try {
-  const bookmark = await BookmarkService.GetBookmarkByID(bookmarkID);
-  if (!bookmark) {
-    errorMessage("bookmark not found");
-    return;
-  }
-  setCurrentTab(newIndex);
-} catch (err) {
-  errorMessage(parseCallServiceError(err));
-}
-```
-
-使用`parseCallServiceError`解析错误提示，消息提醒使用`useMessageStore`立马的方法。
-
-### 4.1 XTerm.js 集成
-
-- 使用 `@xterm/xterm` 及 `@xterm/addon-fit`、`@xterm/addon-web-links` 等官方插件。
-- 每个终端实例封装为 React 组件 `<Terminal sessionID={id} />`。
-- 输入通过 `term.onData()` 捕获并转发至 Go 后端。
-- 输出通过监听 `session.output` 事件写入 `term.write()`。
-
-### 4.2 路由设计（React Router v8）
-
-路由渲染页面组件在`frontend\src\pages`，定义于 `frontend\src\routes.ts`（Hash Router）。
-
-- 主路由 `/` 渲染 `<App />`，主界面。
-- 子路由：
-  - `/setting` 对应 `<Setting />` 组件，应用设置。
-  - `/command` 对应 `<Command />` 组件，命令管理。
-  - `/tools` 对应 `<Tools />` 组件，工具箱列表。
-  - `/tools/:toolId` 对应 `<ToolDetail />` 组件，工具详情。
-  - `/submainwindow` 对应 `<SubMainWindow />` 组件，子窗口。
-
-### 4.3 UI 规范（Material UI v9）
-
-- 主题：使用 `createTheme` 定制深色/浅色模式。
-- 组件：优先使用 MUI 官方组件（如 `Tabs`, `Drawer`, `TextField`, `Button`）。
-
-### 4.4 TypeScript 类型定义规范
-
-- **枚举类型**：对于有限的选项集合（如视图模式、消息角色、状态等），必须使用 `enum` 定义，不要使用联合类型字符串穷举。
-  - ❌ 错误：`view: 'chat' | 'history'`
-  - ✅ 正确：
-    ```typescript
-    enum AIAssistantView {
-      Chat = "chat",
-      History = "history",
-    }
-    view: AIAssistantView;
-    ```
-- **类型定义位置**：共享的 TypeScript 类型定义放在 `frontend/src/types` 目录下，组件内部专用的类型可定义在组件文件中。
+- **只用** module 依赖的官方 go-gui；禁止 `third_party/go-gui`、禁止对本库做 replace 定制（详见 §2）。
+- 主题：应用主题由 `general.theme` 在 go-gui 注册主题中选择，`fonts.Apply` 应用并叠加字体覆盖；终端配色由 `terminal.theme` 在 go-term `Default`+`BundledThemes` 中选择，保存后应用到所有终端。
+- 状态：`gui.State[app.State](w)`；Term 实例放在 Controller，不进即时模式 State。
+- 嵌入终端：`term.Cfg{NoWindowHandler: true}`，由壳层转发事件。
+- Connect/Test：后台 goroutine + `Window.QueueCommand` 回写。
+- 能力缺口：以公开 API 为准；做不到则告知限制并接受现状，不 fork 改库。
+- 禁止使用emoji文字代替`go-gui`图标，图标需要使用`go-gui`库的`Feather`图标。
+- UI组件能通用的尽量创建公共组件使用，不要在不同地方写逻辑重复的UI组件
+- 改完 UI 不要靠读代码猜效果：按 §6 的「UI 无头验证」渲染出图并量出几何数字，再回报结论。
 
 ---
 
 ## 5. 安全与最佳实践
 
-- **密钥存储**：敏感信息（如私钥口令、密码、AI API Key）不持久化明文。使用主密码经 Argon2id 派生密钥后以 AES-GCM 加密，密钥材料只留在进程内 Vault，不接入系统钥匙串。
-- **输入过滤**：后端对所有来自前端的 SSH 配置参数进行校验与转义。
-- **超时控制**：空闲连接自动断开（可配置）。
-- **日志脱敏**：日志中禁止记录密码、私钥内容。
+- 敏感信息不持久化明文；Vault + Argon2id / AES-GCM。
+- 日志禁止记录密码、私钥内容。
+- 连接参数在引擎层校验。
 
 ---
 
 ## 6. 开发与调试
 
-**重要**：使用这里列出来的命令编译测试，不要用其他的。
-
-### 1. 前端编译调试
-
-`frontend`执行下面命令编译调试：
+**重要**：使用这里列出的命令，不要用其他的。
 
 ```bash
-npm run build:dev
-```
-
-### 2. Go编译调试
-
-项目根目录执行下面命令编译调试：
-
-生成前端绑定：`wails3 generate bindings -ts`
-
-```bash
-# 编译go，项目根目录执行
-go build -o {name} .
+# 编译（-s -w 去掉符号表/调试信息，减小体积）
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe . #windows
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela . #linux
 # 或
-go build .
-```
+make build
 
-`{name}` 为平台对应的可执行文件名，如 `Vela.exe`（Windows）、`Vela`（macOS/Linux）。
-
-### 3. 修改完成后的验证与格式化
-
-代码修改完成后，按改动范围执行对应命令，再结束任务。只改前端就只跑前端命令，只改 Go 就只跑 Go 命令，两边都改则都执行。使用这里列出的命令，前端不要改用 `npx eslint`。
-
-前端在 `frontend` 目录执行。验证：
-
-```bash
-npm run lint
-
-npm run build:dev
-```
-
-需要自动修复格式或可自动修复的 lint 问题时：
-
-```bash
-npm run lint:fix
-```
-
-Go 在项目根目录执行。先格式化，再验证能否编译：
-
-```bash
+# 修改后验证
 go fmt ./...
 golangci-lint run
-go build .
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela.exe . #windows
+go build -trimpath -ldflags "-s -w" -o ./bin/Vela . #linux
 ```
 
-# dev运行，使用ctrl+c结束
+### UI 无头验证（改界面必须出图 + 量几何）
 
-## wails3 dev
+go-gui 自带软件渲染后端，可以在没有窗口、没有事件循环的情况下把任意 View 渲染成 PNG，并读出真实布局几何。用临时 `*_test.go` 驱动，验证完删除，不要提交。
 
-## 7. 工具使用
+```go
+import (
+	"testing"
 
-如果没有相应知识，Context7工具可用的情况下使用Context7查询最新知识
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui/backend/soft"
+)
+
+func TestShot(t *testing.T) {
+	win := gui.NewTestWindow(t, gui.WindowCfg{
+		Width: 460, Height: 620,
+		// view：要验证的 View 函数（整块面板，或像 messageView 这样的单个组件）
+		OnInit: func(w *gui.Window) { w.SetView(view) },
+	})
+	// 跑一帧并出图：同时装上软件字体系统，布局用的就是真实字体度量
+	if err := soft.RenderToPNG(win, 2, "shot.png"); err != nil {
+		t.Fatal(err)
+	}
+	// 量几何：叶子 ID → 有效 ID → Shape 的 x/y/w/h
+	root := win.TestRender(nil)
+	for _, id := range win.ResolveID("agent-msg-1") {
+		if ly, ok := root.FindByID(id); ok {
+			t.Logf("%s x=%.1f y=%.1f w=%.1f h=%.1f", id,
+				ly.Shape.X, ly.Shape.Y, ly.Shape.Width, ly.Shape.Height)
+		}
+	}
+}
+```
+
+- `gui.NewTestWindow` 自己注册 cleanup，不需要 `soft.Release`；窗口没有 backend，`TestClick` / `TestFocus` / `TestScroll` 等动作可以在这里驱动状态后重新出图。
+- 中文文案先 `i18n.SetLanguage("zh-CN")`；渲染 AI 面板这类 View 直接构造 `*app.State`（如 `AgentChat`、`AgentExpanded`）传进去，不需要真 Controller。
+- 用 2 倍缩放出图（`RenderToPNG(win, 2, …)`）复核观感；判断内边距、高度、对齐要拿 `Shape` 的数字做前后对比，不要肉眼估。
+- 字体来自宿主机字体目录，所以**不要**提交 PNG 或像素级 golden；需要长期回归就断言几何与文本。
+- 临时脚本与图片用完删掉（给人看的对比图放仓库外或根目录，附在回复里），不要留在 diff 中。
 
 ---
 
-## 8. 相关文档
+## 7. 相关文档
 
-- genkit doc：[guid doc](https://genkit.dev/docs/go/get-started)
-- genkit api参考：[api ref](https://pkg.go.dev/github.com/firebase/genkit/go)
-- wails V3 api参考: [application api ref](https://pkg.go.dev/github.com/wailsapp/wails/v3/pkg/application)
-- wails v3 event: [event ref](https://pkg.go.dev/github.com/wailsapp/wails/v3/pkg/events)
-- MUI [llms.txt](https://mui.com/material-ui/llms.txt)
+- go-gui：[README](https://github.com/go-gui-org/go-gui) / [llms.txt](https://raw.githubusercontent.com/go-gui-org/go-gui/main/llms.txt)
+- go-gui 无头渲染：`go doc github.com/go-gui-org/go-gui/gui/backend/soft`（`RenderToImage` / `RenderToPNG`）与 `go doc github.com/go-gui-org/go-gui/gui.NewTestWindow`
+- go-term：[Embedding wiki](https://github.com/go-gui-org/go-term/wiki/Embedding)
+- genkit：[get started](https://genkit.dev/docs/go/get-started)

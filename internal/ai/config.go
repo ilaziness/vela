@@ -27,6 +27,31 @@ type WebSearchConfig struct {
 	APIKeyEncrypted string              `json:"api_key_encrypted,omitempty" toml:"api_key_encrypted,omitempty"`
 }
 
+// DefaultMCPServerPort is the loopback port used when the MCP server is
+// enabled without an explicit port.
+const DefaultMCPServerPort = 18765
+
+// MCPServerConfig controls the built-in MCP server exposed over streamable
+// HTTP on 127.0.0.1. AccessKey is a plaintext draft field only — it is
+// hashed into AccessKeyHash before persisting and must never be written
+// to disk.
+type MCPServerConfig struct {
+	Enabled       bool   `json:"enabled" toml:"enabled"`
+	Port          int    `json:"port" toml:"port"`
+	AccessKey     string `json:"access_key,omitempty" toml:"-"`
+	AccessKeyHash string `json:"access_key_hash,omitempty" toml:"access_key_hash,omitempty"`
+}
+
+// Normalize fills the default port and clamps the port into range.
+func (c *MCPServerConfig) Normalize() {
+	if c.Port <= 0 {
+		c.Port = DefaultMCPServerPort
+	}
+	if c.Port > 65535 {
+		c.Port = 65535
+	}
+}
+
 // Config AI配置（配置文件与引擎共用）
 type Config struct {
 	Enabled         bool             `json:"enabled" toml:"enabled"`
@@ -41,6 +66,7 @@ type Config struct {
 	MaxAgentTurns   int              `json:"max_agent_turns" toml:"max_agent_turns"`
 	Filesystem      FileSystemConfig `json:"filesystem" toml:"filesystem"`
 	WebSearch       WebSearchConfig  `json:"web_search" toml:"web_search"`
+	MCPServer       MCPServerConfig  `json:"mcp_server" toml:"mcp_server"`
 }
 
 // EffectiveMaxAgentTurns 返回生效轮次：未配置或低于默认时用 DefaultMaxAgentTurns，允许配置更大值。

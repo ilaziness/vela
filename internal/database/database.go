@@ -26,6 +26,7 @@ type Database struct {
 	CommandHistoryRepo *CommandHistoryRepository
 	AISessionRepo      AISessionRepository
 	SftpTransferRepo   *SftpTransferRepository
+	SSHTunnelRepo      *SSHTunnelRepository
 }
 
 func NewDatabase(userDataDir string, logger *zap.Logger) *Database {
@@ -102,6 +103,7 @@ func (d *Database) Initialize() error {
 	d.CommandHistoryRepo = NewCommandHistoryRepository(d.db, d.logger)
 	d.AISessionRepo = NewSQLiteAISessionRepository(d.db)
 	d.SftpTransferRepo = NewSftpTransferRepository(d.db, d.logger)
+	d.SSHTunnelRepo = NewSSHTunnelRepository(d.db, d.logger)
 	return nil
 }
 

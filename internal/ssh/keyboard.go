@@ -121,10 +121,14 @@ func (m *Manager) CancelKeyboardInteractive(id string) error {
 	return m.keyboard.cancel(id)
 }
 
-func (m *Manager) keyboardAuth(ep Endpoint, connFn func() net.Conn, handshakeTimeout time.Duration) cryptossh.AuthMethod {
+// keyboardAuth builds the keyboard-interactive method for one dial. The
+// prompter is resolved per challenge so a closed origin window falls back to
+// the default one.
+func (m *Manager) keyboardAuth(ep Endpoint, connFn func() net.Conn, handshakeTimeout time.Duration, ctxKey string) cryptossh.AuthMethod {
 	var passwordUsed bool
 	return cryptossh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
-		return m.answerKeyboardChallenge(ep, &passwordUsed, connFn, handshakeTimeout, keyboardChallengeTimeout, name, instruction, questions, echos)
+		prompter := m.getKeyboardPrompter(ctxKey)
+		return m.answerKeyboardChallenge(ep, &passwordUsed, connFn, handshakeTimeout, keyboardChallengeTimeout, prompter, name, instruction, questions, echos)
 	})
 }
 
@@ -134,6 +138,7 @@ func (m *Manager) answerKeyboardChallenge(
 	connFn func() net.Conn,
 	handshakeTimeout time.Duration,
 	waitTimeout time.Duration,
+	prompter KeyboardInteractivePrompter,
 	name, instruction string,
 	questions []string,
 	echos []bool,
@@ -156,7 +161,7 @@ func (m *Manager) answerKeyboardChallenge(
 		m.logger.Debug("keyboard-interactive auto password", zap.String("host", ep.Host))
 		return answers, nil
 	}
-	if m.keyboardPrompter == nil || m.keyboard == nil {
+	if prompter == nil || m.keyboard == nil {
 		return nil, usererr.Coded("ssh.kex_unavailable", "Keyboard-interactive prompt is unavailable")
 	}
 
@@ -176,7 +181,7 @@ func (m *Manager) answerKeyboardChallenge(
 		zap.String("host", ep.Host),
 		zap.Int("questions", len(questions)),
 	)
-	if err := m.keyboardPrompter.Prompt(KeyboardChallenge{
+	if err := prompter.Prompt(KeyboardChallenge{
 		ID:          id,
 		Host:        ep.Host,
 		User:        ep.User,
@@ -187,7 +192,7 @@ func (m *Manager) answerKeyboardChallenge(
 		m.logger.Debug("keyboard-interactive prompt", zap.Error(err))
 		return nil, err
 	}
-	defer m.keyboardPrompter.Dismiss(id)
+	defer prompter.Dismiss(id)
 
 	// 提问等待期间清掉握手 deadline，避免用户输入验证码时连接被拨号超时掐断。
 	var conn net.Conn

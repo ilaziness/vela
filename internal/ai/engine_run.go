@@ -218,7 +218,15 @@ func (e *AIEngine) Run(ctx context.Context, req *AgentRequest, rd RunDeps, onEve
 				}
 				continue
 			}
-			if part.ToolRequest.Name == tool.RunSSHCommand && deps.ArmSSHExecCancel != nil {
+			if d.Terminal && part.ToolRequest.Name == tool.RunSSHCommand {
+				// User chose "run in terminal": the UI types the command into
+				// the PTY itself; the tool skips exec and all echo. No
+				// ArmSSHExecCancel — there is no Exec to cancel, and arming it
+				// would leak execAbort into the next exec-channel command.
+				if deps.TerminalExec != nil {
+					deps.TerminalExec.Mark(ref)
+				}
+			} else if part.ToolRequest.Name == tool.RunSSHCommand && deps.ArmSSHExecCancel != nil {
 				deps.ArmSSHExecCancel()
 			}
 			if rp := restartApprovalPart(part, true, ""); rp != nil {
@@ -236,6 +244,10 @@ func collectActiveTools(tools tool.Set, deps tool.Deps, snap CatalogSnapshot) (a
 	if deps.EnableSSH() {
 		active = append(active, tools.SSH)
 		builtin = append(builtin, tool.RunSSHCommand)
+	}
+	if deps.EnableScreen() {
+		active = append(active, tools.Terminal)
+		builtin = append(builtin, tool.ReadTerminal)
 	}
 	if deps.EnableFS() {
 		active = append(active, tools.Read, tools.Write, tools.List)
@@ -260,7 +272,7 @@ func (e *AIEngine) buildRunMiddleware(
 	promptLen int,
 	onCheckpoint func([]ChatMessage),
 ) (mw []genkitAI.Middleware, cleanup func(), err error) {
-	allowed := []string{tool.UpsertPlan, tool.WebSearch, middleware.SkillToolName}
+	allowed := []string{tool.UpsertPlan, tool.ReadTerminal, middleware.SkillToolName}
 	mw = []genkitAI.Middleware{
 		toolStreamMiddleware{},
 		&middleware.ToolApproval{AllowedTools: allowed},

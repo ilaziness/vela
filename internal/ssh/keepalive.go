@@ -8,7 +8,9 @@ import (
 	cryptossh "golang.org/x/crypto/ssh"
 )
 
-const serverAliveCountMax = 3
+// defaultServerAliveCountMax is the fallback consecutive-failure limit
+// when Options.ServerAliveCountMax is unset.
+const defaultServerAliveCountMax = 3
 
 type keepAliveCtrl struct {
 	stop chan struct{}
@@ -42,6 +44,7 @@ func (m *Manager) stopKeepAlive(clientKey string) {
 }
 
 func (m *Manager) runKeepAlive(clientKey string, client *cryptossh.Client, ctrl *keepAliveCtrl, interval time.Duration) {
+	maxFailures := m.aliveCountMax()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	failures := 0
@@ -58,7 +61,7 @@ func (m *Manager) runKeepAlive(clientKey string, client *cryptossh.Client, ctrl 
 					zap.Int("failures", failures),
 					zap.Error(err),
 				)
-				if failures >= serverAliveCountMax {
+				if failures >= maxFailures {
 					m.logger.Warn("SSH keepalive exceeded max failures, closing client",
 						zap.String("clientKey", clientKey),
 					)

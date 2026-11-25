@@ -1,0 +1,92 @@
+# ignore all
+*
+# unignore files with extensions
+!*.*
+# unignore all dirs
+!*/
+### Above combination will ignore all files without extension
+
+!Makefile
+!LICENSE
+
+# Binaries
+main
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Built example binaries
+# `make app` output — the bundle's files have extensions, so the
+# unignore-all-dirs rule above would otherwise track them. Matched by
+# suffix rather than by name so it survives a change to APP_NAME.
+*.app/
+
+# `make release` output. Same reason: the archives carry extensions
+# (.tar.gz, .zip, .dmg), so the unignore rule above would track them.
+/dist/
+/build/
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# pprof profiles
+*.pprof
+
+# iOS c-archive build artifacts
+*.a
+examples/ios_demo/ios/libgoguiapp.h
+
+# WASM build artifacts
+*.wasm
+wasm_exec.js
+
+# npm
+package-lock.json
+
+# Go workspace
+go.work
+go.work.sum
+
+# Dependency directory
+vendor/
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Serena
+.serena/
+
+# Antigravity
+.antigravitycli/
+
+# Pinned linter binary, built by `make lint` from tools/lint.
+.bin/
+
+# Graphify
+graphify-out/
+
+# Anitivibe
+deep-dive/
+
+# Zed
+.zed/
+
+.direnv/
+.tokensave/
+.codegraph/
+.codehound-cache/
+.goslop-cache/

@@ -1,0 +1,669 @@
+package term
+
+import (
+	"regexp"
+	"testing"
+)
+
+func TestGrid_Find_Basic(t *testing.T) {
+	g := newGrid(3, 10)
+	putRow(g, "hello")
+	sb := g.Scrollback.Len()
+	pos, ok := g.Find("hello", contentPos{Row: sb, Col: -1}, true)
+	if !ok {
+		t.Fatal("Find did not find 'hello'")
+	}
+	if pos.Row != sb || pos.Col != 0 {
+		t.Errorf("Find 'hello' at {%d,%d}, want {%d,0}", pos.Row, pos.Col, sb)
+	}
+}
+
+func TestGrid_Find_CaseInsensitive(t *testing.T) {
+	g := newGrid(3, 10)
+	putRow(g, "HELLO")
+	sb := g.Scrollback.Len()
+	pos, ok := g.Find("hello", contentPos{Row: sb, Col: -1}, true)
+	if !ok {
+		t.Fatal("Find case-insensitive did not match")
+	}
+	if pos.Col != 0 {
+		t.Errorf("Find 'hello' (case-insensitive) at col %d, want 0", pos.Col)
+	}
+}
+
+func TestGrid_Find_EmptyQuery_ReturnsFalse(t *testing.T) {
+	g := newGrid(3, 10)
+	putRow(g, "hello")
+	_, ok := g.Find("", contentPos{}, true)
+	if ok {
+		t.Error("Find with empty query should return false")
+	}
+}
+
+func TestGrid_Find_QueryWiderThanCols_ReturnsFalse(t *testing.T) {
+	g := newGrid(3, 5)
+	_, ok := g.Find("toolong", contentPos{}, true)
+	if ok {
+		t.Error("Find with query wider than Cols should return false")
+	}
+}
+
+func TestGrid_Find_NoMatch(t *testing.T) {
+	g := newGrid(3, 10)
+	putRow(g, "hello")
+	_, ok := g.Find("xyz", contentPos{}, true)
+	if ok {
+		t.Error("Find non-existent query should return false")
+	}
+}
+
+func TestGrid_Find_Wrap_Forward(t *testing.T) {
+
+	g := newGrid(2, 10)
+	putRow(g, "target")
+	g.CursorR = 1
+	g.CursorC = 0
+	for range 10 {
+		g.Put(' ')
+	}
+	sb := g.Scrollback.Len()
+
+	pos, ok := g.Find("target", contentPos{Row: sb + 1, Col: 0}, true)
+	if !ok {
+		t.Fatal("Find did not wrap forward to find 'target'")
+	}
+	if pos.Row != sb || pos.Col != 0 {
+		t.Errorf("Find wrapped forward: {%d,%d}, want {%d,0}", pos.Row, pos.Col, sb)
+	}
+}
+
+func TestGrid_Find_Wrap_Backward(t *testing.T) {
+	g := newGrid(2, 10)
+
+	g.CursorR = 1
+	g.CursorC = 0
+	for _, r := range "target" {
+		g.Put(r)
+	}
+	sb := g.Scrollback.Len()
+
+	pos, ok := g.Find("target", contentPos{Row: sb, Col: 0}, false)
+	if !ok {
+		t.Fatal("Find did not wrap backward to find 'target'")
+	}
+	if pos.Row != sb+1 || pos.Col != 0 {
+		t.Errorf("Find wrapped backward: {%d,%d}, want {%d,0}", pos.Row, pos.Col, sb+1)
+	}
+}
+
+func TestGrid_ViewportMatches_All(t *testing.T) {
+	g := newGrid(2, 20)
+	putRow(g, "foo bar foo")
+	matches := g.ViewportMatches("foo")
+	if len(matches) != 2 {
+		t.Errorf("ViewportMatches found %d matches, want 2", len(matches))
+	}
+	if matches[0].Col != 0 {
+		t.Errorf("first match col %d, want 0", matches[0].Col)
+	}
+	if matches[1].Col != 8 {
+		t.Errorf("second match col %d, want 8", matches[1].Col)
+	}
+}
+
+func TestGrid_ViewportMatches_EmptyQuery(t *testing.T) {
+	g := newGrid(2, 10)
+	putRow(g, "hello")
+	if m := g.ViewportMatches(""); m != nil {
+		t.Errorf("ViewportMatches(\"\") = %v, want nil", m)
+	}
+}
+
+func TestGrid_ViewportMatches_AltActiveReturnsNil(t *testing.T) {
+	g := newGrid(2, 10)
+	putRow(g, "hello")
+	g.EnterAlt()
+	if m := g.ViewportMatches("hello"); m != nil {
+		t.Errorf("ViewportMatches during alt = %v, want nil", m)
+	}
+}
+
+func TestGrid_FindRegex_Forward(t *testing.T) {
+	g := newGrid(3, 20)
+	putRow(g, "hello world")
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`w\w+`)
+	pos, l, ok := g.FindRegex(re, contentPos{Row: sb, Col: -1}, true)
+	if !ok {
+		t.Fatal("FindRegex did not find 'w\\w+'")
+	}
+	if pos.Row != sb || pos.Col != 6 {
+		t.Errorf("FindRegex pos {%d,%d}, want {%d,6}", pos.Row, pos.Col, sb)
+	}
+	if l != 5 {
+		t.Errorf("FindRegex match len %d, want 5", l)
+	}
+}
+
+func TestGrid_FindRegex_Backward(t *testing.T) {
+	g := newGrid(3, 20)
+	putRow(g, "foo bar foo")
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`foo`)
+
+	pos, _, ok := g.FindRegex(re, contentPos{Row: sb, Col: 11}, false)
+	if !ok {
+		t.Fatal("FindRegex backward did not find 'foo'")
+	}
+	if pos.Col != 8 {
+		t.Errorf("FindRegex backward col %d, want 8", pos.Col)
+	}
+}
+
+func TestGrid_FindRegex_NoMatch(t *testing.T) {
+	g := newGrid(3, 20)
+	putRow(g, "hello world")
+	re := regexp.MustCompile(`\d+`)
+	_, _, ok := g.FindRegex(re, contentPos{}, true)
+	if ok {
+		t.Error("FindRegex should return false for no match")
+	}
+}
+
+func TestGrid_FindRegex_Wrap(t *testing.T) {
+	g := newGrid(2, 20)
+	putRow(g, "target99")
+	g.CursorR = 1
+	g.CursorC = 0
+	for range 20 {
+		g.Put(' ')
+	}
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`target\d+`)
+
+	pos, _, ok := g.FindRegex(re, contentPos{Row: sb + 1, Col: 0}, true)
+	if !ok {
+		t.Fatal("FindRegex did not wrap forward")
+	}
+	if pos.Row != sb || pos.Col != 0 {
+		t.Errorf("FindRegex wrap: {%d,%d}, want {%d,0}", pos.Row, pos.Col, sb)
+	}
+}
+
+func TestGrid_FindRegex_IPAddress(t *testing.T) {
+	g := newGrid(3, 40)
+	putRow(g, "addr 192.168.1.1 end")
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}`)
+	pos, l, ok := g.FindRegex(re, contentPos{Row: sb, Col: -1}, true)
+	if !ok {
+		t.Fatal("FindRegex did not find IP address")
+	}
+	if pos.Col != 5 {
+		t.Errorf("FindRegex IP col %d, want 5", pos.Col)
+	}
+	if l != 11 {
+		t.Errorf("FindRegex IP len %d, want 11", l)
+	}
+}
+
+func TestGrid_FindRegex_InScrollback(t *testing.T) {
+	const rows, cols = 3, 20
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = 10
+	putRow(g, "error: 42")
+	g.scrollUpRegion(1)
+	if g.Scrollback.Len() == 0 {
+		t.Skip("scrollback not populated")
+	}
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`error: \d+`)
+	pos, _, ok := g.FindRegex(re, contentPos{Row: sb, Col: -1}, true)
+	if !ok {
+		t.Fatal("FindRegex did not find match in scrollback")
+	}
+	if pos.Row >= sb {
+		t.Errorf("FindRegex found match in live grid (row %d), expected scrollback (row < %d)", pos.Row, sb)
+	}
+}
+
+func TestGrid_FindRegex_NilPattern(t *testing.T) {
+	g := newGrid(3, 20)
+	putRow(g, "hello")
+	_, _, ok := g.FindRegex(nil, contentPos{}, true)
+	if ok {
+		t.Error("FindRegex with nil pattern should return false")
+	}
+}
+
+func TestGrid_ViewportMatchesRegex_Basic(t *testing.T) {
+	g := newGrid(2, 30)
+	putRow(g, "foo 123 bar 456")
+	re := regexp.MustCompile(`\d+`)
+	matches := g.ViewportMatchesRegex(re)
+	if len(matches) != 2 {
+		t.Fatalf("ViewportMatchesRegex found %d matches, want 2", len(matches))
+	}
+	if matches[0].Col != 4 || matches[0].Len != 3 {
+		t.Errorf("first match col=%d len=%d, want col=4 len=3", matches[0].Col, matches[0].Len)
+	}
+	if matches[1].Col != 12 || matches[1].Len != 3 {
+		t.Errorf("second match col=%d len=%d, want col=12 len=3", matches[1].Col, matches[1].Len)
+	}
+}
+
+func TestGrid_ViewportMatchesRegex_VariableLen(t *testing.T) {
+	g := newGrid(2, 30)
+	putRow(g, "a bb ccc")
+	re := regexp.MustCompile(`[a-z]+`)
+	matches := g.ViewportMatchesRegex(re)
+	if len(matches) != 3 {
+		t.Fatalf("ViewportMatchesRegex found %d matches, want 3", len(matches))
+	}
+	wantLens := []int{1, 2, 3}
+	for i, m := range matches {
+		if m.Len != wantLens[i] {
+			t.Errorf("match %d len=%d, want %d", i, m.Len, wantLens[i])
+		}
+	}
+}
+
+func TestGrid_ViewportMatchesRegex_AltActiveReturnsNil(t *testing.T) {
+	g := newGrid(2, 20)
+	putRow(g, "hello")
+	g.EnterAlt()
+	re := regexp.MustCompile(`hello`)
+	if m := g.ViewportMatchesRegex(re); m != nil {
+		t.Errorf("ViewportMatchesRegex during alt = %v, want nil", m)
+	}
+}
+
+func TestGrid_ViewportMatchesRegex_NilPatternReturnsNil(t *testing.T) {
+	g := newGrid(2, 20)
+	putRow(g, "hello")
+	if m := g.ViewportMatchesRegex(nil); m != nil {
+		t.Errorf("ViewportMatchesRegex(nil) = %v, want nil", m)
+	}
+}
+
+func TestGrid_ViewportMatches_WithScrollback(t *testing.T) {
+	const rows, cols = 4, 10
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = 10
+	putRow(g, "hello")
+	g.scrollUpRegion(1)
+	if g.Scrollback.Len() == 0 {
+		t.Skip("scrollback not populated")
+	}
+
+	g.ViewOffset = 1
+	matches := g.ViewportMatches("hello")
+	if len(matches) == 0 {
+		t.Error("expected match for 'hello' in scrollback viewport, got none")
+	}
+
+	g.ViewOffset = 0
+	matches = g.ViewportMatches("hello")
+	if len(matches) != 0 {
+		t.Errorf("expected no matches in live view, got %d", len(matches))
+	}
+}
+
+func TestGrid_ViewportMatches_CapsAtMaxHighlights(t *testing.T) {
+	// 6 rows × 90 cols = 540 single-char cells; exceeds maxSearchHighlights (500).
+	const rows, cols = 6, 90
+	g := newGrid(rows, cols)
+	for r := range rows {
+		g.CursorR, g.CursorC = r, 0
+		for range cols {
+			g.Put('x')
+		}
+	}
+	matches := g.ViewportMatches("x")
+	if len(matches) != maxSearchHighlights {
+		t.Errorf("ViewportMatches: got %d matches, want cap %d", len(matches), maxSearchHighlights)
+	}
+}
+
+// rowRunesBuf must truncate the returned slice when the reused buf is larger
+// than the current row, so callers never see stale runes from a prior (wider)
+// row.
+// rowRunesBuf is retained as a test helper; production code uses searchRow.
+func (g *grid) rowRunesBuf(contentRow int, buf []rune) []rune {
+	sb := g.Scrollback.Len()
+	var src []cell
+	if contentRow < sb {
+		if contentRow < 0 {
+			return nil
+		}
+		src = g.Scrollback.Row(contentRow)
+	} else {
+		liveRow := contentRow - sb
+		if liveRow < 0 || liveRow >= g.Rows || g.Cols == 0 {
+			return nil
+		}
+		src = g.row(liveRow)
+	}
+	if cap(buf) < len(src) {
+		buf = make([]rune, len(src))
+	}
+	buf = buf[:len(src)]
+	for i, cell := range src {
+		buf[i] = cell.Ch
+	}
+	return buf
+}
+
+func TestGrid_RowRunesBuf_ReuseWithShrinkingRow(t *testing.T) {
+	g := newGrid(3, 5)
+	// Row 0: 5 cols of 'a'
+	for range 5 {
+		g.Put('a')
+	}
+	g.Newline()
+	g.CursorC = 0
+
+	// Shrink to 3 cols so we can have a narrower live row.
+	// Instead, use the scrollback path: make scrollback row have 5 cells and
+	// live row have 3 cells by testing with a smaller grid.
+	g2 := newGrid(2, 3)
+	g2.Put('x')
+	g2.Put('y')
+	g2.Put('z')
+
+	// Reuse a buf that was sized for 5 runes from g, then apply to g2 (3 cols).
+	buf := make([]rune, 5)
+	for i := range buf {
+		buf[i] = 'S' // sentinel
+	}
+	got := g2.rowRunesBuf(g2.Scrollback.Len(), buf) // first live row
+	if len(got) != 3 {
+		t.Fatalf("len(got)=%d, want 3", len(got))
+	}
+	// Verify sentinels do not bleed into the returned slice.
+	for i, r := range got {
+		if r == 'S' {
+			t.Errorf("stale sentinel at index %d", i)
+		}
+	}
+}
+
+func BenchmarkGrid_Search(b *testing.B) {
+	const rows, cols = 100, 120
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = 200
+	for r := range rows {
+		g.CursorR, g.CursorC = r, 0
+		for range cols {
+			g.Put('x')
+		}
+	}
+	// Add some matches
+	g.CursorR, g.CursorC = 50, 0
+	for _, ch := range "needle" {
+		g.Put(ch)
+	}
+	for range 100 {
+		g.scrollUpRegion(1)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		g.ViewportMatches("needle")
+	}
+}
+
+func TestGrid_ViewportMatchesRegex_CapsAtMaxHighlights(t *testing.T) {
+	// 6 rows × 90 cols = 540 cells; regex matching every cell exceeds cap.
+	const rows, cols = 6, 90
+	g := newGrid(rows, cols)
+	re := regexp.MustCompile(`x`)
+	for r := range rows {
+		g.CursorR, g.CursorC = r, 0
+		for range cols {
+			g.Put('x')
+		}
+	}
+	matches := g.ViewportMatchesRegex(re)
+	if len(matches) != maxSearchHighlights {
+		t.Errorf("ViewportMatchesRegex: got %d matches, want cap %d", len(matches), maxSearchHighlights)
+	}
+}
+
+func BenchmarkGrid_Search_LargeScrollback(b *testing.B) {
+	const rows, cols = 24, 80
+	g := newGrid(rows, cols)
+	g.ScrollbackCap = 10000
+
+	// Fill visible grid and push into scrollback.
+	for range 10000 {
+		for range cols {
+			g.Put('x')
+		}
+		g.scrollUpRegion(1)
+	}
+	// Place target in current visible row.
+	for _, ch := range "TARGET_987654321" {
+		g.Put(ch)
+	}
+
+	b.ResetTimer()
+	for b.Loop() {
+		matches := g.ViewportMatches("TARGET_987654321")
+		if len(matches) != 1 {
+			b.Fatalf("expected 1 match, got %d", len(matches))
+		}
+	}
+}
+
+func TestSearchWide(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣')
+	g.Put('a')
+
+	// Search for "🍣a" starting from before col 0
+	pos, found := g.Find("🍣a", contentPos{0, -1}, true)
+	if !found {
+		t.Errorf("expected to find '🍣a', but not found")
+	} else if pos.Col != 0 {
+		t.Errorf("expected match at col 0, got col %d", pos.Col)
+	}
+}
+
+func TestViewportMatches_WideChars(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // cols 0-1
+	g.Put('a') // col 2
+
+	matches := g.ViewportMatches("🍣a")
+	if len(matches) != 1 {
+		t.Fatalf("ViewportMatches found %d matches, want 1", len(matches))
+	}
+	if matches[0].Col != 0 {
+		t.Errorf("match Col = %d, want 0", matches[0].Col)
+	}
+	// 🍣 spans 2 cols + 'a' spans 1 = 3 total
+	if matches[0].Len != 3 {
+		t.Errorf("match Len = %d, want 3", matches[0].Len)
+	}
+}
+
+func TestViewportMatchesRegex_WideChars(t *testing.T) {
+	g := newGrid(1, 10)
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // cols 0-1
+	g.Put('1') // col 2
+	g.Put('2') // col 3
+	g.Put('3') // col 4
+
+	re := regexp.MustCompile(`\d+`)
+	matches := g.ViewportMatchesRegex(re)
+	if len(matches) != 1 {
+		t.Fatalf("ViewportMatchesRegex found %d matches, want 1", len(matches))
+	}
+	if matches[0].Col != 2 {
+		t.Errorf("match Col = %d, want 2", matches[0].Col)
+	}
+	if matches[0].Len != 3 {
+		t.Errorf("match Len = %d, want 3", matches[0].Len)
+	}
+}
+
+func TestSearchRow_AllContinuationCells(t *testing.T) {
+	g := newGrid(1, 5)
+	// Directly populate the row with only continuation cells (Ch==0, Width==0)
+	for c := range g.Cols {
+		g.Cells[c] = cell{Ch: 0, Width: 0}
+	}
+
+	rr, colMap := g.searchRow(0, nil, nil)
+	if len(rr) != 0 {
+		t.Errorf("expected empty rr for all-continuation row, got %v", rr)
+	}
+	if len(colMap) != 0 {
+		t.Errorf("expected empty colMap for all-continuation row, got %v", colMap)
+	}
+}
+
+func TestCleanIdxGT_EmptyColMap(t *testing.T) {
+	if got := cleanIdxGT(nil, 0); got != 0 {
+		t.Errorf("cleanIdxGT(nil, 0) = %d, want 0", got)
+	}
+}
+
+func TestCleanIdxGE_EmptyColMap(t *testing.T) {
+	if got := cleanIdxGE(nil, 0); got != -1 {
+		t.Errorf("cleanIdxGE(nil, 0) = %d, want -1", got)
+	}
+}
+
+func TestSearchRow_ScrollbackWide(t *testing.T) {
+	g := newGrid(2, 5)
+	g.ScrollbackCap = 10
+	g.CursorR, g.CursorC = 0, 0
+	g.Put('🍣') // cols 0-1
+	g.Put('a') // col 2
+	// Push to scrollback
+	g.Newline()
+	g.scrollUpRegion(1)
+
+	sb := g.Scrollback.Len()
+	if sb == 0 {
+		t.Fatal("expected scrollback to have rows")
+	}
+	rr, colMap := g.searchRow(sb-1, nil, nil)
+	// Row has 5 cells: 🍣 (col 0, W=2), continuation (col 1, Ch=0),
+	// 'a' (col 2), and two trailing spaces (cols 3-4).
+	// searchRow drops the continuation cell, leaving 4 runes.
+	if len(rr) != 4 {
+		t.Fatalf("expected 4 runes in scrollback row, got %d: %v", len(rr), rr)
+	}
+	if rr[0] != '🍣' || rr[1] != 'a' {
+		t.Errorf("expected [🍣, a, ...], got %v", rr)
+	}
+	if colMap[0] != 0 || colMap[1] != 2 {
+		t.Errorf("expected colMap[0]=0, colMap[1]=2, got %v", colMap)
+	}
+}
+
+// A multi-rune cluster expands in the search row (all runes mapping to the
+// same column) so a query can match inside it, not just its base rune.
+func TestSearchRow_ExpandsClusters(t *testing.T) {
+	g := newGrid(1, 4)
+	id := g.internCluster([]byte("é"))
+	if id == 0 {
+		t.Fatal("setup: cluster did not intern")
+	}
+	g.At(0, 0).Ch = 'e'
+	g.At(0, 0).clusterID = id
+	g.At(0, 1).Ch = 'x'
+	rr, colMap := g.searchRow(0, nil, nil)
+	if len(rr) != 5 { // e, combining acute, x, two trailing spaces
+		t.Fatalf("rr = %q, want 5 runes", rr)
+	}
+	if colMap[0] != 0 || colMap[1] != 0 || colMap[2] != 1 {
+		t.Errorf("colMap = %v, want [0 0 1 ...]", colMap)
+	}
+	if pos, ok := g.Find("é", contentPos{Row: 0, Col: 2}, false); !ok || pos.Col != 0 {
+		t.Errorf("Find combining query = %v,%v, want {0 0},true", pos, ok)
+	}
+}
+
+// Queries longer than MaxGridDim cannot match a single row; the grid
+// rejects them instead of running an unbounded O(n*m) scan per row.
+func TestFind_OverlongQueryRejected(t *testing.T) {
+	g := newGrid(2, 8)
+	if _, ok := g.Find(string(make([]rune, MaxGridDim+1)), contentPos{}, true); ok {
+		t.Error("overlong query matched")
+	}
+	if got := g.ViewportMatches(string(make([]rune, MaxGridDim+1))); got != nil {
+		t.Errorf("overlong viewport query = %v, want nil", got)
+	}
+}
+
+// Anchors see the whole row: `^` fires only at column 0 and `\b` needs a
+// real boundary, even when the scan resumes mid-row after a prior match.
+func TestGrid_ViewportMatchesRegex_AnchorsSeeWholeRow(t *testing.T) {
+	g := newGrid(2, 30)
+	putRow(g, "aaa xaa")
+	if m := g.ViewportMatchesRegex(regexp.MustCompile(`^a`)); len(m) != 1 {
+		t.Errorf("^a: got %d matches, want 1 (%v)", len(m), m)
+	}
+	if m := g.ViewportMatchesRegex(regexp.MustCompile(`\ba`)); len(m) != 1 {
+		t.Errorf(`\ba: got %d matches, want 1 (%v)`, len(m), m)
+	}
+}
+
+// Find-next from a `^` match must not re-anchor at the resume column.
+func TestGrid_FindRegex_ForwardAnchorDoesNotReanchor(t *testing.T) {
+	g := newGrid(3, 20)
+	putRow(g, "aaa")
+	sb := g.Scrollback.Len()
+	pos, _, ok := g.FindRegex(regexp.MustCompile(`^a`), contentPos{Row: sb, Col: 0}, true)
+	if ok && pos.Row == sb && pos.Col != 0 {
+		t.Errorf("^a re-anchored mid-row at col %d", pos.Col)
+	}
+}
+
+// A match ending on a zero-width rune inside a cluster (a combining mark,
+// VS16) still highlights the whole cell, not zero columns.
+func TestViewportMatches_ClusterTailHighlightsCell(t *testing.T) {
+	g := newGrid(1, 4)
+	id := g.internCluster([]byte("é"))
+	if id == 0 {
+		t.Fatal("setup: cluster did not intern")
+	}
+	g.At(0, 0).Ch = 'e'
+	g.At(0, 0).clusterID = id
+	g.At(0, 1).Ch = 'x'
+	m := g.ViewportMatches("é")
+	if len(m) != 1 || m[0].Col != 0 || m[0].Len != 1 {
+		t.Errorf("matches = %v, want one at col 0 len 1", m)
+	}
+}
+
+// Zero-width regex matches (a*, x?) have no cell to highlight: they are
+// skipped, and the scan still finds the real matches around them.
+func TestGrid_Regex_ZeroWidthMatchesSkipped(t *testing.T) {
+	g := newGrid(2, 20)
+	putRow(g, "bab aab")
+	sb := g.Scrollback.Len()
+	re := regexp.MustCompile(`a*`)
+	m := g.ViewportMatchesRegex(re)
+	if len(m) != 2 || m[0].Col != 1 || m[0].Len != 1 || m[1].Col != 4 || m[1].Len != 2 {
+		t.Errorf("ViewportMatchesRegex(a*) = %v, want col 1 len 1, col 4 len 2", m)
+	}
+	pos, l, ok := g.FindRegex(re, contentPos{Row: sb, Col: 1}, true)
+	if !ok || pos.Col != 4 || l != 2 {
+		t.Errorf("FindRegex forward = %v,%d,%v, want col 4 len 2", pos, l, ok)
+	}
+	pos, l, ok = g.FindRegex(re, contentPos{Row: sb, Col: 4}, false)
+	if !ok || pos.Col != 1 || l != 1 {
+		t.Errorf("FindRegex backward = %v,%d,%v, want col 1 len 1", pos, l, ok)
+	}
+	if _, _, ok := g.FindRegex(regexp.MustCompile(`x?`), contentPos{Row: sb, Col: -1}, true); ok {
+		t.Error("x? matched a zero-width span")
+	}
+}

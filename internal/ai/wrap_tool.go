@@ -39,6 +39,9 @@ func wrapToolCall(
 		callID = uuid.New().String()
 	}
 	inJSON := toolInputJSON(params)
+	// Tag the ctx with the call id so handlers can read per-call marks
+	// (terminal-exec approvals) — ToolContext exposes no call id of its own.
+	ctx = tool.WithCallID(ctx, callID)
 
 	emitDeps(deps, StreamEvent{Type: EventStartStep})
 	emitDeps(deps, StreamEvent{Type: EventToolInputStart, ToolCallID: callID, ToolName: name})
@@ -49,6 +52,15 @@ func wrapToolCall(
 		if genkitAI.IsToolFailError(err) {
 			outJSON, _ := json.Marshal(map[string]any{"error": err.Error()})
 			emitDeps(deps, StreamEvent{Type: EventToolOutputAvailable, ToolCallID: callID, ToolName: name, Output: outJSON})
+			emitDeps(deps, StreamEvent{Type: EventFinishStep})
+			return resp, err
+		}
+		// middleware.ToolApproval pauses a tool by raising a tool interrupt.
+		// That is a decision point, not an execution failure: the engine emits
+		// the approval request and, once answered, the denied output itself.
+		// Emitting an output error here paints a red error under the tool card
+		// while the approval is still pending.
+		if ok, _ := genkitAI.IsToolInterruptError(err); ok {
 			emitDeps(deps, StreamEvent{Type: EventFinishStep})
 			return resp, err
 		}

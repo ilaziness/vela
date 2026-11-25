@@ -8,6 +8,8 @@ import (
 	"time"
 
 	zm "github.com/xx25/go-zmodem"
+
+	"github.com/ilaziness/vela/internal/utils"
 )
 
 type fileHandler struct {
@@ -77,9 +79,9 @@ func (h *fileHandler) FileProgress(info zm.FileInfo, bytesTransferred int64) {
 	var msg string
 	if total > 0 {
 		msg = fmt.Sprintf("Zmodem: %s %s %d%% (%s/%s)",
-			verb, name, pct, formatSize(bytesTransferred), formatSize(total))
+			verb, name, pct, utils.FormatBytes(bytesTransferred), utils.FormatBytes(total))
 	} else {
-		msg = fmt.Sprintf("Zmodem: %s %s %s", verb, name, formatSize(bytesTransferred))
+		msg = fmt.Sprintf("Zmodem: %s %s %s", verb, name, utils.FormatBytes(bytesTransferred))
 	}
 	h.f.emitProgress(msg)
 }
@@ -94,7 +96,7 @@ func (h *fileHandler) FileCompleted(info zm.FileInfo, bytesTransferred int64, er
 		return
 	}
 	h.completedOK = true
-	h.f.emitLine(fmt.Sprintf("Zmodem: %s complete (%s)", name, formatSize(bytesTransferred)))
+	h.f.emitLine(fmt.Sprintf("Zmodem: %s complete (%s)", name, utils.FormatBytes(bytesTransferred)))
 }
 
 func openFileOffer(path string) (*zm.FileOffer, error) {
@@ -115,22 +117,4 @@ func openFileOffer(path string) (*zm.FileOffer, error) {
 		Mode:    mode,
 		Reader:  f,
 	}, nil
-}
-
-func formatSize(n int64) string {
-	const (
-		kb = 1024
-		mb = 1024 * kb
-		gb = 1024 * mb
-	)
-	switch {
-	case n >= gb:
-		return fmt.Sprintf("%.1fGB", float64(n)/float64(gb))
-	case n >= mb:
-		return fmt.Sprintf("%.1fMB", float64(n)/float64(mb))
-	case n >= kb:
-		return fmt.Sprintf("%.1fKB", float64(n)/float64(kb))
-	default:
-		return fmt.Sprintf("%dB", n)
-	}
 }

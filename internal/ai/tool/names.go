@@ -7,13 +7,14 @@ const (
 	WriteLocalFile     = "write_local_file"
 	ListLocalDirectory = "list_local_directory"
 	WebSearch          = "web_search"
+	ReadTerminal       = "read_terminal"
 )
 
 // IsBuiltin reports whether name is a Genkit tool registered by this package.
 // use_skill is handled separately by the ai wrap middleware.
 func IsBuiltin(name string) bool {
 	switch name {
-	case UpsertPlan, RunSSHCommand, ReadLocalFile, WriteLocalFile, ListLocalDirectory, WebSearch:
+	case UpsertPlan, RunSSHCommand, ReadLocalFile, WriteLocalFile, ListLocalDirectory, WebSearch, ReadTerminal:
 		return true
 	default:
 		return false

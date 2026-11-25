@@ -14,6 +14,9 @@ const (
 	EventToolOutputAvailable = "tool-output-available"
 	EventToolOutputError     = "tool-output-error"
 	EventToolOutputDenied    = "tool-output-denied"
+	// EventDone marks run completion (live Chat and cold resume). Reason is
+	// "cancelled" when the user stopped the run.
+	EventDone = "done"
 )
 
 // StreamEvent is a structured agent stream payload for the frontend.

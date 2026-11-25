@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -139,12 +140,15 @@ func (s *Service) UserCommands() []UserCommand {
 
 func (s *Service) SaveUser(cmd UserCommand) error {
 	existing, err := s.db.UserCommandRepo.GetCommandByCategoryAndName(cmd.Category, cmd.Name)
+	if err != nil && !database.IsNotFound(err) {
+		return err
+	}
 	cmd.CreatedAt = time.Now().UnixNano() / 1000000
 	dbCmd := &database.UserCommandDB{
 		Category: cmd.Category, Name: cmd.Name, Command: cmd.Command,
 		Description: cmd.Description, CreatedAt: time.Unix(cmd.CreatedAt/1000, 0),
 	}
-	if err == nil && existing != nil {
+	if existing != nil {
 		dbCmd.ID = existing.ID
 		return s.db.UserCommandRepo.UpdateCommand(dbCmd)
 	}
@@ -154,8 +158,11 @@ func (s *Service) SaveUser(cmd UserCommand) error {
 
 func (s *Service) DeleteUser(category, name string) error {
 	cmd, err := s.db.UserCommandRepo.GetCommandByCategoryAndName(category, name)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return usererr.Coded("command.not_found", "Command not found: %s / %s", category, name)
+	}
+	if err != nil {
+		return err
 	}
 	return s.db.UserCommandRepo.DeleteCommand(cmd.ID)
 }
@@ -173,23 +180,35 @@ func (s *Service) History() []History {
 	return out
 }
 
+// maxHistoryCmdRunes caps recorded commands; longer lines are almost
+// always pasted blobs, not reusable snippets.
+const maxHistoryCmdRunes = 100
+
 func (s *Service) AddHistory(cmd string) error {
 	cmd = strings.TrimSpace(cmd)
-	if cmd == "" {
+	runes := utf8.RuneCountInString(cmd)
+	if runes < 2 || runes > maxHistoryCmdRunes {
 		return nil
 	}
-	latest, err := s.db.CommandHistoryRepo.GetLatestHistory()
+	now := time.Now()
+	touched, err := s.db.CommandHistoryRepo.TouchHistory(cmd, now)
 	if err != nil {
-		s.logger.Error("get latest command history failed", zap.Error(err))
-	} else if latest != nil && latest.Command == cmd {
+		s.logger.Error("touch command history failed", zap.Error(err))
+	}
+	if touched {
 		return nil
 	}
-	_, err = s.db.CommandHistoryRepo.InsertHistory(&database.CommandHistoryDB{Command: cmd, Timestamp: time.Now()})
+	_, err = s.db.CommandHistoryRepo.InsertHistory(&database.CommandHistoryDB{Command: cmd, Timestamp: now})
 	return err
 }
 
 func (s *Service) ClearHistory() error {
 	return s.db.CommandHistoryRepo.ClearHistory()
+}
+
+// DeleteHistory removes one command from the history list.
+func (s *Service) DeleteHistory(cmd string) error {
+	return s.db.CommandHistoryRepo.DeleteHistoryByCommand(strings.TrimSpace(cmd))
 }
 
 func (s *Service) Builtin() map[string][]BuiltinCommand {
@@ -243,7 +262,9 @@ func (s *Service) Send(command string, sessionIDs []string) error {
 		}
 	}
 	if lastErr == nil {
-		_ = s.AddHistory(command)
+		if err := s.AddHistory(command); err != nil {
+			s.logger.Error("record command history failed", zap.Error(err))
+		}
 	}
 	return lastErr
 }

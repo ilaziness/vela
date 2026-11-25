@@ -61,6 +61,9 @@ type KnownHostEntry struct {
 	Host        string `json:"host"`
 	KeyType     string `json:"keyType"`
 	Fingerprint string `json:"fingerprint"`
+	// KeyData is the raw base64 public key blob (third field of the
+	// known_hosts line), shown so users can verify/copy the exact key.
+	KeyData string `json:"keyData"`
 }
 
 func (m *Manager) knownHostsFile() string {
@@ -225,7 +228,16 @@ func checkKnownHostInFile(path, host, keyType, keyBase64 string) (found, mismatc
 	return false, false, "", "", nil
 }
 
-func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.PublicKey) error {
+// hostKeyCallback builds the host key verifier for one dial. The prompter is
+// resolved per verification, so closing the origin window mid-dial falls back
+// to the default prompter. A nil prompter means non-interactive.
+func (m *Manager) hostKeyCallback(ctxKey string) cryptossh.HostKeyCallback {
+	return func(host string, remote net.Addr, key cryptossh.PublicKey) error {
+		return m.verifyHostKey(host, remote, key, m.getHostKeyPrompter(ctxKey))
+	}
+}
+
+func (m *Manager) verifyHostKey(host string, remote net.Addr, key cryptossh.PublicKey, prompter HostKeyPrompter) error {
 	keyType := key.Type()
 	keyBase64 := base64.StdEncoding.EncodeToString(key.Marshal())
 	knownPath := m.knownHostsFile()
@@ -242,7 +254,7 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 	if found {
 		return nil
 	}
-	if m.prompter == nil {
+	if prompter == nil {
 		if mismatch {
 			return usererr.Coded("ssh.host_key_mismatch", "Host key mismatch for %s", host)
 		}
@@ -266,7 +278,7 @@ func (m *Manager) hostKeyCallback(host string, remote net.Addr, key cryptossh.Pu
 		prompt.OldFingerprint = fingerprintFromBase64(oldBase64)
 	}
 
-	if err := m.prompter.Prompt(prompt); err != nil {
+	if err := prompter.Prompt(prompt); err != nil {
 		return err
 	}
 
@@ -314,9 +326,21 @@ func (m *Manager) ListKnownHosts() ([]KnownHostEntry, error) {
 			Host:        tokens[0],
 			KeyType:     tokens[1],
 			Fingerprint: fingerprintFromBase64(tokens[2]),
+			KeyData:     tokens[2],
 		})
 	}
 	return entries, nil
+}
+
+// ClearKnownHosts removes every trusted host key entry.
+func (m *Manager) ClearKnownHosts() error {
+	path := m.knownHostsFile()
+	m.knownHostsMu.Lock()
+	defer m.knownHostsMu.Unlock()
+	if err := ensureKnownHostsExists(path); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(""), 0600)
 }
 
 func (m *Manager) DeleteKnownHost(host, keyType string) error {

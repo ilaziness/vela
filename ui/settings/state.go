@@ -1,0 +1,121 @@
+package settings
+
+import (
+	"github.com/ilaziness/vela/internal/ai"
+	"github.com/ilaziness/vela/internal/config"
+	"github.com/ilaziness/vela/internal/keybind"
+	"github.com/ilaziness/vela/internal/mcpserver"
+	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/sshkey"
+	"github.com/ilaziness/vela/internal/sync"
+	"github.com/ilaziness/vela/ui/chrome"
+)
+
+const (
+	navGeneral     = "general"
+	navTerminal    = "terminal"
+	navSSH         = "ssh"
+	navSync        = "sync"
+	navAI          = "ai"
+	navKeys        = "keys"
+	navKnownHosts  = "known_hosts"
+	navKeybindings = "keybindings"
+	navAbout       = "about"
+)
+
+const (
+	aiTabGeneral   = "general"
+	aiTabTools     = "tools"
+	aiTabMCP       = "mcp"
+	aiTabSkills    = "skills"
+	aiTabMCPServer = "server"
+)
+
+// State is per-settings-window draft + list cache (independent of app.State).
+type State struct {
+	ActiveNav string
+	Busy      bool
+
+	General  config.GeneralConfig
+	Terminal config.TerminalConfig
+	SSH      config.SSHConfig
+	Sync     sync.SyncConfig
+	AI       ai.Config
+	AITab    string
+
+	// SyncBackups mirrors the *saved* sync config (d.Store.Config.Sync),
+	// not the draft form above it.
+	SyncBackups        []sync.BackupInfo
+	SyncBackupsLoading bool
+	SyncBackupsErr     string
+	SyncBackupsLoaded  bool
+
+	Keys            []sshkey.Info
+	KeyGenName      string
+	KeyGenAlgo      string
+	KeyGenComment   string
+	KnownHosts      []ssh.KnownHostEntry
+	Keybindings     []keybind.Info
+	RecordingAction string
+
+	MCPServers []ai.MCPServerEntry
+	Skills     []ai.SkillInfo
+
+	// MCP server (built-in) draft helpers: MCPKeyCleared marks an explicit
+	// access-key removal; MCPStatus mirrors the runtime server state.
+	MCPKeyCleared bool
+	MCPStatus     mcpserver.Status
+
+	UpdateChecking bool
+
+	// Frameless is the decoration mode captured at window creation;
+	// BarClicks feeds the title strip's double-click maximize.
+	Frameless bool
+	BarClicks chrome.ClickTracker
+
+	loaded bool
+}
+
+func (s *State) ensureLoaded(d *Deps) {
+	if s.loaded {
+		return
+	}
+	cfg := d.Store.Config
+	s.ActiveNav = navGeneral
+	s.General = cfg.General
+	s.Terminal = cfg.Terminal
+	s.SSH = cfg.SSH
+	s.Sync = cfg.Sync
+	if s.Sync.Provider == "" {
+		s.Sync.Provider = sync.ProviderSelfHosted
+	}
+	s.AI = cfg.AI
+	s.AI.APIKey = ""
+	s.AI.WebSearch.APIKey = ""
+	s.AI.MCPServer.AccessKey = ""
+	s.MCPKeyCleared = false
+	s.AITab = aiTabGeneral
+	s.KeyGenAlgo = "ed25519"
+	s.loaded = true
+	refreshLists(s, d)
+}
+
+func refreshLists(s *State, d *Deps) {
+	if list, err := d.Keys.List(); err == nil {
+		s.Keys = list
+	}
+	if list, err := d.SSH.ListKnownHosts(); err == nil {
+		s.KnownHosts = list
+	}
+	s.Keybindings = d.Keybind.List()
+	dir := d.Store.UserDataDir()
+	if mcp, err := ai.LoadMCPConfig(dir); err == nil {
+		s.MCPServers = mcp.Entries()
+	}
+	if skills, err := ai.ListSkills(dir); err == nil {
+		s.Skills = skills
+	}
+	if d.Agent != nil {
+		s.MCPStatus = d.Agent.MCPServerStatus()
+	}
+}

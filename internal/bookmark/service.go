@@ -3,7 +3,6 @@ package bookmark
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -229,8 +228,11 @@ func (s *Service) decryptBookmark(b Bookmark) (Bookmark, error) {
 
 func (s *Service) Get(id string) (*Bookmark, error) {
 	dbBookmark, err := s.db.BookmarkRepo.GetBookmarkByID(id)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return nil, usererr.Coded("bookmark.not_found", "Bookmark not found")
+	}
+	if err != nil {
+		return nil, err
 	}
 	groupName := ""
 	if group, _ := s.db.BookmarkRepo.GetGroupByID(dbBookmark.GroupID); group != nil {
@@ -436,6 +438,9 @@ func (s *Service) Save(b Bookmark) (string, error) {
 	normalizeMeta(&b)
 	if b.ID != "" {
 		existing, err := s.db.BookmarkRepo.GetBookmarkByID(b.ID)
+		if err != nil && !database.IsNotFound(err) {
+			return "", err
+		}
 		if err == nil && existing != nil {
 			return b.ID, s.update(b, existing)
 		}
@@ -519,8 +524,11 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 	groupID := existing.GroupID
 	if b.GroupName != "" {
 		g, err := s.db.BookmarkRepo.GetGroupByName(b.GroupName)
-		if err != nil {
+		if database.IsNotFound(err) {
 			return usererr.Coded("bookmark.group_not_found", "Group '%s' not found", b.GroupName)
+		}
+		if err != nil {
+			return err
 		}
 		groupID = g.ID
 	}
@@ -529,7 +537,7 @@ func (s *Service) update(b Bookmark, existing *database.BookmarkDB) error {
 		if err == nil && dup.ID != b.ID {
 			return usererr.Coded("bookmark.title_exists", "Bookmark '%s' already exists in group '%s'", b.Title, b.GroupName)
 		}
-		if err != nil && err.Error() != "bookmark not found" {
+		if err != nil && !database.IsNotFound(err) {
 			return err
 		}
 	}
@@ -589,8 +597,11 @@ func (s *Service) insert(b Bookmark) (string, error) {
 		groupName = DefaultGroupName
 	}
 	group, err := s.db.BookmarkRepo.GetGroupByName(groupName)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return "", usererr.Coded("bookmark.group_not_found", "Group '%s' not found", groupName)
+	}
+	if err != nil {
+		return "", err
 	}
 	exists, err := s.titleExistsInGroup(b.Title, group.ID)
 	if err != nil {
@@ -655,6 +666,18 @@ func (s *Service) Delete(id string) error {
 	if err := s.db.BookmarkRepo.DeleteBookmark(id); err != nil {
 		return err
 	}
+	// Tunnel rules are bookmark-scoped; a missing cleanup only orphans
+	// rows, so warn instead of failing the delete.
+	if err := s.db.SSHTunnelRepo.DeleteByBookmark(id); err != nil {
+		s.logger.Warn("delete bookmark tunnel rules failed",
+			zap.String("bookmark_id", id), zap.Error(err))
+	}
+	// Others may jump through this bookmark; drop those references so they do
+	// not fail later with a missing ProxyJump target.
+	if err := s.db.BookmarkRepo.ClearProxyJumpRefs(id); err != nil {
+		s.logger.Warn("clear proxy jump references failed",
+			zap.String("bookmark_id", id), zap.Error(err))
+	}
 	s.emit()
 	return nil
 }
@@ -662,6 +685,8 @@ func (s *Service) Delete(id string) error {
 func (s *Service) AddGroup(name string) error {
 	if _, err := s.db.BookmarkRepo.GetGroupByName(name); err == nil {
 		return usererr.Coded("bookmark.group_exists", "Group '%s' already exists", name)
+	} else if !database.IsNotFound(err) {
+		return err
 	}
 	if err := s.db.BookmarkRepo.InsertGroup(&database.BookmarkGroupDB{Name: name}); err != nil {
 		return err
@@ -680,6 +705,8 @@ func (s *Service) UpdateGroup(oldName, newName, icon string) error {
 	if newName != oldName {
 		if _, err := s.db.BookmarkRepo.GetGroupByName(newName); err == nil {
 			return usererr.Coded("bookmark.group_exists", "Group '%s' already exists", newName)
+		} else if !database.IsNotFound(err) {
+			return err
 		}
 	}
 	if err := s.db.BookmarkRepo.UpdateGroup(oldName, newName, icon); err != nil {
@@ -691,8 +718,11 @@ func (s *Service) UpdateGroup(oldName, newName, icon string) error {
 
 func (s *Service) Copy(id string) (*Bookmark, error) {
 	src, err := s.db.BookmarkRepo.GetBookmarkByID(id)
-	if err != nil {
+	if database.IsNotFound(err) {
 		return nil, usererr.Coded("bookmark.not_found", "Bookmark not found")
+	}
+	if err != nil {
+		return nil, err
 	}
 	title, err := s.uniqueCopyTitle(src.Title, src.GroupID)
 	if err != nil {
@@ -738,7 +768,7 @@ func (s *Service) titleExistsInGroup(title string, groupID int) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if err.Error() == "bookmark not found" {
+	if database.IsNotFound(err) {
 		return false, nil
 	}
 	return false, err
@@ -765,16 +795,23 @@ func (s *Service) uniqueCopyTitle(base string, groupID int) (string, error) {
 	}
 }
 
+// DeleteGroup 批量删除分组及其下的所有书签（含书签关联的隧道规则）。
 func (s *Service) DeleteGroup(name string) error {
 	if name == DefaultGroupName || name == LegacyDefaultGroupName {
 		return usererr.Coded("bookmark.cannot_delete_default", "Cannot delete the default group")
 	}
-	count, err := s.db.BookmarkRepo.GetGroupBookmarkCount(name)
-	if err != nil {
-		return err
+	// 关联清理必须在书签行删除前执行：它们的子查询依赖书签行。
+	// 清理失败只留下孤儿数据，告警后继续删除。
+	if err := s.db.BookmarkRepo.ClearProxyJumpRefsByGroup(name); err != nil {
+		s.logger.Warn("clear proxy jump references failed",
+			zap.String("group", name), zap.Error(err))
 	}
-	if count > 0 {
-		return usererr.Coded("bookmark.group_not_empty", "Group '%s' still has %s bookmarks and cannot be deleted", name, strconv.Itoa(count))
+	if err := s.db.SSHTunnelRepo.DeleteByBookmarkGroup(name); err != nil {
+		s.logger.Warn("delete group tunnel rules failed",
+			zap.String("group", name), zap.Error(err))
+	}
+	if err := s.db.BookmarkRepo.DeleteBookmarksByGroup(name); err != nil {
+		return err
 	}
 	if err := s.db.BookmarkRepo.DeleteGroup(name); err != nil {
 		return err
@@ -795,48 +832,26 @@ func (s *Service) PrepareTest(b Bookmark) (PrepareTestResult, error) {
 	ep := b.Endpoint()
 	jumpID := b.ProxyJumpID
 	proxyPass := b.ProxyPassword
+	// Only PasswordMask means "reuse stored secret". Empty string is an
+	// intentional clear (matches Save / encryptFieldIfNeeded).
 	if b.ID != "" {
-		existing, err := s.Get(b.ID)
-		if err != nil {
-			return PrepareTestResult{}, err
-		}
-		sameHost := b.Host == existing.Host && b.Port == existing.Port && b.User == existing.User
-		passwordUnchanged := b.Password == "" || b.Password == PasswordMask
-		keyPassUnchanged := b.PrivateKeyPassword == "" || b.PrivateKeyPassword == PasswordMask
-		proxyPassUnchanged := b.ProxyPassword == "" || b.ProxyPassword == PasswordMask
-		sameKeyFile := b.PrivateKey == existing.PrivateKey
-		sameStoredKey := b.SshKeyID == existing.SshKeyID
-		fullReuse := sameHost && passwordUnchanged && keyPassUnchanged && sameKeyFile && sameStoredKey
-		switch {
-		case fullReuse:
+		needLogin := b.Password == PasswordMask
+		needKeyPass := b.PrivateKeyPassword == PasswordMask
+		needProxy := b.ProxyPassword == PasswordMask
+		if needLogin || needKeyPass || needProxy {
 			decrypted, err := s.GetDecrypted(b.ID)
 			if err != nil {
 				return PrepareTestResult{}, err
 			}
-			ep = decrypted.Endpoint()
-			if proxyPassUnchanged {
-				proxyPass = decrypted.ProxyPassword
+			if needLogin {
+				ep.Password = decrypted.Password
 			}
-		case sameHost && b.Password == PasswordMask:
-			decrypted, err := s.GetDecrypted(b.ID)
-			if err != nil {
-				return PrepareTestResult{}, err
-			}
-			ep.Password = decrypted.Password
-			if sameKeyFile && keyPassUnchanged {
+			if needKeyPass {
 				ep.KeyPassword = decrypted.PrivateKeyPassword
-			} else if b.PrivateKeyPassword == PasswordMask {
-				ep.KeyPassword = ""
 			}
-			if proxyPassUnchanged {
+			if needProxy {
 				proxyPass = decrypted.ProxyPassword
 			}
-		case b.ProxyPassword == PasswordMask:
-			decrypted, err := s.GetDecrypted(b.ID)
-			if err != nil {
-				return PrepareTestResult{}, err
-			}
-			proxyPass = decrypted.ProxyPassword
 		}
 	}
 	ep, err := s.attachKey(ep, b.SshKeyID)

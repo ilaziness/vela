@@ -99,7 +99,7 @@ func (r *SQLiteAISessionRepository) GetSession(ctx context.Context, id string) (
 		`SELECT id, title, plan_json, created_at, updated_at FROM ai_sessions WHERE id = ?`,
 		id).Scan(&session.ID, &session.Title, &session.PlanJSON, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("session not found")
+		return nil, sql.ErrNoRows
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get session failed: %w", err)
@@ -158,7 +158,7 @@ func (r *SQLiteAISessionRepository) UpdateSession(ctx context.Context, session *
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("session not found")
+		return sql.ErrNoRows
 	}
 
 	return nil
@@ -198,7 +198,7 @@ func (r *SQLiteAISessionRepository) DeleteSession(ctx context.Context, id string
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("session not found")
+		return sql.ErrNoRows
 	}
 	return nil
 }
@@ -427,7 +427,7 @@ func (r *SQLiteAISessionRepository) UpdateMessageContent(ctx context.Context, id
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("message not found")
+		return sql.ErrNoRows
 	}
 	return nil
 }

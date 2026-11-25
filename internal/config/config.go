@@ -18,23 +18,10 @@ import (
 
 const FileName = "config.toml"
 
-var defaultFontFamily = []string{
-	"'Noto Sans Mono'",
-	"'ui-monospace'",
-	"'Cascadia Code'",
-	"Consolas",
-	"Menlo",
-	"Monaco",
-	"'DejaVu Sans Mono'",
-	"'Ubuntu Mono'",
-	"'Liberation Mono'",
-	"'Courier New'",
-	"'Microsoft YaHei'",
-	"'PingFang SC'",
-	"'Heiti SC'",
-	"'WenQuanYi Micro Hei'",
-	"monospace",
-}
+const (
+	defaultGeneralTheme  = "dark"
+	defaultTerminalTheme = "Default"
+)
 
 type Config struct {
 	General     GeneralConfig     `toml:"general"`
@@ -56,13 +43,19 @@ type GeneralConfig struct {
 }
 
 type TerminalConfig struct {
-	Font            string  `toml:"font" json:"fontFamily"`
-	FontSize        int     `toml:"font_size" json:"fontSize"`
-	LineHeight      float64 `toml:"line_height" json:"lineHeight"`
-	Scrollback      int     `toml:"scrollback" json:"scrollback"`
-	Bell            bool    `toml:"bell" json:"bell"`
-	CopyOnSelect    bool    `toml:"copy_on_select" json:"copyOnSelect"`
-	RightClickPaste bool    `toml:"right_click_paste" json:"rightClickPaste"`
+	Theme       string `toml:"theme" json:"theme"`
+	Font        string `toml:"font" json:"fontFamily"`    // empty = platform monospace
+	FontSize    int    `toml:"font_size" json:"fontSize"` // <=0 or >72 = 14
+	Scrollback  int    `toml:"scrollback" json:"scrollback"`
+	CursorStyle string `toml:"cursor_style" json:"cursorStyle"`
+	CursorBlink bool   `toml:"cursor_blink" json:"cursorBlink"`
+	CursorLock  bool   `toml:"cursor_lock" json:"cursorLock"`
+	// RecordDir is the default save directory for session recordings
+	// (.gtr files). RecordInput controls whether recordings include
+	// keystrokes and pastes (off by default — they may contain passwords).
+	// Both are consumed by the manual record controls, not term.Cfg.
+	RecordDir   string `toml:"record_dir" json:"recordDir"`
+	RecordInput bool   `toml:"record_input" json:"recordInput"`
 }
 
 const (
@@ -71,11 +64,11 @@ const (
 	maxTerminalScrollback     = 100000
 )
 
-// SSHConfig holds global SSH client options (ServerAliveInterval-style keepalive, dial timeout, auto-reconnect, dial proxy).
+// SSHConfig holds global SSH client options (keepalive interval/count, dial timeout, dial proxy).
 type SSHConfig struct {
 	ServerAliveInterval int    `toml:"server_alive_interval" json:"serverAliveInterval"`
+	ServerAliveCountMax int    `toml:"server_alive_count_max" json:"serverAliveCountMax"`
 	DialTimeoutSec      int    `toml:"dial_timeout_sec" json:"dialTimeoutSec"`
-	AutoReconnect       bool   `toml:"auto_reconnect" json:"autoReconnect"`
 	ProxyType           string `toml:"proxy_type" json:"proxyType"`
 	ProxyHost           string `toml:"proxy_host" json:"proxyHost"`
 	ProxyPort           int    `toml:"proxy_port" json:"proxyPort"`
@@ -103,23 +96,20 @@ func Default() *Config {
 	return &Config{
 		General: GeneralConfig{
 			UserDataDir:     filepath.Join(execDir, "data"),
-			Theme:           "dark",
+			Theme:           defaultGeneralTheme,
 			AutoCheckUpdate: true,
 			FontSize:        14,
 		},
 		Terminal: TerminalConfig{
-			Font:            strings.Join(defaultFontFamily, ","),
-			FontSize:        14,
-			LineHeight:      1,
-			Scrollback:      defaultTerminalScrollback,
-			Bell:            true,
-			CopyOnSelect:    false,
-			RightClickPaste: false,
+			Theme:       defaultTerminalTheme,
+			FontSize:    14,
+			Scrollback:  defaultTerminalScrollback,
+			CursorStyle: "block",
 		},
 		SSH: SSHConfig{
 			ServerAliveInterval: 30,
+			ServerAliveCountMax: 3,
 			DialTimeoutSec:      30,
-			AutoReconnect:       true,
 		},
 	}
 }
@@ -127,6 +117,10 @@ func Default() *Config {
 // Normalize clamps the UI font size and strips characters that would break CSS.
 // An empty font keeps the system stack.
 func (c *GeneralConfig) Normalize() {
+	c.Theme = strings.TrimSpace(c.Theme)
+	if c.Theme == "" {
+		c.Theme = defaultGeneralTheme
+	}
 	c.Font = sanitizeUIFont(c.Font)
 	if c.FontSize < 8 || c.FontSize > 72 {
 		c.FontSize = 14
@@ -154,15 +148,11 @@ func sanitizeUIFont(font string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// Normalize clamps terminal display options. Does not force Bell/CopyOnSelect/
-// RightClickPaste defaults — absent TOML keys keep Default() values via merge.
+// Normalize clamps terminal display options to sane values.
 func (c *TerminalConfig) Normalize() {
 	def := Default().Terminal
 	if c.FontSize < 1 || c.FontSize > 72 {
 		c.FontSize = def.FontSize
-	}
-	if c.LineHeight <= 0 {
-		c.LineHeight = def.LineHeight
 	}
 	switch {
 	case c.Scrollback <= 0:
@@ -172,9 +162,18 @@ func (c *TerminalConfig) Normalize() {
 	case c.Scrollback > maxTerminalScrollback:
 		c.Scrollback = maxTerminalScrollback
 	}
-	if strings.TrimSpace(c.Font) == "" {
-		c.Font = def.Font
+	c.Font = sanitizeUIFont(c.Font)
+	c.Theme = strings.TrimSpace(c.Theme)
+	if c.Theme == "" {
+		c.Theme = defaultTerminalTheme
 	}
+	c.CursorStyle = strings.ToLower(strings.TrimSpace(c.CursorStyle))
+	switch c.CursorStyle {
+	case "block", "underline", "bar":
+	default:
+		c.CursorStyle = def.CursorStyle
+	}
+	c.RecordDir = strings.TrimSpace(c.RecordDir)
 }
 
 // Normalize fills invalid/missing fields with defaults after loading from disk.
@@ -186,6 +185,9 @@ func (c *SSHConfig) Normalize() {
 	}
 	if c.DialTimeoutSec <= 0 {
 		c.DialTimeoutSec = def.DialTimeoutSec
+	}
+	if c.ServerAliveCountMax <= 0 {
+		c.ServerAliveCountMax = def.ServerAliveCountMax
 	}
 	if c.ServerAliveInterval < 0 {
 		c.ServerAliveInterval = 0

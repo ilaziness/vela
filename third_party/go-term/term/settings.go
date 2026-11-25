@@ -1,0 +1,209 @@
+package term
+
+import (
+	"time"
+
+	"github.com/go-gui-org/go-gui/gui"
+)
+
+// Live setters for settings that Cfg otherwise fixes at construction.
+//
+// Cfg is read once, in New. A config-file reload (or a settings UI) needs to
+// change these on a terminal that is already running, which is what these
+// provide. Each mirrors the Cfg field of the same name, including its
+// zero/negative conventions, so the two paths can't drift.
+//
+// All are main-thread only unless noted: they write t.cfg, which onDraw and
+// the keyboard handlers read without a lock. The one exception is the bell
+// mode, which the reader goroutine consults and so lives in an atomic.
+
+// SetTextStyle replaces the terminal's base text style — family, size,
+// typeface — and forces a remeasure. Mirrors Cfg.TextStyle: the zero value
+// means "fall back to gui.CurrentTheme().TextStyleCodeSmall".
+//
+// This also clears any runtime zoom, exactly as ResetFontSize does. t.fontSize
+// is an *absolute* size derived from the previous base and wins over
+// cfg.TextStyle.Size in style(), so a pane zoomed to 14 pt would otherwise
+// ignore a new configured size of 12 pt until the user pressed Cmd+0.
+func (t *Term) SetTextStyle(ts gui.TextStyle) {
+	// Normalize a non-finite size to "unset" before storing it. Otherwise the
+	// equality check below can never hold (NaN != NaN), so every call would
+	// force a remeasure and silently discard the user's zoom.
+	if !realNumber(ts.Size) {
+		ts.Size = 0
+	}
+	if t.cfg.TextStyle == ts && t.fontSize == 0 {
+		return
+	}
+	t.cfg.TextStyle = ts
+	t.fontSize = 0
+	t.invalidateFontMetrics()
+}
+
+// SetScrollbackRows changes the scrollback cap on a live terminal. The sign
+// convention matches Cfg.ScrollbackRows: zero restores the built-in default,
+// positive sets that many rows (clamped to [0, MaxScrollbackCap]), negative
+// disables scrollback entirely.
+//
+// Shrinking trims the stored history immediately — keeping the newest rows and
+// discarding the oldest — rather than waiting for eviction to catch up, so
+// lowering the cap actually returns the memory. Safe to call from the main
+// thread at any time; takes grid.Mu.
+func (t *Term) SetScrollbackRows(n int) {
+	var capRows int
+	switch {
+	case n == 0:
+		capRows = defaultScrollbackRows
+	case n > 0:
+		capRows = clampScrollback(n)
+	default:
+		capRows = 0 // negative: scrollback off
+	}
+	if !t.resizeScrollback(capRows) {
+		return
+	}
+	// Outside the lock: grid.Mu must never be held across a go-gui call.
+	// Trimming can clamp ViewOffset, which moves the visible viewport, so the
+	// frame has to be requested here rather than left to the next event.
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
+}
+
+// resizeScrollback applies a new scrollback capacity under grid.Mu, reporting
+// whether anything actually changed. Split out of SetScrollbackRows so the
+// repaint request can happen after the lock is released.
+func (t *Term) resizeScrollback(capRows int) bool {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	if t.grid.ScrollbackCap == capRows {
+		return false
+	}
+	t.grid.ScrollbackCap = capRows
+	// EnsureGeom keeps the newest min(size, cap) rows on a capacity-only
+	// change and drops the backing entirely at cap 0. Pass the ring's own
+	// column count: a differing value would reset the content, and the ring
+	// is repopulated at the live column count by scrollUpRegion anyway.
+	oldLen := t.grid.Scrollback.Len()
+	t.grid.Scrollback.EnsureGeom(capRows, t.grid.Scrollback.cols)
+	// Dropping the oldest rows shifts every content row up by the same count.
+	// Marks and image anchors live in content rows, so they move with it, the
+	// same as when scrolling evicts rows (scrollUpRegion) or ED 3 clears them.
+	if dropped := oldLen - t.grid.Scrollback.Len(); dropped > 0 {
+		t.grid.trimMarks(dropped)
+		t.grid.trimGraphics(dropped)
+	}
+	// A new or dropped ring slab must not stay pinned by screen rows swapped in
+	// from the old one — at cap 0 no scroll would ever reclaim them.
+	t.grid.syncScrollbackGen()
+	// The reflow scratch scales with the ring: a cap change invalidates it,
+	// so return its blocks with the ring's so a user lowering the cap
+	// actually shrinks the footprint.
+	t.grid.reflowArena = rowArena{}
+	// The viewport may have been scrolled into rows that no longer exist.
+	if n := t.grid.Scrollback.Len(); t.grid.ViewOffset > n {
+		t.grid.ViewOffset = n
+	}
+	t.grid.markAllDirty()
+	t.bumpVersion()
+	return true
+}
+
+// SetBellMode changes how BEL is signalled on a live terminal. Safe to call
+// from the main thread at any time; the reader goroutine reads it atomically.
+func (t *Term) SetBellMode(m BellMode) { t.bellMode.Store(int32(m)) }
+
+// SetMiddleClickPaste enables or disables middle-click paste on a live
+// terminal, mirroring Cfg.MiddleClickPaste. Main-thread only; takes effect on
+// the next click, so a config reload needs no redraw.
+func (t *Term) SetMiddleClickPaste(on bool) { t.cfg.MiddleClickPaste = on }
+
+// SetMinimumContrast changes the render-time contrast floor on a live
+// terminal, mirroring Cfg.MinimumContrast. A ratio at or below 1 turns the
+// clamp off; a non-finite value is ignored. Main-thread only.
+//
+// Takes grid.Mu because the foreground pass reads the ratio and the memo it
+// keys, and the memo has to be dropped in the same critical section — entries
+// computed under the old ratio are wrong, not stale.
+func (t *Term) SetMinimumContrast(ratio float64) {
+	if !realNumber(ratio) {
+		return
+	}
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	if t.grid.MinContrast == ratio {
+		return
+	}
+	t.grid.MinContrast = ratio
+	t.grid.contrast.reset()
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
+}
+
+// SetScrollbarWidth changes the scrollbar thumb width in pixels. Mirrors
+// Cfg.ScrollbarWidth: zero restores the built-in default, negative hides the
+// scrollbar. A non-finite value is ignored. Main-thread only.
+func (t *Term) SetScrollbarWidth(px float32) {
+	if !realNumber(px) || t.cfg.ScrollbarWidth == px {
+		return
+	}
+	t.cfg.ScrollbarWidth = px
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
+}
+
+// SetCursorStyle changes the shape the cursor is drawn in, mirroring
+// Cfg.CursorStyle: it sets both the live shape and the default `reset`
+// restores. An unrecognized value falls back to a block.
+//
+// This is a default, not an override — an unlocked pane still follows the
+// child's DECSCUSR. Pair it with SetCursorLocked to pin the shape.
+//
+// Takes grid.Mu: the shape is grid state that the draw pass reads.
+func (t *Term) SetCursorStyle(s CursorStyle) {
+	s = validCursorStyle(s)
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	if t.grid.defaultShape == s && t.grid.cursorShape == s {
+		return
+	}
+	t.grid.defaultShape = s
+	t.grid.cursorShape = s
+	t.grid.markDirty(t.grid.CursorR)
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
+}
+
+// SetCursorBlink turns cursor blinking on or off, mirroring Cfg.CursorBlink
+// with the same default-not-override meaning as SetCursorStyle.
+//
+// The blink phase is restarted so the cursor is visible at the moment the
+// setting changes rather than mid-cycle. bumpVersion is what un-parks
+// blinkLoop, which sleeps indefinitely while nothing is animating.
+func (t *Term) SetCursorBlink(on bool) {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	if t.grid.defaultBlink == on && t.grid.CursorBlink == on {
+		return
+	}
+	t.grid.defaultBlink = on
+	t.grid.CursorBlink = on
+	t.grid.markDirty(t.grid.CursorR)
+	// Main-thread only, like the rest of this file: cursorEpoch is read by
+	// the draw pass, which also runs there.
+	t.cursorEpoch = time.Now()
+	t.bumpVersion()
+	t.queueCommand(func(w *gui.Window) { w.InvalidateLayout() })
+}
+
+// SetCursorLocked pins the cursor to the configured style and blink, dropping
+// every DECSCUSR the child sends. Mirrors Cfg.CursorLocked.
+//
+// The current shape is left as it is: locking means "no further changes", not
+// "revert now". A caller that wants both calls SetCursorStyle as well.
+func (t *Term) SetCursorLocked(locked bool) {
+	t.grid.Mu.Lock()
+	defer t.grid.Mu.Unlock()
+	if t.grid.cursorLocked == locked {
+		return
+	}
+	t.grid.cursorLocked = locked
+}

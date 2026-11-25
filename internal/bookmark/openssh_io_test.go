@@ -95,3 +95,101 @@ Host target
 		}
 	}
 }
+
+func TestExportOpenSSHSkipsSerialWithWarning(t *testing.T) {
+	svc, _ := testBookmarkService(t, "", "")
+	if _, err := svc.Save(Bookmark{
+		GroupName: DefaultGroupName, Title: "com1", Protocol: "serial",
+		SerialDevice: "COM1", BaudRate: 9600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, warns, err := svc.ExportOpenSSH(DefaultGroupName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "Host com1") {
+		t.Fatalf("serial bookmark exported:\n%s", out)
+	}
+	found := false
+	for _, w := range warns {
+		if strings.Contains(w, "skipped non-SSH bookmark") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing non-SSH warning: %v", warns)
+	}
+}
+
+func TestExportOpenSSHUniqueAliases(t *testing.T) {
+	svc, _ := testBookmarkService(t, "", "")
+	if err := svc.AddGroup("Prod"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Save(Bookmark{
+		GroupName: DefaultGroupName, Title: "web", Protocol: "ssh",
+		Host: "10.0.0.1", Port: 22, User: "u",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Save(Bookmark{
+		GroupName: "Prod", Title: "web", Protocol: "ssh",
+		Host: "10.0.0.2", Port: 22, User: "u",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, warns, err := svc.ExportOpenSSH("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Titles are unique per group only; exporting both groups must not emit
+	// two identical Host blocks.
+	if !strings.Contains(out, "Host web\n") || !strings.Contains(out, "Host web-2\n") {
+		t.Fatalf("expected unique aliases:\n%s\nwarns=%v", out, warns)
+	}
+	if !strings.Contains(out, "HostName 10.0.0.1") || !strings.Contains(out, "HostName 10.0.0.2") {
+		t.Fatalf("missing host entries:\n%s", out)
+	}
+}
+
+func TestExportOpenSSHIncludesCrossGroupJump(t *testing.T) {
+	svc, _ := testBookmarkService(t, "", "")
+	if err := svc.AddGroup("Infra"); err != nil {
+		t.Fatal(err)
+	}
+	jumpID, err := svc.Save(Bookmark{
+		GroupName: "Infra", Title: "bastion", Protocol: "ssh",
+		Host: "10.1.0.1", Port: 22, User: "j",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := svc.Save(Bookmark{
+		GroupName: DefaultGroupName, Title: "app", Protocol: "ssh",
+		Host: "10.2.0.1", Port: 22, User: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := svc.Get(targetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.ProxyJumpID = jumpID
+	if _, err := svc.Save(*target); err != nil {
+		t.Fatal(err)
+	}
+
+	out, warns, err := svc.ExportOpenSSH(DefaultGroupName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Host bastion\n") {
+		t.Fatalf("jump host not included:\n%s\nwarns=%v", out, warns)
+	}
+	if !strings.Contains(out, "ProxyJump bastion") {
+		t.Fatalf("missing ProxyJump:\n%s", out)
+	}
+}

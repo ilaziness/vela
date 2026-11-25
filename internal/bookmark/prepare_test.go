@@ -51,6 +51,24 @@ func TestPrepareTestClearedPasswordStaysEmpty(t *testing.T) {
 	}
 }
 
+func TestPrepareTestClearedLoginKeepsKeyPasswordMask(t *testing.T) {
+	svc, id := testBookmarkService(t, "/keys/id_ed25519", "key-pass")
+	prep, err := svc.PrepareTest(Bookmark{
+		ID: id, Host: "h", Port: 22, User: "root",
+		Password: "", PrivateKey: "/keys/id_ed25519", PrivateKeyPassword: PasswordMask,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := prep.Endpoint
+	if ep.Password != "" {
+		t.Fatalf("password = %q want empty", ep.Password)
+	}
+	if ep.KeyPassword != "key-pass" || ep.Key != "/keys/id_ed25519" {
+		t.Fatalf("endpoint = %+v", ep)
+	}
+}
+
 func TestPrepareTestUnchangedFileKeepsKeyPassword(t *testing.T) {
 	svc, id := testBookmarkService(t, "/keys/id_ed25519", "key-pass")
 	prep, err := svc.PrepareTest(Bookmark{
