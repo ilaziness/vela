@@ -30,6 +30,7 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 - Dual-pane SFTP panel, bookmark management, import and export OpenSSH config
 - Backup & restore: master password encryption and compression, upload to self-hosted storage, WebDAV, or S3
 - AI assistant: local file read/write, web search, remote command execution, MCP and Skills
+- Built-in MCP server: exposes bookmark lookup, SSH command execution and more for external MCP clients
 - Multi-language: English, Simplified Chinese, Traditional Chinese
 - Multiple themes available for app and terminal
 - Automatic update check, download, and installation
