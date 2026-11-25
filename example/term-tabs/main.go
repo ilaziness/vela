@@ -17,8 +17,12 @@ type pane struct {
 }
 
 type appState struct {
-	panes  []*pane
-	active int
+	panes    []*pane
+	active   int
+	leftInput string
+	leftText string
+	rightInput string
+	rightText string
 }
 
 func tabID(i int) string { return fmt.Sprintf("term-%d", i) }
@@ -31,7 +35,7 @@ func main() {
 
 	win := gui.NewWindow(gui.WindowCfg{
 		Title:  "go-term tabs repro",
-		Width:  900,
+		Width:  1100,
 		Height: 600,
 		State:  st,
 		OnInit: func(w *gui.Window) {
@@ -168,19 +172,165 @@ func mainView(w *gui.Window) gui.View {
 					}),
 				},
 			}),
-			gui.TabControl(gui.TabControlCfg{
-				ID:       "tabs",
-				Sizing:   gui.FillFill,
-				Selected: selected,
-				Items:    items,
-				OnSelect: func(id string, ctx gui.EventCtx) {
+			gui.Row(gui.ContainerCfg{
+				Sizing:  gui.FillFill,
+				Spacing: gui.SpacingPx(4),
+				Content: []gui.View{
+					leftSidebar(w),
+					gui.Column(gui.ContainerCfg{
+						Sizing:  gui.FillFill,
+						Spacing: gui.SpacingPx(4),
+						Content: []gui.View{
+							gui.TabControl(gui.TabControlCfg{
+								ID:       "tabs",
+								Sizing:   gui.FillFill,
+								Selected: selected,
+								Items:    items,
+								OnSelect: func(id string, ctx gui.EventCtx) {
+									ctx.Consume()
+									s := gui.State[appState](ctx.Window)
+									var idx int
+									if _, err := fmt.Sscanf(id, "term-%d", &idx); err == nil {
+										s.active = idx
+										focusActive(ctx.Window, s)
+									}
+								},
+							}),
+						},
+					}),
+					rightSidebar(w),
+				},
+			}),
+		},
+	})
+}
+
+func leftSidebar(w *gui.Window) gui.View {
+	st := gui.State[appState](w)
+	th := gui.CurrentTheme()
+	return gui.Column(gui.ContainerCfg{
+		Sizing:  gui.FitFill,
+		Spacing: gui.SpacingPx(4),
+		Content: []gui.View{
+			gui.Label("Left Sidebar", th.TextStyleBody.Bold()),
+			gui.Label("Input:", th.TextStyleBody),
+			gui.Input(gui.InputCfg{
+				ID:          "left-input",
+				Text:        st.leftInput,
+				Placeholder: "Type here...",
+				Sizing:      gui.FillFit,
+				OnTextChanged: func(s string, ctx gui.EventCtx) {
 					ctx.Consume()
-					s := gui.State[appState](ctx.Window)
-					var idx int
-					if _, err := fmt.Sscanf(id, "term-%d", &idx); err == nil {
-						s.active = idx
-						focusActive(ctx.Window, s)
-					}
+					st := gui.State[appState](ctx.Window)
+					st.leftInput = s
+				},
+			}),
+			gui.Label("Textarea:", th.TextStyleBody),
+			gui.Input(gui.InputCfg{
+				ID:          "left-textarea",
+				Text:        st.leftText,
+				Placeholder: "Type multiline text...",
+				Mode:        gui.InputMultiline,
+				Sizing:      gui.FillFill,
+				OnTextChanged: func(s string, ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.leftText = s
+				},
+			}),
+			gui.Label("Sample Buttons:", th.TextStyleBody),
+			gui.Button(gui.ButtonCfg{
+				ID:    "left-btn-1",
+				Label: "Button 1",
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.leftInput = "Clicked Button 1"
+				},
+			}),
+			gui.Button(gui.ButtonCfg{
+				ID:    "left-btn-2",
+				Label: "Button 2",
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.leftText = "Clicked Button 2"
+				},
+			}),
+			gui.Button(gui.ButtonCfg{
+				ID:    "left-btn-3",
+				Label: "Clear",
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.leftInput = ""
+					st.leftText = ""
+				},
+			}),
+		},
+	})
+}
+
+func rightSidebar(w *gui.Window) gui.View {
+	st := gui.State[appState](w)
+	th := gui.CurrentTheme()
+	return gui.Column(gui.ContainerCfg{
+		Sizing:  gui.FitFill,
+		Spacing: gui.SpacingPx(4),
+		Content: []gui.View{
+			gui.Label("Right Sidebar", th.TextStyleBody.Bold()),
+			gui.Label("Input:", th.TextStyleBody),
+			gui.Input(gui.InputCfg{
+				ID:          "right-input",
+				Text:        st.rightInput,
+				Placeholder: "Type here...",
+				Sizing:      gui.FillFit,
+				OnTextChanged: func(s string, ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.rightInput = s
+				},
+			}),
+			gui.Label("Textarea:", th.TextStyleBody),
+			gui.Input(gui.InputCfg{
+				ID:          "right-textarea",
+				Text:        st.rightText,
+				Placeholder: "Type multiline text...",
+				Mode:        gui.InputMultiline,
+				Sizing:      gui.FillFill,
+				OnTextChanged: func(s string, ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.rightText = s
+				},
+			}),
+			gui.Label("Sample Buttons:", th.TextStyleBody),
+			gui.Button(gui.ButtonCfg{
+				ID:    "right-btn-1",
+				Label: "Button 1",
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.rightInput = "Clicked Button 1"
+				},
+			}),
+			gui.Button(gui.ButtonCfg{
+				ID:    "right-btn-2",
+				Label: "Button 2",
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.rightText = "Clicked Button 2"
+				},
+			}),
+			gui.Button(gui.ButtonCfg{
+				ID:    "right-btn-3",
+				Label: "Clear",
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					st := gui.State[appState](ctx.Window)
+					st.rightInput = ""
+					st.rightText = ""
 				},
 			}),
 		},
