@@ -16,10 +16,13 @@ type PendingApproval struct {
 }
 
 // ApprovalDecision is the UI answer for one PendingApproval.
+// Terminal marks an approval whose command the user chose to run inside the
+// bound terminal (PTY input) rather than the exec channel.
 type ApprovalDecision struct {
 	ApprovalID string
 	Approved   bool
 	Reason     string
+	Terminal   bool
 }
 
 // RunDeps wires per-run tool ports and engine-only hooks.

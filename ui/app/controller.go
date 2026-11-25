@@ -522,6 +522,17 @@ func (c *Controller) TermFor(sessID string) *term.Term {
 	return c.terms[sessID]
 }
 
+// TermScreenText returns the session terminal's screen text for the AI
+// read_terminal tool: the live screen plus up to scrollbackTail scrollback
+// rows. Errors when the session has no live terminal pane.
+func (c *Controller) TermScreenText(sessID string, scrollbackTail int) (string, error) {
+	tm := c.TermFor(sessID)
+	if tm == nil {
+		return "", errors.New("no terminal pane for session")
+	}
+	return tm.ScreenText(scrollbackTail), nil
+}
+
 // CloseTab closes a UI tab and every session its panes hold. When a
 // session has unsaved remote edits the user is asked once per session
 // before teardown.

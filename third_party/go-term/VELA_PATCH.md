@@ -12,6 +12,7 @@
 | 2 | `term/widget_view.go`、`term/widget_state.go`、`term/widget.go` | 修改 | `View()` 只在窗口焦点为空或仍是本 pane 的过期焦点声明时收回焦点，不抢其它控件 |
 | 3 | `term/widget_view.go` | 修改 | IME 预编辑只在窗口键盘焦点位于本 pane 时绘制 |
 | 4 | `term/widget_test.go` | 测试 | 同步 #2 的语义 |
+| 5 | `term/widget_screen.go` | 新增文件 | 导出 `Term.ScreenText`：屏幕 + scrollback 尾部的纯文本，供 AI 上下文读取；alt-screen 下只回当前屏 |
 
 ## 1. term/stream.go（新增）
 
@@ -105,6 +106,12 @@ func (t *Term) windowFocused(w *gui.Window) bool {
 ## 4. term/widget_test.go
 
 `TestTerm_View_RestoresFocus`：上游断言「外来焦点会被抢回」，改为断言仍为 `"some-other-widget"`。
+
+## 5. term/widget_screen.go（新增）
+
+上游无此文件，升级后保留 / 重新放回即可。`ScreenText` 只读 `grid.Mu` 下的
+`rowsText`/`ContentRows`，不改解析与渲染路径；alt-screen（`grid.AltActive`）
+时强制忽略 scrollback 参数——alt 下 `g.Scrollback` 仍属主屏，混排会误导调用方。
 
 ## 升级后自检
 

@@ -1,11 +1,13 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-term/term"
 	"go.uber.org/zap"
 
 	"github.com/ilaziness/vela/internal/agent"
@@ -310,21 +312,115 @@ func (c *Controller) AgentRespondApproval(approvalID string, approved bool, reas
 	}
 	w.QueueCommand(func(w *gui.Window) {
 		st := gui.State[State](w)
-		if st.AgentChat != nil {
-			st.AgentChat.RemoveApproval(approvalID)
-			if !approved && toolCallID != "" {
-				st.AgentChat.SetToolStatus(toolCallID, agentmodel.ToolDenied)
+		if st.AgentChat != chat {
+			return
+		}
+		st.AgentChat.RemoveApproval(approvalID)
+		if !approved && toolCallID != "" {
+			st.AgentChat.SetToolStatus(toolCallID, agentmodel.ToolDenied)
+		}
+		if approved {
+			if toolCallID != "" {
+				st.AgentChat.SetToolStatus(toolCallID, agentmodel.ToolRunning)
 			}
-			if approved {
-				if toolCallID != "" {
-					st.AgentChat.SetToolStatus(toolCallID, agentmodel.ToolRunning)
-				}
-				// Live runs already stream into a running bubble; cold
-				// resume (approval answered after reload) starts one now.
-				st.AgentChat.BeginRun("")
-			}
+			// Live runs already stream into a running bubble; cold
+			// resume (approval answered after reload) starts one now.
+			st.AgentChat.BeginRun("")
 		}
 	})
+}
+
+// AgentRunCommandInTerminal approves a pending run_ssh_command approval and
+// types the command into the bound terminal's PTY instead of the exec
+// channel. Order matters: the chat card is dismissed first so a double click
+// cannot inject the command twice, then the bytes are sent, then the
+// approval is answered with Terminal=true (the tool skips exec and all
+// terminal echo regardless of the EchoSSHCommands setting).
+func (c *Controller) AgentRunCommandInTerminal(approvalID string) {
+	w := c.Window()
+	if w == nil {
+		return
+	}
+	st := gui.State[State](w)
+	chat := st.AgentChat
+	svc := c.agentService()
+	if chat == nil || approvalID == "" || svc == nil {
+		return
+	}
+	ap := chat.Approval(approvalID)
+	if ap == nil || ap.ToolName != "run_ssh_command" {
+		return
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(ap.Input, &in); err != nil {
+		c.toast(gui.ToastError, i18n.T("ai.chat.run_in_terminal"), i18n.T("ai.chat.invalid_command"))
+		return
+	}
+	cmd := strings.TrimSpace(in.Command)
+	if cmd == "" || strings.ContainsAny(cmd, "\r\n") {
+		c.toast(gui.ToastError, i18n.T("ai.chat.run_in_terminal"), i18n.T("ai.chat.invalid_command"))
+		return
+	}
+	if !c.AgentTerminalAvailable(st) {
+		c.toast(gui.ToastError, i18n.T("ai.chat.run_in_terminal"), i18n.T("ai.chat.no_terminal"))
+		return
+	}
+	sshCtx := c.agentBind(st)
+	if sshCtx == nil || sshCtx.LinkID == "" {
+		c.toast(gui.ToastError, i18n.T("ai.chat.run_in_terminal"), i18n.T("ai.chat.no_terminal"))
+		return
+	}
+	// AgentTerminalAvailable already proved TermFor(tab.SessID) != nil and
+	// agentBind returns that same SessID as LinkID — no await between, so tm
+	// cannot be nil here.
+	tm := c.TermFor(sshCtx.LinkID)
+
+	// Dismiss the card before typing so repeat clicks find no pending
+	// approval (a queued removal would let a second click in the same frame
+	// inject the command twice).
+	toolCallID := ap.ToolCallID
+	chat.RemoveApproval(approvalID)
+	w.QueueCommand(func(w *gui.Window) {
+		st := gui.State[State](w)
+		if st.AgentChat != chat {
+			return
+		}
+		if toolCallID != "" {
+			chat.SetToolStatus(toolCallID, agentmodel.ToolRunning)
+		}
+		chat.BeginRun("")
+	})
+
+	tm.SendInput([]byte(cmd+"\r"), term.InputKey)
+
+	go func() {
+		if err := svc.RespondToolApproval(&agent.ToolApprovalRequest{
+			SessionID:  chat.SessionID,
+			ApprovalID: approvalID,
+			Approved:   true,
+			Terminal:   true,
+			SSHContext: sshCtx,
+		}); err != nil {
+			c.logger.Warn("agent terminal approval respond", zap.Error(err))
+		}
+	}()
+}
+
+// AgentTerminalAvailable reports whether the active (assistant-bound) tab has
+// a connected session with a live terminal pane the AI can type into. Any
+// terminal protocol qualifies; the AI picks tools from the protocol described
+// in its prompt.
+func (c *Controller) AgentTerminalAvailable(st *State) bool {
+	tab := st.Active()
+	if tab == nil || tab.Kind != TabSession || tab.SessID == "" {
+		return false
+	}
+	if tab.Status != TabStatusConnected {
+		return false
+	}
+	return c.TermFor(tab.SessID) != nil
 }
 
 // agentBind resolves the active terminal tab into an SSHContext for the

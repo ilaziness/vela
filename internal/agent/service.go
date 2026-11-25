@@ -93,16 +93,20 @@ type ChatResponse struct {
 }
 
 type ToolApprovalRequest struct {
-	SessionID  string      `json:"session_id"`
-	ApprovalID string      `json:"approval_id"`
-	Approved   bool        `json:"approved"`
-	Reason     string      `json:"reason,omitempty"`
+	SessionID  string `json:"session_id"`
+	ApprovalID string `json:"approval_id"`
+	Approved   bool   `json:"approved"`
+	Reason     string `json:"reason,omitempty"`
+	// Terminal marks approval whose command runs inside the bound terminal
+	// (PTY input) instead of the exec channel; echo annotations are skipped.
+	Terminal   bool        `json:"terminal,omitempty"`
 	SSHContext *SSHContext `json:"ssh_context,omitempty"`
 }
 
 type approvalDecision struct {
 	Approved bool
 	Reason   string
+	Terminal bool
 }
 
 type agentRun struct {
@@ -127,6 +131,9 @@ type Service struct {
 	emit        func(AIStreamChunkData)
 	engine      *ai.AIEngine
 	sessionRepo database.AISessionRepository
+	// screenFn reads the bound terminal's screen text (UI-provided); nil
+	// disables the read_terminal tool.
+	screenFn func(linkID string, scrollbackLines int) (string, error)
 
 	engineMu sync.Mutex
 	runsMu   sync.Mutex
@@ -148,6 +155,9 @@ type Deps struct {
 	Vault       *secret.Vault
 	Emit        func(AIStreamChunkData)
 	SessionRepo database.AISessionRepository
+	// Screen reads a bound session's terminal screen text; nil disables
+	// the read_terminal tool.
+	Screen func(linkID string, scrollbackLines int) (string, error)
 }
 
 func New(d Deps) *Service {
@@ -156,6 +166,7 @@ func New(d Deps) *Service {
 	return &Service{
 		logger: d.Logger, store: d.Store, sshMgr: d.SSH, serialMgr: d.Serial,
 		hub: d.Hub, vault: d.Vault, emit: d.Emit, sessionRepo: d.SessionRepo,
+		screenFn:      d.Screen,
 		runs:          make(map[string]*agentRun),
 		cancelled:     make(map[string]struct{}),
 		coldApprovals: make(map[string]map[string]approvalDecision),
@@ -683,6 +694,8 @@ func (s *Service) Chat(req *ChatRequest) (*ChatResponse, error) {
 			LinkID:           linkID,
 			SSH:              host,
 			ArmSSHExecCancel: host.ArmSSHExecCancel,
+			Screen:           s.screenFor(linkID),
+			TerminalExec:     tool.NewTerminalExecSet(),
 			AllowedDirs:      allowDirs,
 			WebSearch:        webSearch,
 			OnPlanUpsert: func(planJSON string) error {
@@ -1137,13 +1150,13 @@ func (s *Service) RespondToolApproval(req *ToolApprovalRequest) error {
 			return usererr.Coded("ai.approval_unknown", "Unknown or expired approval")
 		}
 		select {
-		case ch <- approvalDecision{Approved: req.Approved, Reason: req.Reason}:
+		case ch <- approvalDecision{Approved: req.Approved, Reason: req.Reason, Terminal: req.Terminal}:
 			return nil
 		default:
 			return usererr.Coded("ai.approval_resolved", "This approval was already resolved")
 		}
 	}
-	return s.coldRespondToolApproval(sessionID, approvalID, req.Approved, req.Reason, req.SSHContext)
+	return s.coldRespondToolApproval(sessionID, approvalID, req.Approved, req.Reason, req.Terminal, req.SSHContext)
 }
 
 // StopGeneration cancels the active agent run for a session.
@@ -1318,14 +1331,14 @@ func (s *Service) waitApprovals(ctx context.Context, run *agentRun, pending []ai
 			if !ok {
 				out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: false, Reason: "stopped"})
 			} else {
-				out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: d.Approved, Reason: d.Reason})
+				out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: d.Approved, Reason: d.Reason, Terminal: d.Terminal})
 			}
 		case <-ctx.Done():
 			// Prefer a decision already buffered; otherwise soft-deny.
 			select {
 			case d, ok := <-sl.ch:
 				if ok {
-					out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: d.Approved, Reason: d.Reason})
+					out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: d.Approved, Reason: d.Reason, Terminal: d.Terminal})
 				} else {
 					out = append(out, ai.ApprovalDecision{ApprovalID: sl.id, Approved: false, Reason: "stopped"})
 				}
@@ -1336,7 +1349,7 @@ func (s *Service) waitApprovals(ctx context.Context, run *agentRun, pending []ai
 				select {
 				case d, ok := <-rest.ch:
 					if ok {
-						out = append(out, ai.ApprovalDecision{ApprovalID: rest.id, Approved: d.Approved, Reason: d.Reason})
+						out = append(out, ai.ApprovalDecision{ApprovalID: rest.id, Approved: d.Approved, Reason: d.Reason, Terminal: d.Terminal})
 						continue
 					}
 				default:
@@ -1349,12 +1362,12 @@ func (s *Service) waitApprovals(ctx context.Context, run *agentRun, pending []ai
 	return out, nil
 }
 
-func (s *Service) coldRespondToolApproval(sessionID, approvalID string, approved bool, reason string, sshCtx *SSHContext) error {
+func (s *Service) coldRespondToolApproval(sessionID, approvalID string, approved bool, reason string, terminal bool, sshCtx *SSHContext) error {
 	s.runsMu.Lock()
 	if s.coldApprovals[sessionID] == nil {
 		s.coldApprovals[sessionID] = make(map[string]approvalDecision)
 	}
-	s.coldApprovals[sessionID][approvalID] = approvalDecision{Approved: approved, Reason: reason}
+	s.coldApprovals[sessionID][approvalID] = approvalDecision{Approved: approved, Reason: reason, Terminal: terminal}
 	pendingMap := s.coldApprovals[sessionID]
 	s.runsMu.Unlock()
 
@@ -1385,7 +1398,7 @@ func (s *Service) coldRespondToolApproval(sessionID, approvalID string, approved
 	for _, h := range holds {
 		d := pendingMap[h.ApprovalID]
 		decisions = append(decisions, ai.ApprovalDecision{
-			ApprovalID: h.ApprovalID, Approved: d.Approved, Reason: d.Reason,
+			ApprovalID: h.ApprovalID, Approved: d.Approved, Reason: d.Reason, Terminal: d.Terminal,
 		})
 	}
 	s.runsMu.Lock()
@@ -1400,7 +1413,7 @@ func (s *Service) coldRespondToolApproval(sessionID, approvalID string, approved
 	if len(claimIDs) == 0 {
 		return usererr.Coded("ai.interrupt_rows_missing", "Interrupted turn data is missing; cannot resume")
 	}
-	return s.runColdResume(sessionID, messages, resumeParts, claimIDs, sshCtx)
+	return s.runColdResume(sessionID, messages, resumeParts, claimIDs, decisions, sshCtx)
 }
 
 // trailingTurnMessageIDs returns sealed model/tool ids after the last user message (interrupted turn).
@@ -1423,7 +1436,7 @@ func trailingTurnMessageIDs(rows []*database.AIMessage) []string {
 	return ids
 }
 
-func (s *Service) runColdResume(sessionID string, messages []ai.ChatMessage, resumeParts []*genkitAI.Part, claimIDs []string, sshCtx *SSHContext) error {
+func (s *Service) runColdResume(sessionID string, messages []ai.ChatMessage, resumeParts []*genkitAI.Part, claimIDs []string, decisions []ai.ApprovalDecision, sshCtx *SSHContext) error {
 	cfg, err := s.GetConfig()
 	if err != nil {
 		return err
@@ -1506,11 +1519,21 @@ func (s *Service) runColdResume(sessionID string, messages []ai.ChatMessage, res
 		planJSON = session.PlanJSON
 	}
 	host := &aiHost{svc: s, run: run}
+	terminalExec := tool.NewTerminalExecSet()
+	// Cold resume bypasses the engine's live decision loop, so terminal-mode
+	// marks must be applied here before Run executes the resumed tools.
+	for _, d := range decisions {
+		if d.Approved && d.Terminal {
+			terminalExec.Mark(d.ApprovalID)
+		}
+	}
 	rd := ai.RunDeps{
 		Tools: tool.Deps{
 			LinkID:           linkID,
 			ArmSSHExecCancel: host.ArmSSHExecCancel,
 			SSH:              host,
+			Screen:           s.screenFor(linkID),
+			TerminalExec:     terminalExec,
 			AllowedDirs:      snap.AllowDirs,
 			WebSearch:        webSearch,
 			OnPlanUpsert: func(planJSON string) error {

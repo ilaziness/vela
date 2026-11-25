@@ -23,11 +23,17 @@ type sshCommandInput struct {
 
 func defineSSHTool(g *genkit.Genkit) genkitAI.ToolRef {
 	return genkit.DefineTool(g, RunSSHCommand,
-		"Run a shell command on the user's currently connected SSH host. Requires user approval before execution. Output is captured and returned; it does not use the interactive terminal PTY.",
+		"Run a shell command on the user's currently connected SSH host. Requires user approval before execution. Output is captured and returned via the exec channel; it does not use the interactive terminal PTY unless the user explicitly approves running it inside the terminal instead.",
 		func(tc *genkitAI.ToolContext, input sshCommandInput) (string, error) {
 			deps := FromCtx(tc)
 			if !deps.EnableSSH() {
 				return "", genkitTool.Fail(tc, errors.New("SSH tools unavailable: no active SSH session"))
+			}
+			if deps.TerminalExec != nil && deps.TerminalExec.Has(CallIDFromCtx(tc)) {
+				// The user approved "run in terminal": the UI already typed the
+				// command into the PTY. Skip exec AND every Annotate call —
+				// terminal mode treats echo as off regardless of the setting.
+				return "(command was typed into the user's terminal; it runs visibly there — use read_terminal to inspect the result)", nil
 			}
 			cmd := strings.TrimSpace(input.Command)
 			if cmd == "" {

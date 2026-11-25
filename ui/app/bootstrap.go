@@ -154,6 +154,9 @@ func Bootstrap(commandsLoader command.LocaleLoader) (*Runtime, error) {
 		Emit: func(c agent.AIStreamChunkData) {
 			ctrl.AgentEmit(c)
 		},
+		Screen: func(linkID string, scrollbackLines int) (string, error) {
+			return ctrl.TermScreenText(linkID, scrollbackLines)
+		},
 	})
 	ctrl.SetAgent(agentSvc)
 	agentSvc.RecoverOrphanTurns()

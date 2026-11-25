@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/ilaziness/vela/internal/ai"
+	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/usererr"
@@ -74,6 +76,17 @@ func (s *Service) sshAnnotate(linkID, notice string) error {
 		return nil
 	}
 	return s.sshMgr.AnnotateSession(linkID, notice)
+}
+
+// screenFor binds the screen provider to one session; nil when unbound or
+// no provider is wired (read_terminal stays unmounted).
+func (s *Service) screenFor(linkID string) tool.ScreenFunc {
+	if s.screenFn == nil || strings.TrimSpace(linkID) == "" {
+		return nil
+	}
+	return func(_ context.Context, scrollbackLines int) (string, error) {
+		return s.screenFn(linkID, scrollbackLines)
+	}
 }
 
 func (s *Service) protocolOf(id string) (termio.Protocol, bool) {

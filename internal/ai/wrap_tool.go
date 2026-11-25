@@ -39,6 +39,9 @@ func wrapToolCall(
 		callID = uuid.New().String()
 	}
 	inJSON := toolInputJSON(params)
+	// Tag the ctx with the call id so handlers can read per-call marks
+	// (terminal-exec approvals) — ToolContext exposes no call id of its own.
+	ctx = tool.WithCallID(ctx, callID)
 
 	emitDeps(deps, StreamEvent{Type: EventStartStep})
 	emitDeps(deps, StreamEvent{Type: EventToolInputStart, ToolCallID: callID, ToolName: name})

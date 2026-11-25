@@ -811,29 +811,48 @@ func approvalCard(w *gui.Window, ctrl *app.Controller, ap *model.Approval) gui.V
 			gui.Row(layout.Flush(gui.ContainerCfg{
 				Sizing:  gui.FillFit,
 				Spacing: gui.SpacingSmall,
-				Content: []gui.View{
-					gui.Button(gui.ButtonCfg{
-						ID:      "agent-approve-" + ap.ID,
-						Label:   i18n.T("ai.chat.approve"),
-						Variant: gui.ButtonPrimary,
-						OnClick: func(ctx gui.EventCtx) {
-							ctx.Consume()
-							ctrl.AgentRespondApproval(ap.ID, true, "")
-						},
-					}),
-					gui.Button(gui.ButtonCfg{
-						ID:      "agent-deny-" + ap.ID,
-						Label:   i18n.T("ai.chat.deny"),
-						Variant: gui.ButtonGhost,
-						OnClick: func(ctx gui.EventCtx) {
-							ctx.Consume()
-							ctrl.AgentRespondApproval(ap.ID, false, "")
-						},
-					}),
-				},
+				Content: approvalButtons(w, ctrl, ap),
 			})),
 		},
 	}))
+}
+
+// approvalButtons renders approve / run-in-terminal / deny for one pending
+// approval. The terminal button only applies to run_ssh_command and only
+// when the assistant-bound tab has a live terminal pane to type into.
+func approvalButtons(w *gui.Window, ctrl *app.Controller, ap *model.Approval) []gui.View {
+	btns := []gui.View{
+		gui.Button(gui.ButtonCfg{
+			ID:      "agent-approve-" + ap.ID,
+			Label:   i18n.T("ai.chat.approve"),
+			Variant: gui.ButtonPrimary,
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				ctrl.AgentRespondApproval(ap.ID, true, "")
+			},
+		}),
+	}
+	if ap.ToolName == "run_ssh_command" && ctrl.AgentTerminalAvailable(gui.State[app.State](w)) {
+		btns = append(btns, gui.Button(gui.ButtonCfg{
+			ID:      "agent-runterm-" + ap.ID,
+			Label:   i18n.T("ai.chat.run_in_terminal"),
+			Variant: gui.ButtonSecondary,
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				ctrl.AgentRunCommandInTerminal(ap.ID)
+			},
+		}))
+	}
+	btns = append(btns, gui.Button(gui.ButtonCfg{
+		ID:      "agent-deny-" + ap.ID,
+		Label:   i18n.T("ai.chat.deny"),
+		Variant: gui.ButtonGhost,
+		OnClick: func(ctx gui.EventCtx) {
+			ctx.Consume()
+			ctrl.AgentRespondApproval(ap.ID, false, "")
+		},
+	}))
+	return btns
 }
 
 // composer is the bottom input row: multiline draft + send/stop.
