@@ -157,9 +157,15 @@ func Bootstrap(commandsLoader command.LocaleLoader) (*Runtime, error) {
 		Screen: func(linkID string, scrollbackLines int) (string, error) {
 			return ctrl.TermScreenText(linkID, scrollbackLines)
 		},
+		Bookmarks:   bmSvc,
+		Keys:        keys,
+		GlobalProxy: globalProxy,
 	})
 	ctrl.SetAgent(agentSvc)
 	agentSvc.RecoverOrphanTurns()
+	// Start the built-in MCP server when enabled in settings; it does not
+	// depend on the vault or the AI engine.
+	go agentSvc.SyncMCPServer()
 
 	ctrl.SetShutdown(func() {
 		sshMgr.CloseAll()

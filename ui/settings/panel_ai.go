@@ -11,6 +11,7 @@ import (
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/ai/tool"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/mcpserver"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -19,6 +20,7 @@ func panelAI(d *Deps, st *State) gui.View {
 		{Label: i18n.T("settings.ai.tab_general"), Value: aiTabGeneral},
 		{Label: i18n.T("settings.ai.tab_tools"), Value: aiTabTools},
 		{Label: i18n.T("settings.ai.open_mcp"), Value: aiTabMCP},
+		{Label: i18n.T("settings.ai.tab_mcp_server"), Value: aiTabMCPServer},
 		{Label: i18n.T("settings.ai.open_skills"), Value: aiTabSkills},
 	}
 	var body gui.View
@@ -29,6 +31,8 @@ func panelAI(d *Deps, st *State) gui.View {
 		body = aiMCPBody(d, st)
 	case aiTabSkills:
 		body = aiSkillsBody(d, st)
+	case aiTabMCPServer:
+		body = aiMCPServerBody(d, st)
 	default:
 		body = aiGeneralBody(d, st)
 	}
@@ -44,6 +48,9 @@ func panelAI(d *Deps, st *State) gui.View {
 				s.AITab = v
 				if v == aiTabMCP || v == aiTabSkills {
 					refreshLists(s, d)
+				}
+				if v == aiTabMCPServer && d.Agent != nil {
+					s.MCPStatus = d.Agent.MCPServerStatus()
 				}
 			},
 		}),
@@ -277,6 +284,118 @@ func aiMCPBody(d *Deps, st *State) gui.View {
 	}))
 }
 
+// aiMCPServerBody edits the built-in MCP server (streamable HTTP on
+// loopback): enable switch, port, optional bearer access key, live status.
+func aiMCPServerBody(d *Deps, st *State) gui.View {
+	c := &st.AI.MCPServer
+	th := gui.CurrentTheme()
+	port := c.Port
+	if port <= 0 {
+		port = ai.DefaultMCPServerPort
+	}
+	addr := "http://127.0.0.1:" + strconv.Itoa(port) + "/mcp"
+
+	statusText := i18n.T("settings.ai.mcp_server_status_stopped")
+	switch {
+	case st.MCPStatus.Err != "":
+		statusText = i18n.T("settings.ai.mcp_server_status_error") + ": " + st.MCPStatus.Err
+	case st.MCPStatus.Running:
+		statusText = i18n.T("settings.ai.mcp_server_status_running") + " — " + st.MCPStatus.Addr
+	}
+
+	keySet := strings.TrimSpace(c.AccessKey) != "" || strings.TrimSpace(c.AccessKeyHash) != ""
+	keyRows := []gui.View{
+		formRow("settings-ai-mcpserver-key", i18n.T("settings.ai.mcp_server_access_key"), c.AccessKey,
+			secretPlaceholder(c.AccessKey, c.AccessKeyHash, i18n.T("settings.ai.mcp_server_access_key_ph")),
+			true, func(v string) {
+				c.AccessKey = v
+				if strings.TrimSpace(v) != "" {
+					st.MCPKeyCleared = false
+				}
+			}),
+	}
+	if strings.TrimSpace(c.AccessKeyHash) != "" || st.MCPKeyCleared {
+		keyRows = append(keyRows, aiLinkRow(gui.Button(gui.ButtonCfg{
+			ID:      "settings-ai-mcpserver-clear-key",
+			Variant: gui.ButtonGhost,
+			Label:   i18n.T("settings.ai.mcp_server_clear_key"),
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				s := gui.State[State](ctx.Window)
+				s.MCPKeyCleared = true
+				s.AI.MCPServer.AccessKey = ""
+				s.AI.MCPServer.AccessKeyHash = ""
+			},
+		})))
+	}
+	if c.Enabled && !keySet {
+		keyRows = append(keyRows, gui.Text(gui.TextCfg{
+			Text:      i18n.T("settings.ai.mcp_server_risk"),
+			TextStyle: th.TextStyleWarning,
+			Mode:      gui.TextModeWrap,
+			Sizing:    gui.FillFit,
+		}))
+	}
+
+	// Build config example JSON
+	exampleJSON := buildMCPServerExampleJSON(port, keySet)
+	exampleLines := strings.Split(exampleJSON, "\n")
+	exampleViews := make([]gui.View, 0, len(exampleLines))
+	for _, line := range exampleLines {
+		exampleViews = append(exampleViews, gui.Label(line, th.TextStyleBody))
+	}
+	keyRows = append(keyRows,
+		gui.Label(i18n.T("settings.ai.mcp_server_example"), th.TextStyleSecondary),
+		gui.Column(layout.Flush(gui.ContainerCfg{
+			Sizing:  gui.FillFit,
+			Spacing: gui.SpacingTight,
+			Content: exampleViews,
+		})),
+		aiLinkRow(gui.Button(gui.ButtonCfg{
+			ID:      "settings-ai-mcpserver-copy-example",
+			Variant: gui.ButtonGhost,
+			Label:   i18n.T("settings.ai.mcp_server_copy_example"),
+			OnClick: func(ctx gui.EventCtx) {
+				ctx.Consume()
+				ctx.Window.SetClipboard(exampleJSON)
+				toastOK(ctx.Window, i18n.T("common.copied"))
+			},
+		})),
+	)
+
+	portText := ""
+	if c.Port > 0 {
+		portText = strconv.Itoa(c.Port)
+	}
+	rows := []gui.View{
+		gui.Label(i18n.T("settings.ai.mcp_server_endpoint")+": "+addr, th.TextStyleBody),
+		gui.Label(statusText, th.TextStyleSecondary),
+		switchRow("settings-ai-mcpserver-enable", i18n.T("settings.ai.mcp_server_enable"), c.Enabled, func(gui.EventCtx) {
+			c.Enabled = !c.Enabled
+		}),
+		formRow("settings-ai-mcpserver-port", i18n.T("settings.ai.mcp_server_port"), portText,
+			strconv.Itoa(ai.DefaultMCPServerPort), false, func(v string) {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					c.Port = n
+				}
+			}),
+		gui.Column(layout.Flush(gui.ContainerCfg{
+			Sizing:  gui.FillFit,
+			Spacing: gui.SpacingSmall,
+			Content: keyRows,
+		})),
+		saveBtn("settings-ai-mcpserver-save", i18n.T("common.save"), st.Busy, func(ctx gui.EventCtx) {
+			ctx.Consume()
+			saveAI(ctx.Window, d)
+		}),
+	}
+	return gui.Column(layout.Flush(gui.ContainerCfg{
+		Sizing:  gui.FillFit,
+		Spacing: gui.SpacingMedium,
+		Content: rows,
+	}))
+}
+
 func aiSkillsBody(d *Deps, st *State) gui.View {
 	rows := []gui.View{aiSkillsActions(d)}
 	if len(st.Skills) == 0 {
@@ -322,6 +441,29 @@ func aiSkillsBody(d *Deps, st *State) gui.View {
 		Spacing: gui.SpacingSmall,
 		Content: rows,
 	}))
+}
+
+func buildMCPServerExampleJSON(port int, hasKey bool) string {
+	endpoint := "http://127.0.0.1:" + strconv.Itoa(port) + "/mcp"
+	if hasKey {
+		return "{\n" +
+			"  \"mcpServers\": {\n" +
+			"    \"vela\": {\n" +
+			"      \"url\": \"" + endpoint + "\",\n" +
+			"      \"headers\": {\n" +
+			"        \"Authorization\": \"Bearer <your-key>\"\n" +
+			"      }\n" +
+			"    }\n" +
+			"  }\n" +
+			"}"
+	}
+	return "{\n" +
+		"  \"mcpServers\": {\n" +
+		"    \"vela\": {\n" +
+		"      \"url\": \"" + endpoint + "\"\n" +
+		"    }\n" +
+		"  }\n" +
+		"}"
 }
 
 func aiLinkRow(btns ...gui.View) gui.View {
@@ -403,6 +545,7 @@ func aiSkillsActions(d *Deps) gui.View {
 func saveAI(w *gui.Window, d *Deps) {
 	st := gui.State[State](w)
 	incoming := st.AI
+	mcpKeyCleared := st.MCPKeyCleared
 	needsSecret := strings.TrimSpace(incoming.APIKey) != "" || strings.TrimSpace(incoming.WebSearch.APIKey) != ""
 	run := func() {
 		st.Busy = true
@@ -417,6 +560,17 @@ func saveAI(w *gui.Window, d *Deps) {
 					cfg.WebSearch.APIKey = ""
 					cfg.WebSearch.APIKeyEncrypted = ""
 				}
+				// MCP access key is a bearer token: persist only its hash.
+				switch {
+				case strings.TrimSpace(cfg.MCPServer.AccessKey) != "":
+					cfg.MCPServer.AccessKeyHash = mcpserver.HashAccessKey(cfg.MCPServer.AccessKey)
+				case mcpKeyCleared:
+					cfg.MCPServer.AccessKeyHash = ""
+				case cfg.MCPServer.AccessKeyHash == "":
+					cfg.MCPServer.AccessKeyHash = prev.MCPServer.AccessKeyHash
+				}
+				cfg.MCPServer.AccessKey = ""
+				cfg.MCPServer.Normalize()
 				d.Store.Config.AI = cfg
 				err = d.Store.Save()
 			}
@@ -429,9 +583,18 @@ func saveAI(w *gui.Window, d *Deps) {
 				}
 				cfg.APIKey = ""
 				cfg.WebSearch.APIKey = ""
+				s.MCPKeyCleared = false
 				s.AI = cfg
 				if d.Ctrl != nil {
 					d.Ctrl.AgentReloadConfig()
+				}
+				if d.Agent != nil {
+					go func() {
+						d.Agent.SyncMCPServer()
+						win.QueueCommand(func(w2 *gui.Window) {
+							gui.State[State](w2).MCPStatus = d.Agent.MCPServerStatus()
+						})
+					}()
 				}
 				toastOK(win, i18n.T("settings.ai.save_success"))
 			})

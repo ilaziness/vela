@@ -60,7 +60,7 @@ type Controller struct {
 	// Term.Close fires OnExit like any other exit.
 	closing bool
 	// shutdownCh unblocks prompts still waiting on a dialog once the app
-	// closes; Shutdown closes it exactly once.
+	// closes. shutdownOnce makes the whole teardown run only once.
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
 
@@ -678,8 +678,14 @@ func (c *Controller) HandleWindowEvent(e *gui.Event, st *State) {
 	}
 }
 
-// Shutdown closes all terminals and sessions.
+// Shutdown closes all terminals and sessions. It is safe to call more than
+// once (e.g. a second close request while teardown is still running): the
+// teardown and onClose hook — which closes the database — run only once.
 func (c *Controller) Shutdown() {
+	c.shutdownOnce.Do(c.shutdown)
+}
+
+func (c *Controller) shutdown() {
 	c.mu.Lock()
 	ids := make([]string, 0, len(c.terms))
 	for id := range c.terms {
@@ -691,11 +697,9 @@ func (c *Controller) Shutdown() {
 	c.closing = true
 	c.mu.Unlock()
 	// Release prompts blocked on a dialog before their resources go away.
-	c.shutdownOnce.Do(func() {
-		if c.shutdownCh != nil {
-			close(c.shutdownCh)
-		}
-	})
+	if c.shutdownCh != nil {
+		close(c.shutdownCh)
+	}
 	// SFTP clients and edit watchers go down before the SSH sessions
 	// they ride on; watchers are discarded, never prompted, here.
 	c.CloseAllSFTP()

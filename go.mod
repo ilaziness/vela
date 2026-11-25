@@ -9,6 +9,7 @@ require (
 	github.com/go-gui-org/go-term v0.19.3
 	github.com/google/dotprompt/go v0.0.0-20261118215426-97751971e864
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
+	github.com/mark3labs/mcp-go v1.5.0
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/openai/openai-go v1.12.0
 	github.com/pelletier/go-toml/v2 v2.4.3
@@ -65,7 +66,6 @@ require (
 	github.com/klauspost/crc32 v1.3.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lestrrat-go/strftime v1.2.0 // indirect
-	github.com/mark3labs/mcp-go v1.5.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mbleigh/raymond v0.0.0-20250414171441-6b3a58ab9e0a // indirect
 	github.com/minio/crc64nvme v1.1.1 // indirect

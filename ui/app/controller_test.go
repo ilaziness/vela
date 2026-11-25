@@ -84,6 +84,19 @@ func TestMarkDisconnectedWhileClosing(t *testing.T) {
 	}
 }
 
+func TestShutdownIsIdempotent(t *testing.T) {
+	calls := 0
+	c := &Controller{}
+	c.SetShutdown(func() { calls++ })
+
+	c.Shutdown()
+	c.Shutdown()
+
+	if calls != 1 {
+		t.Fatalf("onClose called %d times, want 1", calls)
+	}
+}
+
 func TestDialFailedRestoresDot(t *testing.T) {
 	err := errors.New("dial refused")
 	cases := []struct {

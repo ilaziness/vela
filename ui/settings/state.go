@@ -4,6 +4,7 @@ import (
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/keybind"
+	"github.com/ilaziness/vela/internal/mcpserver"
 	"github.com/ilaziness/vela/internal/ssh"
 	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/internal/sync"
@@ -23,10 +24,11 @@ const (
 )
 
 const (
-	aiTabGeneral = "general"
-	aiTabTools   = "tools"
-	aiTabMCP     = "mcp"
-	aiTabSkills  = "skills"
+	aiTabGeneral   = "general"
+	aiTabTools     = "tools"
+	aiTabMCP       = "mcp"
+	aiTabSkills    = "skills"
+	aiTabMCPServer = "server"
 )
 
 // State is per-settings-window draft + list cache (independent of app.State).
@@ -59,6 +61,11 @@ type State struct {
 	MCPServers []ai.MCPServerEntry
 	Skills     []ai.SkillInfo
 
+	// MCP server (built-in) draft helpers: MCPKeyCleared marks an explicit
+	// access-key removal; MCPStatus mirrors the runtime server state.
+	MCPKeyCleared bool
+	MCPStatus     mcpserver.Status
+
 	UpdateChecking bool
 
 	// Frameless is the decoration mode captured at window creation;
@@ -85,6 +92,8 @@ func (s *State) ensureLoaded(d *Deps) {
 	s.AI = cfg.AI
 	s.AI.APIKey = ""
 	s.AI.WebSearch.APIKey = ""
+	s.AI.MCPServer.AccessKey = ""
+	s.MCPKeyCleared = false
 	s.AITab = aiTabGeneral
 	s.KeyGenAlgo = "ed25519"
 	s.loaded = true
@@ -105,5 +114,8 @@ func refreshLists(s *State, d *Deps) {
 	}
 	if skills, err := ai.ListSkills(dir); err == nil {
 		s.Skills = skills
+	}
+	if d.Agent != nil {
+		s.MCPStatus = d.Agent.MCPServerStatus()
 	}
 }

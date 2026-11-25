@@ -202,8 +202,10 @@ func (s *Service) OpenChatAttachment(uri, filename string) error {
 	return nil
 }
 
-// ShutdownMCP closes MCP child processes / connections.
+// ShutdownMCP closes MCP child processes / connections and stops the
+// built-in MCP server.
 func (s *Service) ShutdownMCP() {
+	s.stopMCPServer()
 	s.engineMu.Lock()
 	engine := s.engine
 	s.engineMu.Unlock()

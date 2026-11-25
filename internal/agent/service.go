@@ -16,12 +16,15 @@ import (
 
 	"github.com/ilaziness/vela/internal/ai"
 	"github.com/ilaziness/vela/internal/ai/tool"
+	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/config"
 	"github.com/ilaziness/vela/internal/database"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/mcpserver"
 	"github.com/ilaziness/vela/internal/secret"
 	"github.com/ilaziness/vela/internal/serial"
 	"github.com/ilaziness/vela/internal/ssh"
+	"github.com/ilaziness/vela/internal/sshkey"
 	"github.com/ilaziness/vela/internal/termio"
 	"github.com/ilaziness/vela/internal/usererr"
 )
@@ -134,6 +137,10 @@ type Service struct {
 	// screenFn reads the bound terminal's screen text (UI-provided); nil
 	// disables the read_terminal tool.
 	screenFn func(linkID string, scrollbackLines int) (string, error)
+	// bookmarks / keys / globalProxyFn back the built-in MCP server tools.
+	bookmarks     *bookmark.Service
+	keys          *sshkey.Service
+	globalProxyFn func() ssh.GlobalProxy
 
 	engineMu sync.Mutex
 	runsMu   sync.Mutex
@@ -142,6 +149,9 @@ type Service struct {
 	cancelled map[string]struct{}
 	// coldApprovals accumulates decisions when no live Chat is waiting (reload).
 	coldApprovals map[string]map[string]approvalDecision
+	// mcpSrv is the built-in MCP server runtime (lazy).
+	mcpSrv   *mcpserver.Server
+	mcpSrvMu sync.Mutex
 }
 
 // Deps wires the agent service to app engines. Emit receives every stream
@@ -158,6 +168,10 @@ type Deps struct {
 	// Screen reads a bound session's terminal screen text; nil disables
 	// the read_terminal tool.
 	Screen func(linkID string, scrollbackLines int) (string, error)
+	// Bookmarks / Keys / GlobalProxy back the built-in MCP server tools.
+	Bookmarks   *bookmark.Service
+	Keys        *sshkey.Service
+	GlobalProxy func() ssh.GlobalProxy
 }
 
 func New(d Deps) *Service {
@@ -167,6 +181,9 @@ func New(d Deps) *Service {
 		logger: d.Logger, store: d.Store, sshMgr: d.SSH, serialMgr: d.Serial,
 		hub: d.Hub, vault: d.Vault, emit: d.Emit, sessionRepo: d.SessionRepo,
 		screenFn:      d.Screen,
+		bookmarks:     d.Bookmarks,
+		keys:          d.Keys,
+		globalProxyFn: d.GlobalProxy,
 		runs:          make(map[string]*agentRun),
 		cancelled:     make(map[string]struct{}),
 		coldApprovals: make(map[string]map[string]approvalDecision),
@@ -253,7 +270,9 @@ func (s *Service) Reload() error {
 	if err != nil {
 		return err
 	}
-	return s.reloadEngine(cfg)
+	err = s.reloadEngine(cfg)
+	s.SyncMCPServer()
+	return err
 }
 
 func (s *Service) SaveConfig(cfg AIConfig) error {
@@ -281,6 +300,11 @@ func (s *Service) saveConfig(cfg AIConfig, reset bool) error {
 		cfg.WebSearch.APIKeyEncrypted = encrypted
 		cfg.WebSearch.APIKey = ""
 	}
+	// MCP access key is a bearer token: persist only its SHA-256 hash.
+	if strings.TrimSpace(cfg.MCPServer.AccessKey) != "" {
+		cfg.MCPServer.AccessKeyHash = mcpserver.HashAccessKey(cfg.MCPServer.AccessKey)
+	}
+	cfg.MCPServer.AccessKey = ""
 	if !reset {
 		prev, prevErr := s.GetConfig()
 		// Preserve existing ciphertext when the UI leaves the key blank.
@@ -294,7 +318,11 @@ func (s *Service) saveConfig(cfg AIConfig, reset bool) error {
 			tool.ValidSearchProvider(cfg.WebSearch.Provider) {
 			cfg.WebSearch.APIKeyEncrypted = prev.WebSearch.APIKeyEncrypted
 		}
+		if cfg.MCPServer.AccessKeyHash == "" && prevErr == nil && prev != nil {
+			cfg.MCPServer.AccessKeyHash = prev.MCPServer.AccessKeyHash
+		}
 	}
+	cfg.MCPServer.Normalize()
 
 	// Unconfigured provider must not keep a usable encrypted key on disk.
 	if !tool.ValidSearchProvider(cfg.WebSearch.Provider) {
@@ -312,7 +340,9 @@ func (s *Service) saveConfig(cfg AIConfig, reset bool) error {
 		cfg.APIKey = runtimeAPIKey
 	}
 	// Web search keys stay on the Chat RunDeps path only — not in Genkit engine config.
-	return s.reloadEngine(&cfg)
+	err := s.reloadEngine(&cfg)
+	s.SyncMCPServer()
+	return err
 }
 
 func (s *Service) ResetConfig() error {
