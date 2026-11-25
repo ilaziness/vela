@@ -19,21 +19,30 @@ jobs:
           - goos: windows
             goarch: amd64
             runs-on: windows-latest
-            cgo: "0"
             ldflags_extra: "-H windowsgui"
             artifact: Vela.exe
             archive: Vela_${{ github.ref_name }}_windows_amd64.zip
           - goos: linux
             goarch: amd64
             runs-on: ubuntu-latest
-            cgo: "0"
             ldflags_extra: ""
             artifact: Vela
             archive: Vela_${{ github.ref_name }}_linux_amd64.tar.gz
+          - goos: linux
+            goarch: arm64
+            runs-on: ubuntu-latest
+            ldflags_extra: ""
+            artifact: Vela
+            archive: Vela_${{ github.ref_name }}_linux_arm64.tar.gz
+          - goos: windows
+            goarch: arm64
+            runs-on: windows-latest
+            ldflags_extra: "-H windowsgui"
+            artifact: Vela.exe
+            archive: Vela_${{ github.ref_name }}_windows_arm64.zip
           - goos: darwin
             goarch: arm64
             runs-on: macos-latest
-            cgo: "1"
             ldflags_extra: ""
             artifact: Vela
             archive: Vela_${{ github.ref_name }}_darwin_arm64.zip
@@ -51,7 +60,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
+          CGO_ENABLED: "0"
         shell: bash
         run: |
           mkdir -p bin
