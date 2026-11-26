@@ -151,6 +151,9 @@ type State struct {
 	AgentHistoryOpen bool
 	// AgentDraft is the composer text.
 	AgentDraft string
+	// AgentAttachments are files queued in the composer. Each path is the
+	// original absolute path; nothing is copied into the user data dir.
+	AgentAttachments []agentmodel.Attachment
 	// AgentSeenRev is the last transcript Rev the view auto-scrolled for.
 	AgentSeenRev int
 	// AgentScrollChat is the transcript the view has already positioned

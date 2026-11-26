@@ -1,7 +1,11 @@
 package model
 
 import (
+	"net/url"
+	"path/filepath"
 	"testing"
+
+	genkitAI "github.com/firebase/genkit/go/ai"
 
 	"github.com/ilaziness/vela/internal/agent"
 	"github.com/ilaziness/vela/internal/ai"
@@ -142,6 +146,48 @@ func TestLoadPendingApproval(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("tool card missing")
+	}
+}
+
+func TestAppendUserCopiesAttachments(t *testing.T) {
+	c := NewChat("s1")
+	atts := []Attachment{{Path: filepath.Join(t.TempDir(), "a.png"), Filename: "a.png", MIME: "image/png"}}
+	m := c.AppendUser("see", atts)
+	atts[0].Filename = "changed"
+	if m.Text() != "see" || len(m.Attachments) != 1 || m.Attachments[0].Filename != "a.png" {
+		t.Fatalf("message=%+v", m)
+	}
+}
+
+func TestLoadPathAttachments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "shot.png")
+	note := filepath.Join(dir, "note.txt")
+	image := genkitAI.NewMediaPart("image/png", ai.PathURIPrefix+url.QueryEscape(path))
+	image.Metadata = map[string]any{"filename": "shot.png"}
+	text := genkitAI.NewMediaPart("text/plain", ai.PathURIPrefix+url.QueryEscape(note))
+	text.Metadata = map[string]any{"filename": "note.txt"}
+	parts := ai.MarshalParts([]*genkitAI.Part{
+		genkitAI.NewTextPart("see"),
+		image,
+		text,
+	})
+	c := NewChat("s1")
+	c.Load([]*agent.AIMessage{{
+		ID: "m1", Role: ai.RoleUser, Content: "see", Parts: parts, Timestamp: 1,
+	}})
+	if len(c.Messages) != 1 {
+		t.Fatalf("messages=%d", len(c.Messages))
+	}
+	got := c.Messages[0].Attachments
+	if len(got) != 2 {
+		t.Fatalf("atts=%+v", got)
+	}
+	if got[0].Path != path || got[0].Filename != "shot.png" || got[0].MIME != "image/png" {
+		t.Fatalf("image=%+v", got[0])
+	}
+	if got[1].Path != note || got[1].Filename != "note.txt" || got[1].MIME != "text/plain" {
+		t.Fatalf("text=%+v", got[1])
 	}
 }
 

@@ -348,11 +348,15 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 		style := th.TextStyleBody
 		style.Align = gui.TextAlignRight
 		blocks = append(blocks, gui.Text(gui.TextCfg{
+			ID:        "agent-msg-text-" + m.ID,
 			Text:      m.Text(),
 			TextStyle: style,
 			Mode:      gui.TextModeWrap,
 			Sizing:    gui.FillFit,
 		}))
+		if row := messageAttachRow(ctrl, m); row != nil {
+			blocks = append(blocks, row)
+		}
 	} else {
 		for i, b := range m.Blocks {
 			if v := blockView(w, ctrl, st, chat, m, b, i); v != nil {
@@ -404,10 +408,11 @@ func messageView(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model
 	}
 
 	bubble := gui.Column(layout.Flush(gui.ContainerCfg{
+		ID:      "agent-bubble-" + m.ID,
 		Sizing:  gui.FillFit,
 		Color:   bubbleColor,
 		Radius:  gui.RadiusMedium,
-		Padding: gui.NewPadding(8, 10, 8, 10),
+		Padding: gui.NewPadding(8, 10, 4, 10),
 		Spacing: gui.SpacingTight,
 		Content: blocks,
 	}))
@@ -906,23 +911,48 @@ func composer(w *gui.Window, ctrl *app.Controller, st *app.State, chat *model.Ch
 			if text == "" {
 				return
 			}
+			atts := append([]model.Attachment(nil), s.AgentAttachments...)
 			s.AgentDraft = ""
-			ctrl.AgentSend(text)
+			s.AgentAttachments = nil
+			ctrl.AgentSend(text, atts)
 		},
 	})
 
+	attachBtn := layout.IconTipButton(layout.IconTipButtonCfg{
+		ID:       "agent-attach",
+		Glyph:    gui.IconFile,
+		Tip:      i18n.T("ai.attach.add"),
+		Th:       th,
+		Variant:  gui.ButtonGhost,
+		Disabled: !svcReady || running,
+		OnClick: func(ctx gui.EventCtx) {
+			ctx.Consume()
+			ctrl.AgentPickAttachments(ctx.Window)
+		},
+	})
+
+	body := []gui.View{}
+	if row := draftAttachRow(ctrl, st.AgentAttachments); row != nil {
+		body = append(body, row)
+	}
+	body = append(body,
+		input,
+		gui.Row(layout.Flush(gui.ContainerCfg{
+			ID:     "agent-composer-actions",
+			Sizing: gui.FillFit,
+			VAlign: gui.VAlignMiddle,
+			Content: []gui.View{
+				attachBtn,
+				gui.Row(layout.Flush(gui.ContainerCfg{Sizing: gui.FillFit})),
+				action,
+			},
+		})),
+	)
 	return gui.Column(layout.Flush(gui.ContainerCfg{
 		ID:      "agent-composer-row",
 		Sizing:  gui.FillFit,
 		Spacing: gui.SpacingTight,
 		Padding: gui.NewPadding(6, 8, 8, 8),
-		Content: []gui.View{
-			input,
-			gui.Row(layout.Flush(gui.ContainerCfg{
-				Sizing:  gui.FillFit,
-				HAlign:  gui.HAlignRight,
-				Content: []gui.View{action},
-			})),
-		},
+		Content: body,
 	}))
 }

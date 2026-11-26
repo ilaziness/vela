@@ -5,6 +5,9 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -78,6 +81,16 @@ type Message struct {
 	RunID  string
 	// Time is the unix timestamp shown under the bubble.
 	Time int64
+	// Attachments are local files recorded on a user message. Path is the
+	// original absolute path (not a copy in the user data dir).
+	Attachments []Attachment
+}
+
+// Attachment is one composer or user-message file.
+type Attachment struct {
+	Path     string
+	Filename string
+	MIME     string
 }
 
 // Approval is a pending tool-approval request shown as a card.
@@ -118,9 +131,15 @@ func (c *Chat) nextID() string {
 	return strconv.Itoa(c.seq)
 }
 
-// AppendUser adds a user bubble.
-func (c *Chat) AppendUser(text string) *Message {
-	m := &Message{ID: "u" + c.nextID(), Role: RoleUser, Blocks: []*Block{{Kind: BlockText, Text: text}}, Time: time.Now().Unix()}
+// AppendUser adds a user bubble. atts is copied so the composer can clear its own slice.
+func (c *Chat) AppendUser(text string, atts []Attachment) *Message {
+	m := &Message{
+		ID:          "u" + c.nextID(),
+		Role:        RoleUser,
+		Blocks:      []*Block{{Kind: BlockText, Text: text}},
+		Time:        time.Now().Unix(),
+		Attachments: cloneAttachments(atts),
+	}
 	c.Messages = append(c.Messages, m)
 	c.Rev++
 	return m
@@ -397,10 +416,11 @@ func (c *Chat) Load(msgs []*agent.AIMessage) {
 				text = partsText(m.Parts)
 			}
 			c.Messages = append(c.Messages, &Message{
-				ID:     m.ID,
-				Role:   RoleUser,
-				Blocks: []*Block{{Kind: BlockText, Text: text}},
-				Time:   m.Timestamp,
+				ID:          m.ID,
+				Role:        RoleUser,
+				Blocks:      []*Block{{Kind: BlockText, Text: text}},
+				Time:        m.Timestamp,
+				Attachments: attachmentsFromParts(m.Parts),
 			})
 			continue
 		}
@@ -483,6 +503,46 @@ func (m *Message) findLocalTool(callID string) *ToolCall {
 		}
 	}
 	return nil
+}
+
+func cloneAttachments(atts []Attachment) []Attachment {
+	if len(atts) == 0 {
+		return nil
+	}
+	return append([]Attachment(nil), atts...)
+}
+
+// attachmentsFromParts reads vela-path: media refs. Filename comes from
+// part metadata; MIME from the part content type.
+func attachmentsFromParts(partsJSON string) []Attachment {
+	var out []Attachment
+	for _, p := range ai.UnmarshalParts(partsJSON) {
+		if p == nil || !p.IsMedia() || !strings.HasPrefix(p.Text, ai.PathURIPrefix) {
+			continue
+		}
+		raw, err := url.QueryUnescape(strings.TrimPrefix(p.Text, ai.PathURIPrefix))
+		if err != nil || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		abs := filepath.Clean(raw)
+		if !filepath.IsAbs(abs) {
+			continue
+		}
+		name := ""
+		if p.Metadata != nil {
+			if v, ok := p.Metadata["filename"]; ok {
+				name = strings.TrimSpace(fmt.Sprint(v))
+			}
+		}
+		if name == "" || name == "." || name == ".." {
+			name = filepath.Base(abs)
+		}
+		out = append(out, Attachment{Path: abs, Filename: name, MIME: p.ContentType})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func partsText(partsJSON string) string {

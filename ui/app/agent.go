@@ -223,8 +223,9 @@ func (c *Controller) AgentDeleteSession(w *gui.Window, id string) {
 	}()
 }
 
-// AgentSend submits the composer text. The run streams back through AgentEmit.
-func (c *Controller) AgentSend(text string) {
+// AgentSend submits the composer text and optional local file paths.
+// The run streams back through AgentEmit.
+func (c *Controller) AgentSend(text string, atts []agentmodel.Attachment) {
 	w := c.Window()
 	if w == nil {
 		return
@@ -240,13 +241,19 @@ func (c *Controller) AgentSend(text string) {
 		return
 	}
 	sshCtx := c.agentBind(st)
-	chat.AppendUser(text)
+	copied := append([]agentmodel.Attachment(nil), atts...)
+	chat.AppendUser(text, copied)
 	chat.BeginRun("")
+	reqAtts := make([]agent.ChatAttachment, len(copied))
+	for i, a := range copied {
+		reqAtts[i] = agent.ChatAttachment{Path: a.Path, Filename: a.Filename, MIME: a.MIME}
+	}
 	go func() {
 		_, err := svc.Chat(&agent.ChatRequest{
-			SessionID:  chat.SessionID,
-			NewMessage: text,
-			SSHContext: sshCtx,
+			SessionID:   chat.SessionID,
+			NewMessage:  text,
+			Attachments: reqAtts,
+			SSHContext:  sshCtx,
 		})
 		cancelled := errors.Is(err, agent.ErrGenerationStopped)
 		w.QueueCommand(func(w *gui.Window) {
