@@ -8,6 +8,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/bookmarks/oslogo"
 	"github.com/ilaziness/vela/ui/layout"
 )
 
@@ -137,59 +138,145 @@ func tabBasicBody(st *State) gui.View {
 	}))
 }
 
+// iconViewFor returns the picker glyph for a token: catalog OS logo as SVG,
+// anything else ("", legacy tokens) as the neutral default SVG.
+func iconViewFor(token string, size float32) gui.View {
+	svg := oslogo.DefaultSVG
+	if e, ok := oslogo.Lookup(token); ok {
+		svg = e.SVG
+	}
+	return gui.Svg(gui.SvgCfg{
+		SvgData:   svg,
+		Width:     size,
+		Height:    size,
+		NoAnimate: true,
+		Sizing:    gui.FixedFixed,
+	})
+}
+
+// iconDisplayName returns the label shown on the picker entry button.
+func iconDisplayName(token string) string {
+	if e, ok := oslogo.Lookup(token); ok {
+		return e.Name
+	}
+	return i18n.T("common.default")
+}
+
 func iconPickerRow(st *State) gui.View {
 	th := gui.CurrentTheme()
-	btns := make([]gui.View, 0, len(iconPresets))
-	for _, p := range iconPresets {
-		token := p.Token
-		glyph := p.Glyph
-		selected := st.Draft.Icon == token
-		bg := gui.Color{}
-		if selected {
-			bg = th.ColorActive
-		}
-		iconViews := []gui.View{
-			gui.Text(gui.TextCfg{Text: glyph, TextStyle: th.TextStyleIconSmall}),
-		}
-		if token == "" {
-			iconViews = append(iconViews, gui.Text(gui.TextCfg{
-				Text:      " " + i18n.T("common.default"),
-				TextStyle: th.TextStyleBody,
-			}))
-		}
-		btns = append(btns, gui.Button(gui.ButtonCfg{
-			ID:      "bm-icon-" + token,
-			Variant: gui.ButtonGhost,
-			Color:   bg,
-			Sizing:  gui.FitFit,
-			Content: []gui.View{
-				gui.Row(layout.Flush(gui.ContainerCfg{
-					Sizing:  gui.FitFit,
-					Spacing: gui.SpacingTight,
-					VAlign:  gui.VAlignMiddle,
-					Content: iconViews,
-				})),
-			},
-			OnClick: func(ctx gui.EventCtx) {
-				ctx.Consume()
-				s := gui.State[State](ctx.Window)
-				s.Draft.Icon = token
-				s.Dirty = true
-			},
-		}))
-	}
 	return gui.Column(layout.Flush(gui.ContainerCfg{
 		Sizing:  gui.FillFit,
 		Spacing: gui.SpacingTight,
 		Content: []gui.View{
 			gui.Text(gui.TextCfg{Text: i18n.T("bookmark.field.icon"), TextStyle: th.TextStyleLabel}),
-			gui.Row(layout.Flush(gui.ContainerCfg{
-				Sizing:  gui.FillFit,
-				Spacing: gui.SpacingTight,
-				Content: btns,
-			})),
+			gui.Button(gui.ButtonCfg{
+				ID:      "bm-icon-open",
+				Variant: gui.ButtonGhost,
+				Sizing:  gui.FitFit,
+				Content: []gui.View{
+					gui.Row(layout.Flush(gui.ContainerCfg{
+						Sizing:  gui.FitFit,
+						Spacing: gui.SpacingSmall,
+						VAlign:  gui.VAlignMiddle,
+						Content: []gui.View{
+							iconViewFor(st.Draft.Icon, 24),
+							gui.Text(gui.TextCfg{Text: iconDisplayName(st.Draft.Icon), TextStyle: th.TextStyleBody}),
+						},
+					})),
+				},
+				OnClick: func(ctx gui.EventCtx) {
+					ctx.Consume()
+					openIconPicker(ctx.Window)
+				},
+			}),
 		},
 	}))
+}
+
+// iconPickerCell renders one selectable icon cell in the picker dialog.
+func iconPickerCell(token, a11y string, view gui.View, selected bool) gui.View {
+	th := gui.CurrentTheme()
+	bg := gui.Color{}
+	if selected {
+		bg = th.ColorActive
+	}
+	id := strings.TrimPrefix(token, "os:")
+	if id == "" {
+		id = "default"
+	}
+	return gui.Button(gui.ButtonCfg{
+		ID:        "bm-iconpick-" + id,
+		Variant:   gui.ButtonGhost,
+		Color:     bg,
+		Sizing:    gui.FixedFixed,
+		Width:     44,
+		Height:    44,
+		A11YLabel: a11y,
+		Padding:   gui.PaddingNone,
+		Content:   []gui.View{view},
+		OnClick: func(ctx gui.EventCtx) {
+			ctx.Consume()
+			s := gui.State[State](ctx.Window)
+			s.Draft.Icon = token
+			s.Dirty = true
+			ctx.Window.DialogDismiss()
+		},
+	})
+}
+
+func openIconPicker(w *gui.Window) {
+	w.Dialog(gui.DialogCfg{
+		DialogType: gui.DialogCustom,
+		Title:      i18n.T("bookmark.field.icon"),
+		Width:      360,
+		CustomView: func(win *gui.Window) gui.View {
+			th := gui.CurrentTheme()
+			s := gui.State[State](win)
+			current := s.Draft.Icon
+			// Entry shows "Default" for empty and legacy tokens, so the
+			// default cell must be highlighted for both.
+			_, known := oslogo.Lookup(current)
+			cells := make([]gui.View, 0, len(oslogo.Catalog)+1)
+			cells = append(cells, iconPickerCell("", i18n.T("common.default"),
+				gui.Column(layout.Flush(gui.ContainerCfg{
+					Sizing:  gui.FitFit,
+					Spacing: gui.SpacingTight,
+					HAlign:  gui.HAlignCenter,
+					Content: []gui.View{
+						iconViewFor("", 20),
+						gui.Text(gui.TextCfg{
+							Text:      i18n.T("common.default"),
+							TextStyle: th.TextStyleCaptionSmall,
+						}),
+					},
+				})), !known))
+			for _, e := range oslogo.Catalog {
+				cells = append(cells, iconPickerCell(e.Token, e.Name,
+					iconViewFor(e.Token, 28), current == e.Token))
+			}
+			grid := gui.Wrap(layout.Flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
+				Spacing: gui.SpacingTight,
+				Content: cells,
+			}))
+			return gui.Column(layout.Flush(gui.ContainerCfg{
+				Sizing:  gui.FillFit,
+				Spacing: gui.SpacingMedium,
+				Padding: gui.PaddingMedium,
+				Content: []gui.View{
+					gui.Column(layout.Flush(gui.ContainerCfg{
+						ID:         "bm-iconpick-scroll",
+						Sizing:     gui.FillFit,
+						Scrollable: true,
+						MaxHeight:  300,
+						Padding:    gui.PaddingNone,
+						SizeBorder: gui.NoBorder,
+						Content:    []gui.View{grid},
+					})),
+				},
+			}))
+		},
+	})
 }
 
 func tagsRow(st *State) gui.View {

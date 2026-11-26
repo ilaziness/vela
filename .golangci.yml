@@ -78,6 +78,11 @@ linters:
       - path: _test\.go
         linters:
           - gosec
+      # OS logo tokens ("os:ubuntu" etc.) trip G101's credential heuristic.
+      - path: ^ui/bookmarks/oslogo/
+        text: G101
+        linters:
+          - gosec
 
 formatters:
   enable:

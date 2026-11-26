@@ -8,6 +8,7 @@ import (
 
 	"github.com/ilaziness/vela/internal/bookmark"
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/ui/bookmarks/oslogo"
 )
 
 // Legacy named colors → hex for display / ColorPicker.
@@ -16,28 +17,12 @@ var legacyColorHex = map[string]string{
 	"cyan": "#00acc1", "blue": "#1e88e5", "purple": "#8e24aa", "pink": "#d81b60",
 }
 
-// iconPresets use Feather glyphs (gui.Icon*) so Tree TextStyleIcon aligns with labels.
-var iconPresets = []struct {
-	Token string
-	Glyph string
-}{
-	{Token: "", Glyph: gui.IconBookmark},
-	{Token: "server", Glyph: gui.IconDesktop},
-	{Token: "cloud", Glyph: gui.IconCloud},
-	{Token: "router", Glyph: gui.IconSitemap},
-	{Token: "db", Glyph: gui.IconTable},
-	{Token: "terminal", Glyph: gui.IconTerminal},
-}
-
+// iconGlyph maps a bookmark icon token to the Feather glyph shown in trees.
+// Catalog OS logos become a generic desktop glyph; any other value (empty,
+// legacy, unknown) uses the default bookmark glyph.
 func iconGlyph(token string) string {
-	for _, p := range iconPresets {
-		if p.Token == token {
-			return p.Glyph
-		}
-	}
-	if token != "" {
-		// Unknown tokens may be emoji/legacy; fall back to bookmark so tree stays aligned.
-		return gui.IconBookmark
+	if _, ok := oslogo.Lookup(token); ok {
+		return gui.IconDesktop
 	}
 	return gui.IconBookmark
 }
