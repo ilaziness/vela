@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/appicon.png" alt="Vela" width="128">
+</p>
+
 # Vela — Cross-platform SSH / SFTP / serial AI GUI client
 
 [English](README.en.md) | [中文](README.md)
@@ -29,7 +33,7 @@ A cross-platform SSH / SFTP / serial desktop client with an AI assistant, for de
 - SSH sessions support Zmodem (rz / sz) file transfer
 - Dual-pane SFTP panel, bookmark management, import and export OpenSSH config
 - Backup & restore: master password encryption and compression, upload to self-hosted storage, WebDAV, or S3
-- AI assistant: local file read/write, web search, remote command execution, MCP and Skills
+- AI assistant: local file read/write, web search, remote command execution, MCP and Skills, terminal awareness and command execution
 - Built-in MCP server: exposes bookmark lookup, SSH command execution and more for external MCP clients
 - Multi-language: English, Simplified Chinese, Traditional Chinese
 - Multiple themes available for app and terminal

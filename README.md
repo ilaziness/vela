@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/appicon.png" alt="Vela" width="128">
+</p>
+
 # Vela — 跨平台 SSH / SFTP / 串口 AI GUI 客户端
 
 [中文](README.md) | [English](README.en.md)
@@ -29,7 +33,7 @@
 - SSH 会话支持 Zmodem（rz / sz）传文件
 - 双栏SFTP面板，书签管理功能，导入、导出 OpenSSH 配置
 - 备份恢复：主密码加密压缩后上传，支持自建后端、WebDAV 或 S3协议存储
-- AI助手：支持本地读写、网络搜索、远程命令执行、MCP和Skill
+- AI助手：支持本地读写、网络搜索、远程命令执行、MCP和Skill、终端感知和命令执行
 - 内置 MCP 服务器：暴露书签查询、SSH 命令执行等工具，供外部 MCP 客户端调用
 - 多语言：英语、简体中文、繁体中文
 - 应用和终端多主题可选
