@@ -63,6 +63,20 @@ func treeBookmarkText(b bookmark.Bookmark) string {
 	return b.Title + " — " + sub
 }
 
+// bookmarkTreeTextStyle colors a bookmark row when Color is set.
+// A zero style leaves the tree on its theme default. The style is copied
+// from TextStyleDef because that is the face and size the tree widget
+// uses; only the color changes.
+func bookmarkTreeTextStyle(b bookmark.Bookmark) gui.TextStyle {
+	c, ok := parseBookmarkColor(b.Color)
+	if !ok {
+		return gui.TextStyle{}
+	}
+	style := gui.CurrentTheme().TextStyleDef
+	style.Color = c
+	return style
+}
+
 func matchesQuery(b bookmark.Bookmark, q string) bool {
 	q = strings.ToLower(strings.TrimSpace(q))
 	if q == "" {
@@ -237,9 +251,10 @@ func groupTreeNodes(groups []*bookmark.Group) []gui.TreeNodeCfg {
 		kids := make([]gui.TreeNodeCfg, 0, len(g.Bookmarks))
 		for _, b := range g.Bookmarks {
 			kids = append(kids, gui.TreeNodeCfg{
-				ID:   nodeBook(b.ID),
-				Text: treeBookmarkText(b),
-				Icon: iconGlyph(b.Icon),
+				ID:        nodeBook(b.ID),
+				Text:      treeBookmarkText(b),
+				Icon:      iconGlyph(b.Icon),
+				TextStyle: bookmarkTreeTextStyle(b),
 			})
 		}
 		nodes = append(nodes, gui.TreeNodeCfg{
