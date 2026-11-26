@@ -150,9 +150,8 @@ func newMainWindow(rt *app.Runtime, d *windowDeps) *gui.Window {
 		Decorations: chrome.Decoration(rt.Store.Config.General.Frameless),
 		OnInit: func(w *gui.Window) {
 			rt.BindWindow(w)
-			onCommand := func() { commandui.Toggle(d.Command) }
-			installKeybindCommands(w, rt, onCommand)
-			watchKeybindChanges(w, rt, onCommand)
+			installKeybindCommands(w, rt)
+			watchKeybindChanges(w, rt)
 			if saved.Maximised {
 				w.Maximize()
 			}

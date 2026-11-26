@@ -7,6 +7,7 @@ import (
 	"github.com/go-gui-org/go-term/term"
 
 	"github.com/ilaziness/vela/internal/i18n"
+	"github.com/ilaziness/vela/internal/keybind"
 	"github.com/ilaziness/vela/ui/app"
 	"github.com/ilaziness/vela/ui/layout"
 )
@@ -121,35 +122,8 @@ func paneMenu(w *gui.Window, ctrl *app.Controller, tab *app.Tab, idx int, p app.
 	items := paneLayoutMenuItems(ctrl, tab, idx)
 	if p.SessID != "" {
 		if tm := ctrl.TermFor(p.SessID); tm != nil {
-			replay := app.IsReplayProtocol(p.Protocol)
-			top := []gui.MenuItemCfg{
-				{ID: "copy", Text: i18n.T("common.copy"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-					tm.RunAction(term.ActionCopy, ctx.Window)
-				}},
-			}
-			if !replay {
-				top = append(top, gui.MenuItemCfg{ID: "paste", Text: i18n.T("terminal.paste"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-					tm.RunAction(term.ActionPaste, ctx.Window)
-				}})
-			}
-			top = append(top, gui.MenuItemCfg{ID: "find", Text: i18n.T("terminal.find"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-				tm.RunAction(term.ActionFind, ctx.Window)
-			}})
-			if replay {
-				top = append(top, gui.MenuSeparator())
-			} else {
-				recordText := i18n.T("terminal.start_logging")
-				if tm.Recording() {
-					recordText = i18n.T("terminal.stop_logging")
-				}
-				top = append(top,
-					gui.MenuSeparator(),
-					gui.MenuItemCfg{ID: "record", Text: recordText, Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
-						ctrl.ToggleSessionRecording(ctx.Window, p.SessID)
-					}},
-					gui.MenuSeparator(),
-				)
-			}
+			top := termMenuItems(ctrl, p.SessID, tm,
+				app.IsReplayProtocol(p.Protocol), tm.Recording(), ctrl.KeybindKeys)
 			items = append(top, items...)
 		}
 	}
@@ -160,6 +134,51 @@ func paneMenu(w *gui.Window, ctrl *app.Controller, tab *app.Tab, idx int, p app.
 		Items:   items,
 		Content: []gui.View{body},
 	})
+}
+
+// termMenuItems builds the terminal-action entries (copy/paste/find/record)
+// that sit above the pane layout group. Each item appends its current
+// shortcut in parentheses via keys; a nil/empty lookup hides the hint.
+// Closures only fire on click, so tests can pass nil tm/ctrl.
+func termMenuItems(ctrl *app.Controller, sessID string, tm *term.Term, replay, recording bool, keys func(string) string) []gui.MenuItemCfg {
+	hint := func(action string) string {
+		if keys == nil {
+			return ""
+		}
+		if s := keys(action); s != "" {
+			return " (" + s + ")"
+		}
+		return ""
+	}
+	top := []gui.MenuItemCfg{
+		{ID: "copy", Text: i18n.T("common.copy") + hint(keybind.TerminalCopy), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			tm.RunAction(term.ActionCopy, ctx.Window)
+		}},
+	}
+	if !replay {
+		top = append(top, gui.MenuItemCfg{ID: "paste", Text: i18n.T("terminal.paste") + hint(keybind.TerminalPaste), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+			tm.RunAction(term.ActionPaste, ctx.Window)
+		}})
+	}
+	top = append(top, gui.MenuItemCfg{ID: "find", Text: i18n.T("terminal.find") + hint(keybind.TerminalFind), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+		tm.RunAction(term.ActionFind, ctx.Window)
+	}})
+	if replay {
+		top = append(top, gui.MenuSeparator())
+	} else {
+		recordText := i18n.T("terminal.start_logging")
+		if recording {
+			recordText = i18n.T("terminal.stop_logging")
+		}
+		top = append(top,
+			gui.MenuSeparator(),
+			gui.MenuItemCfg{ID: "record", Text: recordText + hint(keybind.TerminalToggleLog), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+				ctrl.ToggleSessionRecording(ctx.Window, sessID)
+			}},
+			gui.MenuSeparator(),
+		)
+	}
+	return top
 }
 
 // paneLayoutMenuItems is the split/layout group shared by every pane

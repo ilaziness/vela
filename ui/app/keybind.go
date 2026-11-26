@@ -49,6 +49,19 @@ func (c *Controller) termKeyMap() term.KeyMap {
 	return km
 }
 
+// KeybindKeys returns the display shortcut for a keybind action (the same
+// text the settings page shows), or "" when no manager is attached or the
+// action is unknown.
+func (c *Controller) KeybindKeys(action string) string {
+	c.mu.Lock()
+	kb := c.keybindMgr
+	c.mu.Unlock()
+	if kb == nil {
+		return ""
+	}
+	return kb.Keys(action)
+}
+
 // ApplyKeyBindings pushes the current shortcut table into every live
 // terminal. Main-thread only: Term.SetKeyBindings must run on the UI thread.
 func (c *Controller) ApplyKeyBindings() {

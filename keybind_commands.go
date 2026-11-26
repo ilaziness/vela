@@ -20,7 +20,7 @@ const keybindCommandID = "keybind:"
 // paste stay inside go-term via Controller.ApplyKeyBindings instead.
 // Safe to call repeatedly: each action's old command is unregistered
 // before the new one is registered.
-func installKeybindCommands(w *gui.Window, rt *app.Runtime, onCommand func()) {
+func installKeybindCommands(w *gui.Window, rt *app.Runtime) {
 	if rt == nil || rt.Keybind == nil || rt.Ctrl == nil {
 		return
 	}
@@ -46,10 +46,6 @@ func installKeybindCommands(w *gui.Window, rt *app.Runtime, onCommand func()) {
 		{
 			action: keybind.PanelQuickConnect,
 			exec:   func(_ *gui.Event, w *gui.Window) { shell.ToggleQuickConnect(w, rt.Ctrl) },
-		},
-		{
-			action: keybind.PanelCommand,
-			exec:   func(_ *gui.Event, _ *gui.Window) { onCommand() },
 		},
 	}
 	for _, s := range specs {
@@ -85,13 +81,13 @@ func hasActiveSession(w *gui.Window) bool {
 // watchKeybindChanges reapplies shortcuts whenever the settings page
 // saves a new binding: global commands are rebuilt on the main window
 // and every live terminal gets the new term.KeyMap.
-func watchKeybindChanges(w *gui.Window, rt *app.Runtime, onCommand func()) {
+func watchKeybindChanges(w *gui.Window, rt *app.Runtime) {
 	if rt == nil || rt.Keybind == nil {
 		return
 	}
 	rt.Keybind.SetOnChange(func() {
 		w.QueueCommand(func(ww *gui.Window) {
-			installKeybindCommands(ww, rt, onCommand)
+			installKeybindCommands(ww, rt)
 			rt.Ctrl.ApplyKeyBindings()
 		})
 	})

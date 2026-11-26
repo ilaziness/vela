@@ -14,7 +14,6 @@ const (
 	TerminalToggleLog = "terminal.toggleLog"
 	PanelAI           = "panel.ai"
 	PanelQuickConnect = "panel.quickConnect"
-	PanelCommand      = "panel.command"
 )
 
 const (
@@ -59,7 +58,6 @@ func builtin() []def {
 		{TerminalToggleLog, "CmdOrCtrl+Shift+Y", "keybinding.terminal.toggleLog", categoryTerminal},
 		{PanelAI, "CmdOrCtrl+Shift+J", "keybinding.panel.ai", categoryPanel},
 		{PanelQuickConnect, "CmdOrCtrl+B", "keybinding.panel.quickConnect", categoryPanel},
-		{PanelCommand, "CmdOrCtrl+Shift+P", "keybinding.panel.command", categoryPanel},
 	}
 }
 

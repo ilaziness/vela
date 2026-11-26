@@ -62,6 +62,23 @@ func (m *Manager) List() []Info {
 	return out
 }
 
+// Keys returns the display shortcut for one action, or "" when the
+// action is unknown. Unlike List it skips localization, so it is cheap
+// enough for per-frame UI lookups.
+func (m *Manager) Keys(action string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.defs[action]
+	if !ok {
+		return ""
+	}
+	logical := m.current[action]
+	if logical == "" {
+		logical = d.logical
+	}
+	return displayKeys(logical)
+}
+
 // Bindings returns the effective action -> logical table.
 func (m *Manager) Bindings() map[string]string {
 	m.mu.Lock()

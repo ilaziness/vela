@@ -5,16 +5,13 @@ import "testing"
 func TestNewDefaults(t *testing.T) {
 	m := New(nil)
 	b := m.Bindings()
-	if len(b) != 7 {
-		t.Fatalf("bindings = %d, want 7", len(b))
+	if len(b) != 6 {
+		t.Fatalf("bindings = %d, want 6", len(b))
 	}
 	if b[PanelQuickConnect] != "CmdOrCtrl+B" {
 		t.Fatalf("panel.quickConnect = %q", b[PanelQuickConnect])
 	}
-	if b[PanelCommand] != "CmdOrCtrl+Shift+P" {
-		t.Fatalf("panel.command = %q", b[PanelCommand])
-	}
-	for _, gone := range []string{"terminal.addToChat", "terminal.clear", "panel.bookmarkConnect", "panel.bookmarks", "panel.tools", "panel.settings"} {
+	for _, gone := range []string{"terminal.addToChat", "terminal.clear", "panel.bookmarkConnect", "panel.bookmarks", "panel.tools", "panel.settings", "panel.command"} {
 		if _, ok := b[gone]; ok {
 			t.Fatalf("removed action %q still present", gone)
 		}
