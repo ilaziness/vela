@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-gui-org/go-gui/gui"
 
+	"github.com/ilaziness/vela/internal/localfs"
 	"github.com/ilaziness/vela/internal/sftp"
 	"github.com/ilaziness/vela/ui/app"
 )
@@ -44,6 +45,16 @@ func TestRemoteMenusSharePaneItems(t *testing.T) {
 				t.Errorf("%s menu missing shared item %q", name, want)
 			}
 		}
+	}
+}
+
+func TestLocalItemMenuHasUpload(t *testing.T) {
+	s := &app.SFTPState{}
+	tab := &app.Tab{SessID: "s1"}
+	cfg := localItemMenu(nil, tab, s, localfs.Entry{Path: "/tmp/a", Name: "a"})
+	ids := menuIDs(cfg.Items)
+	if !ids["upload"] {
+		t.Error("local item menu missing upload")
 	}
 }
 

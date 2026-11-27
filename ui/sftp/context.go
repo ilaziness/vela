@@ -190,6 +190,9 @@ func localItemMenu(ctrl *app.Controller, tab *app.Tab, s *app.SFTPState, e local
 		// padding, which inflates every row's spacing.
 		Padding: gui.PaddingNone,
 		Items: []gui.MenuItemCfg{
+			{ID: "upload", Text: i18n.T("sftp.upload"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
+				ctrl.SFTPUploadLocalPaths(ctx.Window, sessID, targetPaths())
+			}},
 			{ID: "copy_path", Text: i18n.T("sftp.copy_path"), Action: func(_ *gui.MenuItemCfg, ctx gui.EventCtx) {
 				copyPaths(ctx, targetPaths())
 			}},
